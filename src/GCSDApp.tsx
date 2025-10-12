@@ -12,7 +12,7 @@ import {
 
 const APP_NAME = "GCS Bank";
 const LOGO_URL = "/logo.png";              // Put high-res in /public/logo.png
-const ADMIN_PIN = "13577531";              // exact admin PIN
+
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox";
@@ -160,6 +160,8 @@ export default function GCSDApp() {
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminPin, setAdminPin] = useState<string>("");  // ← ADD THIS LINE
+
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
 
   const [showIntro, setShowIntro] = useState(true);
@@ -319,10 +321,16 @@ export default function GCSDApp() {
   /* Sandbox (PIN-gated enter, sticky until Exit) */
   function enterSandbox() {
     const pin = prompt("Admin PIN to enter Sandbox:");
-    if (pin !== ADMIN_PIN) { toast.error("Wrong PIN"); return; }
-    setSandboxActive(true);
-    setPortal("sandbox");
-    toast.success("Sandbox started");
+    // Only format-check on the client — no constant comparison
+if (!/^\d{5,8}$/.test(pin)) {
+  toast.error("Enter a valid PIN");
+  return;
+}
+setAdminPin(pin);          // keep it in memory for server-side validation
+setSandboxActive(true);
+setPortal("sandbox");
+toast.success("Sandbox started");
+
   }
   function exitSandbox() {
     setSandboxActive(false);
@@ -425,9 +433,15 @@ export default function GCSDApp() {
         {portal==="admin" && !isAdmin && (
           <PinModalGeneric
             title="Admin PIN"
-            onClose={()=>{ setPortal("home"); }}
-            onOk={(pin)=> pin===ADMIN_PIN ? (setIsAdmin(true), toast.success("Admin unlocked")) : toast.error("Wrong PIN")}
-            maxLen={8}
+            onClose={() => { setPortal("home"); }}
+onOk={(pin) => {
+  // no client-side comparison; just store it
+  if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
+  setAdminPin(pin);      // <- uses the state we added
+  setIsAdmin(true);
+  toast.success("Admin unlocked");
+}}
+
           />
         )}
       </AnimatePresence>
