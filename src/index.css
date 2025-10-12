@@ -2,5 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-.card { @apply rounded-2xl bg-white shadow p-4; }
-.badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-slate-100; }
+/* small helpers */
+.badge {
+  @apply inline-flex items-center rounded-lg px-2 py-0.5 text-xs border;
+}
