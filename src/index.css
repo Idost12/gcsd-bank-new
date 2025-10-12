@@ -3,6 +3,6 @@
 @tailwind utilities;
 
 /* small helpers */
-.badge {
-  @apply inline-flex items-center rounded-lg px-2 py-0.5 text-xs border;
+.badge{
+  @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700;
 }
