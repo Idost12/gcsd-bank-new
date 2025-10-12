@@ -3,18 +3,20 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
-  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Settings, Plus, Edit3,
-  Shield, Zap
+  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Edit3, Shield, Zap
 } from "lucide-react";
 
 /* ===========================
-   G C S   B A N K — Single File App
+   G C S  B A N K  —  Single-file app
    =========================== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png"; // place a high-res file in /public/logo.png
+const LOGO_URL = "/logo.png";              // Put high-res in /public/logo.png
+const ADMIN_PIN = "13577531";              // exact admin PIN
 
-/* ---------- Types ---------- */
+type Theme  = "light" | "dark" | "neon";
+type Portal = "home" | "agent" | "admin" | "sandbox";
+
 type TxnKind = "credit" | "debit";
 type Transaction = {
   id: string;
@@ -27,13 +29,21 @@ type Transaction = {
   meta?: Record<string, any>;
 };
 type Account = { id: string; name: string; role?: "system"|"agent" };
-type PrizeItem = { key: string; label: string; price: number };
 type ProductRule = { key: string; label: string; gcsd: number };
+type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
-type Theme = "light" | "dark" | "neon";
-type Portal = "home" | "agent" | "admin" | "sandbox";
 
-/* ---------- Constants ---------- */
+const MAX_PRIZES_PER_AGENT = 2;
+
+const STORAGE = {
+  CORE:   "gcs-v4-core",      // {accounts, txns}
+  STOCK:  "gcs-v4-stock",     // Record<prizeKey, number>
+  PINS:   "gcs-v4-pins",      // Record<agentId, 5digits>
+  GOALS:  "gcs-v4-goals",     // Record<agentId, amount>
+  THEME:  "gcs-v4-theme",     // "light" | "dark" | "neon"
+  NOTIFS: "gcs-v4-notifs",    // Notification[]
+};
+
 const AGENT_NAMES = [
   "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
   "Caitlyn Stone","Rebecca Brooks","Logan Noir","Christopher O'Connor","Viktor Parks",
@@ -72,23 +82,10 @@ const PRIZE_ITEMS: PrizeItem[] = [
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
   soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
-  flight_madrid: 1, flight_london: 1, flight_milan: 1, // Madrid explicitly 1
+  flight_madrid: 1, flight_london: 1, flight_milan: 1,         // Madrid explicitly 1
 };
 
-const MAX_PRIZES_PER_AGENT = 2;
-const ADMIN_PIN = "13577531";
-
-const STORAGE = {
-  CORE: "gcs-v4-core",       // {accounts, txns}
-  STOCK: "gcs-v4-stock",     // stock
-  PINS: "gcs-v4-pins",       // { [agentId]: "12345" }
-  GOALS: "gcs-v4-goals",     // { [agentId]: number }
-  THEME: "gcs-v4-theme",     // "light" | "dark" | "neon"
-  NOTIFS: "gcs-v4-notifs",   // Notification[]
-  INTRO: "gcs-v4-introFlag", // not persisted across refresh (we want it every time)
-};
-
-/* ---------- Utils ---------- */
+/* ---------- helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
@@ -96,16 +93,24 @@ const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", mo
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 function loadJSON<T>(k: string, fallback: T): T { try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } }
 function saveJSON(k: string, v: any) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
 function confettiBurst() {
-  // lightweight confetti using CSS + emojis (no lib)
   const el = document.createElement("div");
-  el.style.position = "fixed"; el.style.inset = "0"; el.style.pointerEvents = "none"; el.style.zIndex = "60";
-  el.innerHTML = `<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:40px;animation:pop .8s ease-out">🎉</div>
+  el.style.position="fixed"; el.style.inset="0"; el.style.pointerEvents="none"; el.style.zIndex="60";
+  el.innerHTML=`<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:42px;animation:pop .8s ease-out">🎉</div>
   <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
   document.body.appendChild(el); setTimeout(()=> el.remove(), 800);
 }
 
-/* ---------- Seeding ---------- */
+/* Neon helpers */
+const neonBox = (theme:Theme) =>
+  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
+const neonBtn = (theme:Theme, filled=false) =>
+  theme==="neon"
+    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
+    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
+
+/* ---------- seed ---------- */
 const seedAccounts: Account[] = [
   { id: uid(), name: "Bank Vault", role: "system" },
   ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" })),
@@ -115,49 +120,69 @@ const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-/* ---------- App Root ---------- */
+/* =================================
+   App
+   ================================= */
 export default function GCSDApp() {
-  // Load
+  // base load
   const persisted = loadJSON<{accounts:Account[]; txns:Transaction[] } | null>(STORAGE.CORE, null);
-  const [accounts, setAccounts] = useState<Account[]>(persisted?.accounts || seedAccounts);
-  const [txns, setTxns] = useState<Transaction[]>(persisted?.txns || seedTxns);
+
+  /* ---- MIGRATION: revive old keys if v4 missing ---- */
+  if (!persisted) {
+    const legacyKeys = [
+      "gcs-v3-core","gcs-core","gcsd-bank-core","gcs-bank-core","gcs-core-2025"
+    ];
+    for (const k of legacyKeys) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        const old = JSON.parse(raw);
+        if (old?.accounts && old?.txns) {
+          localStorage.setItem(STORAGE.CORE, JSON.stringify(old));
+          const sraw = localStorage.getItem(k.replace("core","stock"));
+          if (sraw) localStorage.setItem(STORAGE.STOCK, sraw);
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  const persisted2 = loadJSON<{accounts:Account[]; txns:Transaction[] } | null>(STORAGE.CORE, null);
+
+  const [accounts, setAccounts] = useState<Account[]>(persisted2?.accounts || seedAccounts);
+  const [txns, setTxns] = useState<Transaction[]>(persisted2?.txns || seedTxns);
   const [stock, setStock] = useState<Record<string, number>>(loadJSON(STORAGE.STOCK, INITIAL_STOCK));
-  const [pins, setPins] = useState<Record<string, string>>(loadJSON(STORAGE.PINS, {}));
-  const [goals, setGoals] = useState<Record<string, number>>(loadJSON(STORAGE.GOALS, {}));
+  const [pins, setPins] = useState<Record<string, string>>(loadJSON(STORAGE.PINS, {}));          // agent pins (5 digits)
+  const [goals, setGoals] = useState<Record<string, number>>(loadJSON(STORAGE.GOALS, {}));       // savings goals
   const [notifs, setNotifs] = useState<Notification[]>(loadJSON(STORAGE.NOTIFS, []));
   const [theme, setTheme] = useState<Theme>((localStorage.getItem(STORAGE.THEME) as Theme) || "light");
 
   const [portal, setPortal] = useState<Portal>("home");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [pickerOpen, setPickerOpen] = useState<boolean>(false);
-  const [showIntro, setShowIntro] = useState<boolean>(true);
+
+  const [showIntro, setShowIntro] = useState(true);
+  const [clock, setClock] = useState(fmtTime(new Date()));
+  const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
   const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users">("dashboard");
-  const [sandboxActive, setSandboxActive] = useState<boolean>(false);
-  const [sandboxState, setSandboxState] = useState<{txns:Transaction[]; stock:Record<string,number>}|null>(null);
 
-  const [clock, setClock] = useState<string>(fmtTime(new Date()));
-  const [dateStr, setDateStr] = useState<string>(fmtDate(new Date()));
-  const [themeFlip, setThemeFlip] = useState<number>(0);
+  const [sandboxActive, setSandboxActive] = useState(false);       // sticky until Exit
+  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
+  const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
 
-  /* Persist */
+  /* persist */
   useEffect(()=> saveJSON(STORAGE.CORE, {accounts, txns}), [accounts, txns]);
   useEffect(()=> saveJSON(STORAGE.STOCK, stock), [stock]);
   useEffect(()=> saveJSON(STORAGE.PINS, pins), [pins]);
   useEffect(()=> saveJSON(STORAGE.GOALS, goals), [goals]);
   useEffect(()=> saveJSON(STORAGE.NOTIFS, notifs), [notifs]);
+  useEffect(()=> { localStorage.setItem(STORAGE.THEME, theme); }, [theme]);
 
+  /* clock + intro every load */
   useEffect(()=> {
-    localStorage.setItem(STORAGE.THEME, theme);
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme==="dark" || theme==="neon");
-    setThemeFlip(x=>x+1);
-  }, [theme]);
-
-  /* Clock + Intro */
-  useEffect(()=> {
-    const t = setInterval(()=> { const d = new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
+    const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
     return ()=> clearInterval(t);
   }, []);
   useEffect(()=> {
@@ -168,83 +193,59 @@ export default function GCSDApp() {
     return ()=> { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
   }, [showIntro]);
 
-  /* Derived */
+  /* derived */
   const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
+  const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
 
   const agent = accounts.find(a=>a.id===currentAgentId);
   const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
   const agentBalance = balances.get(currentAgentId)||0;
   const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
-  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit" && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
-  const prizeCount = agentTxns.filter(t=> t.kind==="debit" && t.fromId===currentAgentId && (t.memo||"").startsWith("Redeem:")).length;
+  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const prizeCount = agentTxns.filter(t=> t.kind==="debit" && (t.memo||"").startsWith("Redeem:")).length;
 
-  const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
-  const totalEarned = txns.filter(t=> t.kind==="credit" && t.toId && nonSystemIds.has(t.toId) && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
-  const totalSpent  = txns.filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId)).reduce((a,b)=>a+b.amount,0);
-
-  /* Leaderboard + Streaks */
+  // leaderboard + streaks
   const dayBuckets = bucketByDay(txns, nonSystemIds);
-  const streaks = computeStreaks(dayBuckets); // { [agentId]: nDays }
+  const streaks = computeStreaks(dayBuckets);
   const leaderboard = Array.from(nonSystemIds).map(id => {
-    const earn = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
-    return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned: earn, streak: streaks[id] || 0 };
+    const earned = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+    return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
   }).sort((a,b)=> b.earned - a.earned);
 
-  /* Star of day / Leader of month */
+  // star of the day / leader of month
   const todayKey = new Date().toLocaleDateString();
-  const curMonthKey = monthKey(new Date());
-  const earnedTodayBy: Record<string, number> = {}, earnedMonthBy: Record<string, number> = {};
+  const curMonth  = monthKey(new Date());
+  const earnedToday: Record<string, number> = {}, earnedMonth: Record<string, number> = {};
   for (const t of txns) {
     if (t.kind!=="credit" || !t.toId || t.memo==="Mint" || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
-    if (d.toLocaleDateString() === todayKey) earnedTodayBy[t.toId] = (earnedTodayBy[t.toId] || 0) + t.amount;
-    if (monthKey(d) === curMonthKey)       earnedMonthBy[t.toId] = (earnedMonthBy[t.toId] || 0) + t.amount;
+    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId]||0) + t.amount;
+    if (monthKey(d) === curMonth)           earnedMonth[t.toId] = (earnedMonth[t.toId]||0) + t.amount;
   }
-  const starId = Object.entries(earnedTodayBy).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedTodayBy[starId] } : null;
-  const leaderId = Object.entries(earnedMonthBy).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonthBy[leaderId] } : null;
+  const starId   = Object.entries(earnedToday).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const leaderId = Object.entries(earnedMonth).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedToday[starId] } : null;
+  const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
-  /* Sandbox */
-  function enterSandbox() {
-    setSandboxState({ txns: structuredClone(txns), stock: structuredClone(stock) });
-    setSandboxActive(true);
-    setPortal("sandbox");
-  }
-  function exitSandbox() {
-    // reset sandbox each time you close it (discard sandbox edits)
-    setSandboxState(null);
-    setSandboxActive(false);
-    setPortal("home");
-    toast.success("Sandbox cleared");
-  }
-
-  /* Helpers to post transactions + notifications */
+  /* helpers */
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
     setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev ]);
+  const notify = (text:string) => setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
+  const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
+  const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
-  function notify(text:string) {
-    const n: Notification = { id: uid(), when: nowISO(), text };
-    setNotifs(prev => [n, ...prev].slice(0, 200));
-  }
-
-  /* --------- Actions --------- */
-
-  // Admin credits by product rule
+  /* actions */
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     if (!isAdmin) return toast.error("Admin only");
-    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if(!rule) return;
+    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
     if (!agentId) return toast.error("Choose agent");
     const amount = rule.gcsd * Math.max(1, qty||1);
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
-    // Confetti on milestones (every +1000 lifetime)
     const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount;
     if (newLifetime % 1000 === 0) confettiBurst();
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
   }
-
-  // Manual transfer (admin has infinite)
   function manualTransfer(agentId:string, amount:number, note:string){
     if (!isAdmin) return toast.error("Admin only");
     if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
@@ -254,34 +255,26 @@ export default function GCSDApp() {
     if (newLifetime % 1000 === 0) confettiBurst();
     toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
   }
-
-  // Redeem prize (requires agent PIN)
-  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
-
   function redeemPrize(agentId:string, prizeKey:string){
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
-    const bal = balances.get(agentId)||0;
-    const count = txns.filter(t=> t.kind==="debit" && t.fromId===agentId && (t.memo||"").startsWith("Redeem:")).length;
-
+    const bal  = balances.get(agentId)||0;
+    const count= txns.filter(t=> t.kind==="debit" && t.fromId===agentId && (t.memo||"").startsWith("Redeem:")).length;
     if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
-    if (bal < prize.price) return toast.error("Insufficient balance");
+    if (bal  < prize.price) return toast.error("Insufficient balance");
 
-    // PIN modal
-    openPinModalFor(agentId, (ok)=>{
+    openAgentPin(agentId, (ok)=>{
       if (!ok) return toast.error("Wrong PIN");
       postTxn({ kind:"debit", amount: prize.price, fromId: agentId, memo:`Redeem: ${prize.label}` });
-      setStock(s=>({...s, [prizeKey]: left-1}));
+      setStock(s=> ({...s, [prizeKey]: left-1}));
       notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
       confettiBurst();
-      const orderId = ("ORD-" + Math.random().toString(36).slice(2,7).toUpperCase());
-      setReceipt({ id: orderId, when: new Date().toLocaleString(), buyer: getName(agentId), item: prize.label, amount: prize.price });
+      setReceipt({ id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
+                   when: new Date().toLocaleString(), buyer: getName(agentId), item: prize.label, amount: prize.price });
       toast.success(`Redeemed ${prize.label}`);
     });
   }
-
-  // Corrections (admin)
   function undoSale(txId:string){
     if (!isAdmin) return toast.error("Admin only");
     const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
@@ -299,8 +292,6 @@ export default function GCSDApp() {
     notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
     toast.success("Redemption reversed & stock restored");
   }
-
-  // Users (admin): add agent, set/reset PIN
   function addAgent(name:string){
     if (!isAdmin) return toast.error("Admin only");
     const a: Account = { id: uid(), name, role: "agent" };
@@ -315,11 +306,9 @@ export default function GCSDApp() {
     notify(`🔐 PIN set/reset for ${getName(agentId)}`);
     toast.success("PIN updated");
   }
-
-  // Savings goal (requires agent PIN to set)
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
-    openPinModalFor(agentId, (ok)=>{
+    openAgentPin(agentId, (ok)=>{
       if (!ok) return toast.error("Wrong PIN");
       setGoals(prev=> ({...prev, [agentId]: amount}));
       notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
@@ -327,39 +316,41 @@ export default function GCSDApp() {
     });
   }
 
-  /* PIN modal flow */
-  const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
-  function openPinModalFor(agentId:string, onOK:(good:boolean)=>void){
-    setPinModal({open:true, agentId, onOK});
+  /* Sandbox (PIN-gated enter, sticky until Exit) */
+  function enterSandbox() {
+    const pin = prompt("Admin PIN to enter Sandbox:");
+    if (pin !== ADMIN_PIN) { toast.error("Wrong PIN"); return; }
+    setSandboxActive(true);
+    setPortal("sandbox");
+    toast.success("Sandbox started");
+  }
+  function exitSandbox() {
+    setSandboxActive(false);
+    setPortal("home");
+    toast.success("Sandbox cleared");
   }
 
-  /* Header theme class helpers */
-  const neonClass = theme==="neon" ? " [--bg:theme(colors.orange.950)] [--card:theme(colors.orange.900)] [--ink:theme(colors.orange.50)] [--inkmuted:theme(colors.orange.200)]" : "";
+  /* UI states */
+  const [adminUnlockOpen, setAdminUnlockOpen] = useState(false);
+  useEffect(()=> { if (portal==="admin" && !isAdmin) setAdminUnlockOpen(true); }, [portal, isAdmin]);
 
-  /* Render */
+  /* render */
   return (
-    <div className={`min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200${neonClass}`}>
+    <div
+      className={
+        theme === "neon"
+          ? "min-h-screen overflow-x-hidden bg-[#0B0B0B] text-orange-50 transition-colors duration-200"
+          : "min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200"
+      }
+    >
       <Toaster position="top-center" richColors />
 
-      {/* Theme overlay (quick soften) */}
-      <AnimatePresence>
-        <motion.div
-          key={themeFlip}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 0 }}
-          exit={{ opacity: 0.14 }}
-          transition={{ duration: 0.1 }}
-          className={`pointer-events-none fixed inset-0 z-40 ${theme==="neon" ? "bg-orange-950" : "bg-white dark:bg-slate-900"}`}
-        />
-      </AnimatePresence>
-
-      {/* Intro — EVERY visit */}
+      {/* Intro (every visit) */}
       <AnimatePresence>
         {showIntro && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-orange-950" : "bg-black/85"} text-white`}>
+            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
             <motion.div initial={{scale:0.96}} animate={{scale:1}} className="text-center p-8">
-              {/* Bigger logo with glow */}
               <div className="mx-auto mb-6 w-32 h-32 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_80px_rgba(59,130,246,.45)]">
                 <img src={LOGO_URL} alt="GCS Bank logo" className="w-24 h-24 rounded drop-shadow-[0_6px_18px_rgba(59,130,246,.35)]"/>
               </div>
@@ -376,32 +367,38 @@ export default function GCSDApp() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className={`sticky top-0 z-20 backdrop-blur ${theme==="neon" ? "bg-orange-950/85 border-orange-800" : "bg-white/70 dark:bg-slate-900/70 border-slate-200 dark:border-slate-800"} border-b transition-colors duration-200`}>
+      <div
+        className={
+          theme === "neon"
+            ? "sticky top-0 z-20 backdrop-blur bg-[#14110B]/85 border-b border-orange-800 transition-colors duration-200"
+            : "sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200"
+        }
+      >
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          <motion.div layout className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <img src={LOGO_URL} alt="GCS Bank logo" className="h-10 w-10 rounded drop-shadow-sm" />
             <span className="font-semibold">{APP_NAME}</span>
             <button
-              className={`ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg border ${theme==="neon" ? "bg-orange-900 border-orange-700" : "bg-white dark:bg-slate-800"}`}
+              className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
               onClick={()=> setPortal("home")}
               title="Go Home"
             >
               <HomeIcon className="w-4 h-4"/> Home
             </button>
             <button
-              className={`ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg border ${theme==="neon" ? "bg-orange-900 border-orange-700" : "bg-white dark:bg-slate-800"}`}
+              className={classNames("ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
               onClick={()=> portal==="sandbox" ? exitSandbox() : enterSandbox()}
               title={portal==="sandbox" ? "Exit Sandbox" : "Enter Sandbox"}
             >
               <Shield className="w-4 h-4"/> {portal==="sandbox" ? "Exit Sandbox" : "Sandbox"}
             </button>
-          </motion.div>
+          </div>
           <div className="flex items-center gap-3">
-            <NotificationsBell notifs={notifs}/>
-            <span className={`text-xs font-mono ${theme==="neon" ? "text-orange-200" : "text-slate-600 dark:text-slate-300"}`}>{dateStr} • {clock}</span>
+            <NotificationsBell notifs={notifs} theme={theme}/>
+            <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
             <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
-              className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 ${theme==="neon" ? "bg-orange-900 border-orange-700" : "bg-white dark:bg-slate-800"}`}
+              className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
               onClick={()=> setPickerOpen(true)}>
               <Users className="w-4 h-4"/> Switch User
             </motion.button>
@@ -409,40 +406,37 @@ export default function GCSDApp() {
         </div>
       </div>
 
-      {/* User Picker */}
+      {/* Switch User */}
       <AnimatePresence>
         {pickerOpen && (
           <Picker
+            theme={theme}
             accounts={accounts}
             balances={balances}
             onClose={()=> setPickerOpen(false)}
-            onChooseAdmin={()=>{
-              setPortal("admin");
-              setIsAdmin(false);
-              setPickerOpen(false);
-            }}
-            onChooseAgent={(id)=>{
-              setCurrentAgentId(id);
-              setPortal("agent");
-              setIsAdmin(false);
-              setPickerOpen(false);
-            }}
+            onChooseAdmin={()=>{ setPortal("admin"); setIsAdmin(false); setPickerOpen(false); }}
+            onChooseAgent={(id)=>{ setCurrentAgentId(id); setPortal("agent"); setIsAdmin(false); setPickerOpen(false); }}
           />
         )}
       </AnimatePresence>
 
-      {/* Admin PIN modal (shown when admin chosen) */}
-      <AdminPinMount
-        active={portal==="admin" && !isAdmin}
-        onCancel={()=>{ setPortal("home"); }}
-        onUnlocked={()=> setIsAdmin(true)}
-      />
+      {/* Admin unlock modal */}
+      <AnimatePresence>
+        {portal==="admin" && !isAdmin && (
+          <PinModalGeneric
+            title="Admin PIN"
+            onClose={()=>{ setPortal("home"); }}
+            onOk={(pin)=> pin===ADMIN_PIN ? (setIsAdmin(true), toast.success("Admin unlocked")) : toast.error("Wrong PIN")}
+            maxLen={8}
+          />
+        )}
+      </AnimatePresence>
 
-      {/* Agent PIN modal (for redeem/goal) */}
+      {/* Agent PIN modal */}
       <PinModal
         open={pinModal.open}
         onClose={()=> setPinModal({open:false})}
-        onCheck={(pin)=> {
+        onCheck={(pin)=>{
           const aId = pinModal.agentId!;
           const ok = pins[aId] && pin === pins[aId];
           pinModal.onOK?.(!!ok);
@@ -450,11 +444,11 @@ export default function GCSDApp() {
         }}
       />
 
-      {/* Receipt after purchase */}
+      {/* Receipt */}
       <AnimatePresence>
         {receipt && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={`rounded-2xl p-5 w-[min(460px,92vw)] border ${theme==="neon" ? "bg-orange-900 border-orange-700 text-orange-50" : "bg-white dark:bg-slate-900"}`}>
+            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
               <div className="flex items-center justify-between mb-3">
                 <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4"/> Receipt</div>
                 <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={()=>setReceipt(null)}><X className="w-4 h-4"/></button>
@@ -472,12 +466,18 @@ export default function GCSDApp() {
         )}
       </AnimatePresence>
 
-      {/* Page content */}
+      {/* Pages */}
       <div className="max-w-6xl mx-auto px-4 py-6">
         {portal==="home" && (
           <Home
-            accounts={accounts} txns={txns} stock={stock} prizes={PRIZE_ITEMS}
-            leaderboard={leaderboard} starOfDay={starOfDay} leaderOfMonth={leaderOfMonth}
+            theme={theme}
+            accounts={accounts}
+            txns={txns}
+            stock={stock}
+            prizes={PRIZE_ITEMS}
+            leaderboard={leaderboard}
+            starOfDay={starOfDay}
+            leaderOfMonth={leaderOfMonth}
           />
         )}
 
@@ -523,13 +523,9 @@ export default function GCSDApp() {
       </div>
     </div>
   );
-
-  /* ---- inner helpers ---- */
-  function getName(id:string){ return accounts.find(a=>a.id===id)?.name || "—"; }
-  function openPinModalFor(agentId:string, cb:(ok:boolean)=>void){ setPinModal({open:true, agentId, onOK:cb}); }
 }
 
-/* ---------- Derived helpers ---------- */
+/* ========== Derived utils ========== */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>(accounts.map(a => [a.id, 0]));
   for (const t of txns) {
@@ -539,7 +535,7 @@ function computeBalances(accounts: Account[], txns: Transaction[]) {
   return map;
 }
 function bucketByDay(txns:Transaction[], nonSystem:Set<string>){
-  const by: Record<string, Set<string>> = {}; // agentId -> set of ISO date strings (days with sales)
+  const by: Record<string, Set<string>> = {};
   for (const t of txns) {
     if (t.kind==="credit" && t.toId && nonSystem.has(t.toId) && t.memo!=="Mint") {
       const d = new Date(t.dateISO); d.setHours(0,0,0,0);
@@ -553,10 +549,8 @@ function bucketByDay(txns:Transaction[], nonSystem:Set<string>){
 function computeStreaks(by: Record<string, Set<string>>){
   const res: Record<string, number> = {};
   for (const id of Object.keys(by)) {
-    const days = Array.from(by[id]).sort();
-    // compute current streak: go back from today
-    let streak = 0;
     const today = new Date(); today.setHours(0,0,0,0);
+    let streak = 0;
     for (let i=0; ; i++){
       const d = new Date(today); d.setDate(today.getDate() - i);
       const iso = d.toISOString();
@@ -567,18 +561,13 @@ function computeStreaks(by: Record<string, Set<string>>){
   return res;
 }
 
-/* ---------- Shared UI ---------- */
+/* ========== Shared UI ========== */
 
 function TypeLabel({ text }:{ text:string }) {
   return (
     <div aria-label={text} className="text-2xl font-semibold">
       {text.split("").map((ch, i)=>(
-        <motion.span
-          key={i}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.08, delay: i * 0.015 }}
-        >
+        <motion.span key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.08, delay: i * 0.015 }}>
           {ch}
         </motion.span>
       ))}
@@ -611,7 +600,8 @@ function ThemeToggle({theme, setTheme}:{theme:Theme; setTheme:(t:Theme)=>void}) 
       </button>
       <button
         onClick={() => setTheme(isNeon ? "light" : "neon")}
-        className={`h-8 px-2 rounded-full border inline-flex items-center gap-1 ${isNeon ? "bg-orange-900 border-orange-700 text-orange-50" : "bg-white dark:bg-slate-800"}`}
+        className={classNames("h-8 px-2 rounded-full border inline-flex items-center gap-1",
+          isNeon ? "bg-orange-700 text-black border-orange-600" : "bg-white dark:bg-slate-800")}
         title="Neon mode"
       >
         <Zap className="w-4 h-4" /> Neon
@@ -620,7 +610,7 @@ function ThemeToggle({theme, setTheme}:{theme:Theme; setTheme:(t:Theme)=>void}) 
   );
 }
 
-function NotificationsBell({ notifs }:{ notifs: Notification[] }) {
+function NotificationsBell({ notifs, theme }:{ notifs: Notification[]; theme:Theme }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -636,15 +626,15 @@ function NotificationsBell({ notifs }:{ notifs: Notification[] }) {
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-40 bg-black/30" onClick={()=>setOpen(false)}>
             <motion.div initial={{y:24, opacity:0}} animate={{y:0, opacity:1}} exit={{y:24, opacity:0}}
               transition={{type:"spring", stiffness:160, damping:18}}
-              className="absolute right-4 top-16 w-[min(520px,92vw)] rounded-2xl border bg-white dark:bg-slate-900 p-4"
+              className={classNames("absolute right-4 top-16 w-[min(520px,92vw)] rounded-2xl p-4", neonBox(theme))}
               onClick={e=>e.stopPropagation()}>
               <div className="text-sm font-semibold mb-3 flex items-center gap-2"><Bell className="w-4 h-4"/> Notifications</div>
               <div className="space-y-2 max-h-[60vh] overflow-auto pr-2">
-                {notifs.length===0 && <div className="text-sm text-slate-500">No notifications yet.</div>}
+                {notifs.length===0 && <div className="text-sm opacity-70">No notifications yet.</div>}
                 {notifs.map(n=>(
                   <div key={n.id} className="text-sm border rounded-xl px-3 py-2">
                     <div>{n.text}</div>
-                    <div className="text-xs text-slate-500">{new Date(n.when).toLocaleString()}</div>
+                    <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
                   </div>
                 ))}
               </div>
@@ -656,7 +646,8 @@ function NotificationsBell({ notifs }:{ notifs: Notification[] }) {
   );
 }
 
-function Picker({ accounts, balances, onClose, onChooseAdmin, onChooseAgent }:{
+function Picker({ theme, accounts, balances, onClose, onChooseAdmin, onChooseAgent }:{
+  theme:Theme;
   accounts:Account[]; balances:Map<string,number>;
   onClose:()=>void; onChooseAdmin:()=>void; onChooseAgent:(id:string)=>void;
 }) {
@@ -665,22 +656,22 @@ function Picker({ accounts, balances, onClose, onChooseAdmin, onChooseAgent }:{
       className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
       <motion.div initial={{y:18, opacity:0}} animate={{y:0, opacity:1}}
         transition={{type:"spring", stiffness:160, damping:18}}
-        className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]">
+        className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2"><Users className="w-4 h-4"/><h2 className="text-xl font-semibold">Switch User</h2></div>
           <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X className="w-4 h-4"/></button>
         </div>
 
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-2">
-          <HoverCard onClick={onChooseAdmin}>
+          <HoverCard theme={theme} onClick={onChooseAdmin}>
             <div className="font-semibold flex items-center gap-2"><Lock className="w-4 h-4"/> Admin Portal</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">PIN required</div>
+            <div className="text-xs opacity-70 mt-1">PIN required</div>
           </HoverCard>
 
           {accounts.filter(a=>a.role!=="system").map((a,i)=>(
-            <HoverCard key={a.id} delay={0.03 + i*0.02} onClick={()=>onChooseAgent(a.id)}>
+            <HoverCard key={a.id} theme={theme} delay={0.03 + i*0.02} onClick={()=>onChooseAgent(a.id)}>
               <div className="font-medium">{a.name}</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Balance: {(balances.get(a.id)||0).toLocaleString()} GCSD</div>
+              <div className="text-xs opacity-70">Balance: {(balances.get(a.id)||0).toLocaleString()} GCSD</div>
             </HoverCard>
           ))}
         </div>
@@ -688,45 +679,32 @@ function Picker({ accounts, balances, onClose, onChooseAdmin, onChooseAgent }:{
     </motion.div>
   );
 }
-function HoverCard({ children, onClick, delay=0.03 }:{children:React.ReactNode; onClick:()=>void; delay?:number}) {
+function HoverCard({ children, onClick, delay=0.03, theme }:{
+  children:React.ReactNode; onClick:()=>void; delay?:number; theme:Theme;
+}) {
   return (
     <motion.button
       initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay}}
       whileHover={{y:-3, boxShadow:"0 10px 22px rgba(0,0,0,.10)"}} whileTap={{scale:0.98}}
       onClick={onClick}
-      className="border rounded-2xl px-3 py-3 text-left bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+      className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}
     >
       {children}
     </motion.button>
   );
 }
 
-/* ---------- PIN Modals ---------- */
-function AdminPinMount({ active, onCancel, onUnlocked }:{ active:boolean; onCancel:()=>void; onUnlocked:()=>void }) {
-  const [show, setShow] = useState<boolean>(false);
-  useEffect(()=> { if (active) setShow(true); else setShow(false); }, [active]);
-  return (
-    <AnimatePresence>
-      {show && (
-        <PinModalGeneric
-          title="Admin PIN"
-          onClose={()=>{ setShow(false); onCancel(); }}
-          onOk={(pin)=> pin===ADMIN_PIN ? (setShow(false), onUnlocked(), toast.success("Admin unlocked")) : toast.error("Wrong PIN")}
-        />
-      )}
-    </AnimatePresence>
-  );
-}
+/* PIN modals */
 function PinModal({ open, onClose, onCheck }:{ open:boolean; onClose:()=>void; onCheck:(pin:string)=>void }) {
   return (
     <AnimatePresence>
       {open && (
-        <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin)=> onCheck(pin)}/>
+        <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin)=> onCheck(pin)} maxLen={5}/>
       )}
     </AnimatePresence>
   );
 }
-function PinModalGeneric({ title, onClose, onOk }:{ title:string; onClose:()=>void; onOk:(pin:string)=>void }) {
+function PinModalGeneric({ title, onClose, onOk, maxLen }:{ title:string; onClose:()=>void; onOk:(pin:string)=>void; maxLen:number }) {
   const [pin, setPin] = useState("");
   return (
     <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
@@ -736,9 +714,9 @@ function PinModalGeneric({ title, onClose, onOk }:{ title:string; onClose:()=>vo
           <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X className="w-4 h-4"/></button>
         </div>
         <div className="space-y-3">
-          <div className="text-sm text-slate-600 dark:text-slate-300">Enter 5-digit PIN.</div>
-          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="PIN" type="password" value={pin} onChange={e=>setPin(e.target.value)} maxLength={5}/>
-          <button className="px-3 py-1.5 rounded-xl border bg-black text-white" onClick={()=> /^\d{5}$/.test(pin) ? onOk(pin) : toast.error("PIN must be 5 digits")}>
+          <div className="text-sm opacity-70">Enter {maxLen}-digit PIN.</div>
+          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="PIN" type="password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))} maxLength={maxLen}/>
+          <button className="px-3 py-1.5 rounded-xl border bg-black text-white" onClick={()=> pin.length===maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`)}>
             <Check className="w-4 h-4 inline mr-1"/> OK
           </button>
         </div>
@@ -747,8 +725,9 @@ function PinModalGeneric({ title, onClose, onOk }:{ title:string; onClose:()=>vo
   );
 }
 
-/* ---------- Home ---------- */
-function Home({ accounts, txns, stock, prizes, leaderboard, starOfDay, leaderOfMonth }:{
+/* ========== Home ========== */
+function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, leaderOfMonth }:{
+  theme:Theme;
   accounts:Account[]; txns:Transaction[]; stock:Record<string,number>; prizes:PrizeItem[];
   leaderboard: {id:string; name:string; earned:number; streak:number}[];
   starOfDay: {name:string; amount:number} | null; leaderOfMonth: {name:string; amount:number} | null;
@@ -768,14 +747,15 @@ function Home({ accounts, txns, stock, prizes, leaderboard, starOfDay, leaderOfM
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
       <div className="grid md:grid-cols-3 gap-4">
-        <BigCard title="Dashboard">
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Dashboard</div>
           <div className="grid sm:grid-cols-2 gap-4">
             <TileRow label="Total GCSD Earned (30d)" value={totalEarned}/>
             <TileRow label="Total GCSD Spent (30d)"  value={totalSpent}/>
           </div>
 
           <div className="mt-4">
-            <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Finance (30 days)</div>
+            <div className="text-sm opacity-70 mb-2">Finance (30 days)</div>
             <LineChart earned={earnedSeries} spent={spentSeries}/>
           </div>
 
@@ -785,51 +765,61 @@ function Home({ accounts, txns, stock, prizes, leaderboard, starOfDay, leaderOfM
           </div>
 
           <div className="mt-4">
-            <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Purchased Prizes (All Agents)</div>
-            <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
+            <div className="text-sm opacity-70 mb-2">Purchased Prizes (All Agents)</div>
+            <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
               <div className="text-sm mb-2">Total purchases: <b>{purchases.length}</b></div>
               <div className="space-y-2 max-h-40 overflow-auto pr-1">
                 {purchases.map((p, i)=> (
                   <div key={i} className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5">
                     <span>{p.memo.replace("Redeem: ","")}</span>
-                    <span className="text-slate-500 dark:text-slate-300">{p.when.toLocaleString()}</span>
+                    <span className="opacity-70">{p.when.toLocaleString()}</span>
                   </div>
                 ))}
-                {purchases.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No purchases yet.</div>}
+                {purchases.length===0 && <div className="text-sm opacity-70">No purchases yet.</div>}
               </div>
             </div>
           </div>
-        </BigCard>
+        </div>
 
-        <BigCard title="Leaderboard">
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Leaderboard</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {leaderboard.map((row,i)=>(
-              <div key={row.id} className="flex items-center justify-between bg-white dark:bg-slate-800 border rounded-xl px-3 py-2">
+              <div key={row.id} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 text-right">{i+1}.</span>
                   <span className="font-medium">{row.name}</span>
-                  {row.streak>=2 && <span title={`${row.streak} day streak`} className="inline-flex items-center gap-1 text-orange-600 dark:text-orange-400 text-xs"><Flame className="w-4 h-4"/> {row.streak}</span>}
+                  {row.streak>=2 && <span title={`${row.streak} day streak`} className="inline-flex items-center gap-1 text-orange-400 text-xs"><Flame className="w-4 h-4"/> {row.streak}</span>}
                 </div>
                 <div className="text-sm">{row.earned.toLocaleString()} GCSD</div>
               </div>
             ))}
-            {leaderboard.length===0 && <div className="text-sm text-slate-500">No data yet.</div>}
+            {leaderboard.length===0 && <div className="text-sm opacity-70">No data yet.</div>}
           </div>
-        </BigCard>
+        </div>
 
-        <BigCard title="Prizes (Available)">
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {prizes.map(p=>(
-              <div key={p.key} className="flex justify-between items-center bg-white dark:bg-slate-800 border rounded-xl px-3 py-2">
+              <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
-                <div className="text-sm text-slate-500 dark:text-slate-300 flex items-center gap-4">
-                  <span>{p.price.toLocaleString()} GCSD</span>
-                  <span className="badge dark:bg-slate-700">Stock: {stock[p.key] ?? 0}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
+                  <span
+                    className={
+                      theme==="neon"
+                        ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200"
+                        : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"
+                    }
+                  >
+                    Stock: {stock[p.key] ?? 0}
+                  </span>
                 </div>
               </div>
             ))}
           </div>
-        </BigCard>
+        </div>
       </div>
     </motion.div>
   );
@@ -839,471 +829,381 @@ function sumInRange(txns:Transaction[], day:Date, spanDays:number, pred:(t:Trans
   return txns.filter(t=> pred(t) && new Date(t.dateISO)>=start && new Date(t.dateISO)<end).reduce((a,b)=>a+b.amount,0);
 }
 
-/* Simple SVG line chart */
-function LineChart({ earned, spent }:{earned:number[]; spent:number[]}) {
-  const width = 520, height = 140, pad = 8;
-  const max = Math.max(1, ...earned, ...spent);
-  const scaleX = (i:number)=> pad + (i*(width-2*pad))/29;
-  const scaleY = (v:number)=> height - pad - (v/max)*(height-2*pad);
-  const toPath = (arr:number[]) => arr.map((v,i)=> `${i===0?"M":"L"} ${scaleX(i)} ${scaleY(v)}`).join(" ");
+/* small tiles + chart */
+function TileRow({ label, value }:{ label:string; value:number }) {
   return (
-    <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-36">
-        <path d={toPath(earned)} fill="none" stroke="currentColor" className="text-emerald-500" strokeWidth="2"/>
-        <path d={toPath(spent)}  fill="none" stroke="currentColor" className="text-rose-500" strokeWidth="2"/>
-      </svg>
-      <div className="flex justify-end gap-4 text-xs text-slate-500 dark:text-slate-300">
-        <div className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-emerald-500 inline-block"/><span>Earned</span></div>
-        <div className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-rose-500 inline-block"/><span>Spent</span></div>
-      </div>
-    </div>
-  );
-}
-function BigCard({ title, children }:{ title:string; children:React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border p-4 bg-white dark:bg-slate-800 shadow-sm">
-      <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">{title}</div>
-      {children}
-    </div>
-  );
-}
-function TileRow({label, value}:{label:string; value:number}){
-  return (
-    <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
-      <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{label}</div>
       <div className="text-2xl font-semibold">{value.toLocaleString()} GCSD</div>
     </div>
   );
 }
-function Highlight({ title, value }:{ title:string; value:string }){
+function Highlight({ title, value }:{ title:string; value:string }) {
   return (
-    <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
-      <div className="text-sm text-slate-500 dark:text-slate-400">{title}</div>
-      <div className="mt-1 font-medium">{value}</div>
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{title}</div>
+      <div>{value}</div>
     </div>
   );
 }
+function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
+  const max = Math.max(1, ...earned, ...spent);
+  const h = 110, w = 420, pad = 10, step = (w - pad*2) / (earned.length - 1 || 1);
+  const toPath = (arr:number[]) =>
+    arr.map((v,i)=> `${i===0 ? "M" : "L"} ${pad + i*step},${h - pad - (v/max)*(h-pad*2)}`).join(" ");
 
-/* ---------- Agent Portal ---------- */
-function AgentPortal(props:{
-  theme: Theme;
-  agentName:string; agentBalance:number; lifetimeEarn:number; lifetimeSpend:number;
-  goal:number; setGoal:(amt:number)=>void;
-  txns:Transaction[]; prizes:PrizeItem[]; stock:Record<string,number>; prizeCount:number;
-  onRedeem:(k:string)=>void;
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
+      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
+      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <g className="text-xs">
+        <text x={pad} y={h-2} className="fill-current opacity-60">Earned</text>
+        <text x={pad+70} y={h-2} className="fill-current opacity-60">Spent</text>
+      </g>
+    </svg>
+  );
+}
+
+/* ========== Agent Portal ========== */
+function AgentPortal({
+  theme, agentName, agentBalance, lifetimeEarn, lifetimeSpend, goal, setGoal,
+  txns, prizes, stock, prizeCount, onRedeem,
+}:{
+  theme:Theme; agentName:string; agentBalance:number; lifetimeEarn:number; lifetimeSpend:number; goal:number; setGoal:(n:number)=>void;
+  txns:Transaction[]; prizes:PrizeItem[]; stock:Record<string,number>; prizeCount:number; onRedeem:(k:string)=>void;
 }) {
-  const { theme, agentName, agentBalance, lifetimeEarn, lifetimeSpend, goal, setGoal, txns, prizes, stock, prizeCount, onRedeem } = props;
-  const [tab, setTab] = useState<"overview"|"shop"|"activity">("overview");
-  const percent = goal>0 ? Math.min(100, Math.round((agentBalance/goal)*100)) : 0;
+  const [goalInput, setGoalInput] = useState(goal? String(goal):"");
+  const progress = goal>0 ? Math.min(100, Math.round((agentBalance/goal)*100)) : 0;
 
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <UserCircle2 className="w-6 h-6"/>
-          <div>
-            <div className="text-sm text-slate-500 dark:text-slate-400">Signed in as</div>
-            <div className="text-lg font-semibold">{agentName}</div>
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* Summary */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Agent</div>
+          <div className="text-xl font-semibold mb-1">{agentName}</div>
+          <div className="grid sm:grid-cols-3 gap-3 mt-3">
+            <TileRow label="Balance" value={agentBalance}/>
+            <TileRow label="Lifetime Earned" value={lifetimeEarn}/>
+            <TileRow label="Lifetime Spent" value={lifetimeSpend}/>
           </div>
-        </div>
-        <div className="flex gap-2">
-          {(["overview","shop","activity"] as const).map(k=> (
-            <motion.button key={k}
-              whileHover={{y:-2, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}}
-              whileTap={{scale:0.98}}
-              className={`px-3 py-1.5 rounded-xl border transition-colors ${tab===k ? (theme==="neon"?"bg-orange-800 text-orange-50":"bg-black text-white") : (theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800")}`}
-              onClick={()=>setTab(k)}>
-              {k[0].toUpperCase()+k.slice(1)}
-            </motion.button>
-          ))}
-        </div>
-      </div>
 
-      <AnimatePresence mode="wait">
-        {tab==="overview" && (
-          <motion.div key="overview" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="grid md:grid-cols-3 gap-4">
-            <StatCard icon={<Wallet/>} label="Current Balance" value={`${agentBalance.toLocaleString()} GCSD`} />
-            <StatCard icon={<Sparkles/>} label="Lifetime Earned" value={`${lifetimeEarn.toLocaleString()} GCSD`} />
-            <StatCard icon={<Gift/>} label="Lifetime Spent" value={`${lifetimeSpend.toLocaleString()} GCSD`} />
-
-            <div className="md:col-span-3 rounded-2xl border p-4 bg-white dark:bg-slate-800">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Savings Goal</div>
-                <button className={`inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg border ${theme==="neon" ? "bg-orange-900 border-orange-700" : "bg-white dark:bg-slate-700"}`}
-                  onClick={()=> {
-                    const raw = prompt("Set goal amount (GCSD)");
-                    const amt = raw ? Number(raw) : 0;
-                    if (!amt || amt<=0) return;
-                    // handled in parent with PIN
-                    setGoal(amt);
-                  }}>
-                  <Edit3 className="w-4 h-4"/> Set Goal
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Savings goal</div>
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center gap-3">
+                <input
+                  className="border rounded-lg px-2 py-1 w-40 bg-white dark:bg-slate-800"
+                  placeholder="Amount"
+                  value={goalInput}
+                  onChange={(e)=> setGoalInput(e.target.value.replace(/[^\d]/g,""))}
+                />
+                <button
+                  className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme,true))}
+                  onClick={()=> goalInput ? setGoal(parseInt(goalInput,10)) : null}
+                >
+                  <Check className="w-4 h-4 inline mr-1"/> Set goal
                 </button>
               </div>
-              <div className="text-sm mb-2">{goal>0 ? `${agentBalance.toLocaleString()} / ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
-              <div className="h-3 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                <div className={`${theme==="neon" ? "bg-orange-500" : "bg-emerald-500"} h-full`} style={{width:`${percent}%`}}/>
+              <div className="mt-3 text-sm opacity-70">{goal>0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
+              <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10">
+                <div className="h-2 rounded-full bg-emerald-500" style={{width: `${progress}%`}}/>
               </div>
-              <div className="text-right text-xs mt-1">{percent}%</div>
             </div>
-          </motion.div>
-        )}
+          </div>
 
-        {tab==="shop" && (
-          <motion.div key="shop" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
-            <div className="sm:col-span-2 md:col-span-3 text-sm text-slate-600 dark:text-slate-300 mb-1">
-              You can redeem <b>{Math.max(0, MAX_PRIZES_PER_AGENT - prizeCount)}</b> more {MAX_PRIZES_PER_AGENT - prizeCount === 1 ? "prize" : "prizes"}.
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Recent activity</div>
+            <div className="space-y-2 max-h-56 overflow-auto pr-2">
+              {txns.slice(0,40).map(t=>(
+                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="text-sm">{t.memo || (t.kind==="credit" ? "Credit" : "Debit")}</div>
+                  <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
+                    {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                  </div>
+                </div>
+              ))}
+              {txns.length===0 && <div className="text-sm opacity-70">No activity yet.</div>}
             </div>
-            {prizes.map((p,i)=> {
+          </div>
+        </div>
+
+        {/* Shop */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
+            <div className="text-xs opacity-70">Balance: {agentBalance.toLocaleString()} GCSD</div>
+          </div>
+          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+            {prizes.map(p=>{
               const left = stock[p.key] ?? 0;
-              const canBuy = agentBalance >= p.price && left > 0 && prizeCount < MAX_PRIZES_PER_AGENT;
-              const label = left <= 0 ? "Out of stock" : (prizeCount >= MAX_PRIZES_PER_AGENT ? "Limit reached" : (canBuy ? "Redeem" : "Insufficient balance"));
+              const can = left>0 && agentBalance>=p.price && prizeCount<MAX_PRIZES_PER_AGENT;
               return (
-                <motion.div key={p.key} initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{delay:i*0.03}}
-                  className={`border rounded-2xl p-4 ${theme==="neon" ? "bg-orange-900 border-orange-700" : "bg-white dark:bg-slate-800"} ${!canBuy ? "opacity-70" : ""}`}>
-                  <div className="font-medium mb-1">{p.label}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Remaining: {left}</div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400 mb-3">{p.price.toLocaleString()} GCSD</div>
-                  <motion.button whileHover={{scale: canBuy?1.03:1}} whileTap={{scale: canBuy?0.97:1}}
-                    disabled={!canBuy} onClick={()=>onRedeem(p.key)}
-                    className={`px-3 py-1.5 rounded-xl border ${canBuy ? (theme==="neon"?"bg-orange-700 text-orange-50 border-orange-600":"bg-black text-white") : (theme==="neon"?"bg-orange-950":"bg-white dark:bg-slate-700")}`}>
-                    {label}
-                  </motion.button>
-                </motion.div>
+                <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                  <div>
+                    <div className="font-medium">{p.label}</div>
+                    <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
+                  </div>
+                  <button
+                    disabled={!can}
+                    className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme,true))}
+                    onClick={()=> onRedeem(p.key)}
+                  >
+                    <Gift className="w-4 h-4 inline mr-1"/> Redeem
+                  </button>
+                </div>
               );
             })}
-          </motion.div>
-        )}
-
-        {tab==="activity" && (
-          <motion.div key="activity" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className={`rounded-2xl border p-4 ${theme==="neon" ? "bg-orange-900 border-orange-700" : "bg-white dark:bg-slate-800"}`}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-lg font-semibold flex items-center gap-2"><History className="w-4 h-4"/> Activity</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Newest first</div>
-            </div>
-            <div className="space-y-2 max-h-[60vh] overflow-auto pr-2">
-              {txns.map((t,i)=> (
-                <motion.div key={t.id} initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{delay:i*0.02}}
-                  className="grid grid-cols-12 gap-2 items-center border rounded-xl p-3">
-                  <div className="col-span-3 text-xs text-slate-500 dark:text-slate-300">{new Date(t.dateISO).toLocaleString()}</div>
-                  <div className="col-span-2"><span className="badge dark:bg-slate-700">{t.kind}</span></div>
-                  <div className="col-span-2 font-medium">{t.amount.toLocaleString()} GCSD</div>
-                  <div className="col-span-5 text-sm">{t.memo}</div>
-                </motion.div>
-              ))}
-              {txns.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No activity yet.</div>}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-function StatCard({ icon, label, value }:{icon:React.ReactNode, label:string, value:string}){
-  return (
-    <motion.div initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:16}}
-      className="rounded-2xl border p-4 bg-white dark:bg-slate-800 shadow-sm">
-      <div className="flex items-center gap-3">{icon}<div><div className="text-sm text-slate-500 dark:text-slate-400">{label}</div><div className="text-2xl font-semibold">{value}</div></div></div>
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }
 
-/* ---------- Admin Portal ---------- */
-function AdminPortal(props:{
-  theme: Theme;
-  isAdmin:boolean;
-  accounts:Account[];
-  balances:Map<string,number>;
-  stock:Record<string,number>;
-  rules:ProductRule[];
-  txns:Transaction[];
-  onCredit:(agent:string, rule:string, qty:number)=>void;
-  onManualTransfer:(agent:string, amount:number, note:string)=>void;
-  onUndoSale:(txId:string)=>void;
-  onUndoRedemption:(txId:string)=>void;
-  onAddAgent:(name:string)=>void;
-  onSetPin:(agentId:string, pin:string)=>void;
-  adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users";
-  setAdminTab:(t:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users")=>void;
-}) {
-  const { theme, isAdmin, accounts, balances, stock, rules, txns, onCredit, onManualTransfer, onUndoSale, onUndoRedemption, onAddAgent, onSetPin, adminTab, setAdminTab } = props;
-  return (
-    <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="font-semibold flex items-center gap-2"><Lock className="w-4 h-4"/> Admin</div>
-        <div className="flex gap-2">
-          {(["dashboard","addsale","transfer","corrections","history","users"] as const).map(k=> (
-            <motion.button key={k} whileHover={{y:-2, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
-              className={`px-3 py-1.5 rounded-xl border ${adminTab===k ? (theme==="neon"?"bg-orange-800 text-orange-50":"bg-black text-white") : (theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800")}`}
-              onClick={()=>setAdminTab(k)}>{k==="addsale" ? "Add Sale" : k[0].toUpperCase()+k.slice(1)}</motion.button>
-          ))}
-        </div>
-      </div>
-
-      {!isAdmin ? (
-        <div className="rounded-2xl border p-4 bg-white dark:bg-slate-800">Enter PIN to unlock Admin.</div>
-      ) : (
-        <>
-          {adminTab==="dashboard" && (
-            <motion.div key="dashboard" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="grid md:grid-cols-3 gap-4">
-              <div className={`rounded-2xl border p-5 shadow-sm md:col-span-2 ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-                <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">All Balances</div>
-                <ul className="space-y-2 max-h-[520px] overflow-auto pr-2">
-                  {accounts.filter(a=>a.role!=="system").sort((a,b)=>(balances.get(b.id)||0)-(balances.get(a.id)||0)).map(a=>(
-                    <li key={a.id} className="flex justify-between text-lg bg-slate-50 dark:bg-slate-700/40 rounded-xl px-3 py-2">
-                      <span>{a.name}</span><span className="font-semibold">{(balances.get(a.id)||0).toLocaleString()} GCSD</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className={`rounded-2xl border p-5 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-                <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Prize Stock</div>
-                <ul className="space-y-2 max-h-[520px] overflow-auto pr-2">
-                  {PRIZE_ITEMS.map(p=>(
-                    <li key={p.key} className="flex justify-between text-lg bg-slate-50 dark:bg-slate-700/40 rounded-xl px-3 py-2">
-                      <span>{p.label}</span><span className="font-semibold">{stock[p.key] ?? 0}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </motion.div>
-          )}
-
-          {adminTab==="addsale" && <AddSale theme={theme} rules={rules} accounts={accounts} onCredit={onCredit} />}
-          {adminTab==="transfer" && <ManualTransfer theme={theme} accounts={accounts} onTransfer={onManualTransfer} />}
-          {adminTab==="corrections" && <Corrections theme={theme} accounts={accounts} txns={txns} onUndoSale={onUndoSale} onUndoRedemption={onUndoRedemption} />}
-          {adminTab==="history" && <AdminHistory theme={theme} txns={txns} accounts={accounts} />}
-          {adminTab==="users" && <UsersAdmin theme={theme} accounts={accounts} onAdd={onAddAgent} onSetPin={onSetPin} />}
-        </>
-      )}
-    </motion.div>
-  );
-}
-
-function AddSale({ theme, rules, accounts, onCredit }:{
-  theme:Theme; rules:ProductRule[]; accounts:Account[]; onCredit:(agent:string, rule:string, qty:number)=>void
-}) {
-  const [modal, setModal] = useState<{open:boolean; rule?:ProductRule}>({open:false});
-  const [agent, setAgent] = useState("");
-  const [qty, setQty] = useState<number>(1);
-  const open = (rule:ProductRule)=> setModal({open:true, rule});
-  const confirm = ()=> { if (modal.rule) { onCredit(agent, modal.rule.key, qty); setModal({open:false}); setQty(1); setAgent(""); } };
-
-  return (
-    <>
-      <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
-        {rules.map((r,i)=>(
-          <motion.button key={r.key}
-            initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{delay:i*0.03}}
-            whileHover={{y:-2, boxShadow:"0 10px 22px rgba(0,0,0,.12)"}}
-            className={`border rounded-2xl p-4 text-left hover:bg-slate-50 dark:hover:bg-slate-700 ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}
-            onClick={()=>open(r)}>
-            <div className="font-semibold">{r.label}</div>
-            <div className="text-sm text-slate-500 dark:text-slate-400">+{r.gcsd} GCSD</div>
-          </motion.button>
-        ))}
-      </div>
-
-      <AnimatePresence>
-        {modal.open && modal.rule && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={`rounded-2xl p-5 w-[min(440px,92vw)] ${theme==="neon"?"bg-orange-900 border border-orange-700":"bg-white dark:bg-slate-900"}`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="font-semibold">Add Sale — {modal.rule.label} (+{modal.rule.gcsd})</div>
-                <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={()=>setModal({open:false})}><X className="w-4 h-4"/></button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Agent</div>
-                  <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={agent} onChange={e=>setAgent(e.target.value)}>
-                    <option value="">Choose agent</option>
-                    {accounts.filter(a=>a.role!=="system").map(a=>(
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Quantity</div>
-                  <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" type="number" min={1} value={qty} onChange={e=>setQty(Math.max(1, Number(e.target.value)||1))}/>
-                </div>
-                <div className="flex gap-2">
-                  <button className={`px-3 py-1.5 rounded-xl border ${theme==="neon"?"bg-orange-700 text-orange-50 border-orange-600":"bg-black text-white"}`} onClick={confirm}>Confirm</button>
-                  <button className={`px-3 py-1.5 rounded-xl border ${theme==="neon"?"bg-orange-950":"bg-white dark:bg-slate-800"}`} onClick={()=>setModal({open:false})}>Cancel</button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
-
-function ManualTransfer({ theme, accounts, onTransfer }:{
-  theme:Theme; accounts:Account[]; onTransfer:(agent:string, amount:number, note:string)=>void
-}) {
-  const [agent, setAgent] = useState(""); const [amount, setAmount] = useState<number>(100); const [note, setNote] = useState<string>("Manual transfer");
-  return (
-    <div className={`rounded-2xl border p-5 shadow-sm max-w-xl ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-      <div className="text-sm text-slate-500 dark:text-slate-400 mb-3">Admin has infinite balance; use this to add credits manually.</div>
-      <div className="grid sm:grid-cols-2 gap-3">
-        <div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Agent</div>
-          <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={agent} onChange={e=>setAgent(e.target.value)}>
-            <option value="">Choose agent</option>
-            {accounts.filter(a=>a.role!=="system").map(a=>(
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Amount</div>
-          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" type="number" min={1} value={amount} onChange={e=>setAmount(Math.max(1, Number(e.target.value)||1))}/>
-        </div>
-      </div>
-      <div className="mt-3">
-        <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Note</div>
-        <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={note} onChange={e=>setNote(e.target.value)}/>
-      </div>
-      <motion.button whileHover={{y:-1, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
-        className={`mt-4 px-4 py-2 rounded-xl border ${theme==="neon"?"bg-orange-700 text-orange-50 border-orange-600":"bg-black text-white"}`}
-        onClick={()=> onTransfer(agent, amount, note)}>
-        Transfer
-      </motion.button>
-    </div>
-  );
-}
-
-function Corrections({ theme, accounts, txns, onUndoSale, onUndoRedemption }:{
-  theme:Theme; accounts:Account[]; txns:Transaction[];
+/* ========== Admin Portal ========== */
+function AdminPortal({
+  theme, isAdmin, accounts, balances, stock, rules, txns,
+  onCredit, onManualTransfer, onUndoSale, onUndoRedemption, onAddAgent, onSetPin,
+  adminTab, setAdminTab
+}:{
+  theme:Theme; isAdmin:boolean; accounts:Account[]; balances:Map<string,number>;
+  stock:Record<string,number>; rules:ProductRule[]; txns:Transaction[];
+  onCredit:(agentId:string, ruleKey:string, qty:number)=>void;
+  onManualTransfer:(agentId:string, amount:number, note:string)=>void;
   onUndoSale:(txId:string)=>void; onUndoRedemption:(txId:string)=>void;
+  onAddAgent:(name:string)=>void; onSetPin:(agentId:string, pin:string)=>void;
+  adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users";
+  setAdminTab:(t:any)=>void;
 }) {
-  const [aid, setAid] = useState<string>("");
-  const agentTx = txns.filter(t => (t.toId===aid && t.kind==="credit" && t.memo!=="Mint") || (t.fromId===aid && t.kind==="debit"));
-  const sales   = agentTx.filter(t => t.kind==="credit");
-  const redeems = agentTx.filter(t => t.kind==="debit" && (t.memo||"").startsWith("Redeem:"));
+  const [agentId, setAgentId] = useState("");
+  const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
+  const [qty, setQty] = useState(1);
+  const [xferAmt, setXferAmt] = useState("");
+  const [xferNote, setXferNote] = useState("");
+  const [newAgent, setNewAgent] = useState("");
+  const [pinAgent, setPinAgent] = useState("");
+  const [pinVal, setPinVal] = useState("");
+
+  if (!isAdmin) {
+    return (
+      <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
+        <Lock className="w-5 h-5 mx-auto mb-2"/>
+        <div>Enter Admin PIN to access the portal.</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <div className={`rounded-2xl border p-5 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Choose Agent</div>
-        <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={aid} onChange={e=>setAid(e.target.value)}>
-          <option value="">—</option>
-          {accounts.filter(a=>a.role!=="system").map(a=>(
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className={`rounded-2xl border p-5 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Sales (credits)</div>
-        <div className="space-y-2 max-h-[50vh] overflow-auto pr-2">
-          {sales.map(t=>(
-            <div key={t.id} className="flex items-center justify-between border rounded-xl px-3 py-2">
-              <div className="text-sm">{t.memo} — <b>+{t.amount}</b> <span className="text-xs text-slate-500">{new Date(t.dateISO).toLocaleString()}</span></div>
-              <button className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border ${theme==="neon"?"bg-orange-950":"bg-white dark:bg-slate-700"}`}
-                onClick={()=>onUndoSale(t.id)} title="Undo sale">
-                <RotateCcw className="w-3.5 h-3.5"/> Undo
-              </button>
-            </div>
-          ))}
-          {sales.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No sales.</div>}
-        </div>
-      </div>
-
-      <div className={`rounded-2xl border p-5 shadow-sm md:col-span-2 ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Redemptions (purchases)</div>
-        <div className="space-y-2 max-h-[50vh] overflow-auto pr-2">
-          {redeems.map(t=>(
-            <div key={t.id} className="flex items-center justify-between border rounded-xl px-3 py-2">
-              <div className="text-sm">{t.memo} — <b>-{t.amount}</b> <span className="text-xs text-slate-500">{new Date(t.dateISO).toLocaleString()}</span></div>
-              <button className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border ${theme==="neon"?"bg-orange-950":"bg-white dark:bg-slate-700"}`}
-                onClick={()=>onUndoRedemption(t.id)} title="Undo redemption (restock)">
-                <RotateCcw className="w-3.5 h-3.5"/> Undo & Restock
-              </button>
-            </div>
-          ))}
-          {redeems.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No redemptions.</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminHistory({ theme, txns, accounts }:{ theme:Theme; txns:Transaction[]; accounts:Account[] }) {
-  const credits = txns.filter(t=> t.kind==="credit" && t.toId && t.memo && t.memo !== "Mint");
-  const byId = new Map(accounts.map(a=>[a.id, a.name]));
-  return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-      <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Sales History</div>
-      <div className="space-y-2 max-h-[65vh] overflow-auto pr-2">
-        {credits.map((t,i)=>(
-          <motion.div key={t.id} initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay:i*0.02}}
-            className="flex items-center justify-between border rounded-xl p-3">
-            <div className="text-sm"><b>{byId.get(t.toId!)}</b> — {t.memo}</div>
-            <div className="text-sm font-medium">+{t.amount} GCSD</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{new Date(t.dateISO).toLocaleString()}</div>
-          </motion.div>
+    <div className="grid gap-4">
+      {/* tabs */}
+      <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
+        {[
+          ["dashboard","Dashboard"],
+          ["addsale","Add Sale"],
+          ["transfer","Transfer"],
+          ["corrections","Corrections"],
+          ["history","History"],
+          ["users","Users"]
+        ].map(([k,lab])=>(
+          <button key={k}
+            onClick={()=> setAdminTab(k as any)}
+            className={classNames("px-3 py-1.5 rounded-xl text-sm",
+              adminTab===k ? neonBtn(theme,true) : neonBtn(theme))}
+          >
+            {lab}
+          </button>
         ))}
-        {credits.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No sales yet.</div>}
       </div>
-    </div>
-  );
-}
 
-function UsersAdmin({ theme, accounts, onAdd, onSetPin }:{
-  theme:Theme; accounts:Account[]; onAdd:(name:string)=>void; onSetPin:(id:string, pin:string)=>void
-}) {
-  const [name, setName] = useState("");
-  const [pin, setPin] = useState("");
-  const [aid, setAid] = useState("");
-
-  return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <div className={`rounded-2xl border p-5 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Add Agent</div>
-        <div className="flex gap-2">
-          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="Agent full name" value={name} onChange={e=>setName(e.target.value)} />
-          <button className={`px-3 rounded-xl border ${theme==="neon"?"bg-orange-700 text-orange-50 border-orange-600":"bg-black text-white"}`} onClick={()=> { if(name.trim()) { onAdd(name.trim()); setName(""); } }}>
-            <Plus className="w-4 h-4"/>
-          </button>
+      {/* dashboard */}
+      {adminTab==="dashboard" && (
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Balances</div>
+            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+              {accounts.filter(a=>a.role!=="system").map(a=>(
+                <div key={a.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="font-medium">{a.name}</div>
+                  <div className="text-sm">{(balances.get(a.id)||0).toLocaleString()} GCSD</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Prize Stock</div>
+            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+              {PRIZE_ITEMS.map(p=>(
+                <div key={p.key} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div>{p.label}</div>
+                  <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Quick Tips</div>
+            <ul className="text-sm list-disc pl-5 space-y-1 opacity-80">
+              <li>“Add Sale” posts credits by product rule.</li>
+              <li>“Corrections” lets you reverse a sale or redemption.</li>
+              <li>Each agent can redeem up to {MAX_PRIZES_PER_AGENT} prizes.</li>
+            </ul>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className={`rounded-2xl border p-5 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Set / Reset Agent PIN (5 digits)</div>
-        <div className="grid sm:grid-cols-3 gap-2">
-          <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={aid} onChange={e=>setAid(e.target.value)}>
-            <option value="">Choose agent</option>
-            {accounts.filter(a=>a.role!=="system").map(a=>(
-              <option key={a.id} value={a.id}>{a.name}</option>
+      {/* add sale */}
+      {adminTab==="addsale" && (
+        <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-2 gap-4", neonBox(theme))}>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Agent</div>
+            <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={agentId} onChange={(e)=>setAgentId(e.target.value)}>
+              <option value="">Choose agent…</option>
+              {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+            </select>
+          </div>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Product</div>
+            <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={ruleKey} onChange={(e)=>setRuleKey(e.target.value)}>
+              {rules.map(r=>(<option key={r.key} value={r.key}>{r.label} — {r.gcsd}</option>))}
+            </select>
+          </div>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Quantity</div>
+            <input className="border rounded-xl px-3 py-2 w-40 bg-white dark:bg-slate-800" value={qty} onChange={(e)=> setQty(Math.max(1,parseInt(e.target.value||"1",10)))} />
+          </div>
+          <div className="flex items-end">
+            <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> onCredit(agentId, ruleKey, qty)}>
+              <Plus className="w-4 h-4 inline mr-1"/> Add Sale
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* manual transfer */}
+      {adminTab==="transfer" && (
+        <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-3 gap-4", neonBox(theme))}>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Agent</div>
+            <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={agentId} onChange={(e)=>setAgentId(e.target.value)}>
+              <option value="">Choose agent…</option>
+              {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+            </select>
+          </div>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Amount</div>
+            <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={xferAmt} onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g,""))}/>
+          </div>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Note</div>
+            <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={xferNote} onChange={(e)=> setXferNote(e.target.value)} placeholder="Manual transfer"/>
+          </div>
+          <div className="sm:col-span-3">
+            <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))}
+              onClick={()=> onManualTransfer(agentId, parseInt(xferAmt||"0",10), xferNote)}>
+              <Wallet className="w-4 h-4 inline mr-1"/> Transfer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* corrections */}
+      {adminTab==="corrections" && (
+        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Reverse a sale or redemption</div>
+          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
+            {txns.filter(t=>t.memo && t.memo!=="Mint").map(t=>(
+              <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div className="text-sm">
+                  <div className="font-medium">{t.memo}</div>
+                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
+                    {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                  </div>
+                  {t.kind==="credit" ? (
+                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                      onClick={()=> onUndoSale(t.id)}>
+                      <RotateCcw className="w-4 h-4 inline mr-1"/> Undo sale
+                    </button>
+                  ) : (
+                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                      onClick={()=> onUndoRedemption(t.id)}>
+                      <RotateCcw className="w-4 h-4 inline mr-1"/> Undo redeem
+                    </button>
+                  )}
+                </div>
+              </div>
             ))}
-          </select>
-          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="12345" value={pin} onChange={e=>setPin(e.target.value)} maxLength={5}/>
-          <button className={`px-3 rounded-xl border ${theme==="neon"?"bg-orange-700 text-orange-50 border-orange-600":"bg-black text-white"}`} onClick={()=> aid && onSetPin(aid, pin)}>
-            <Check className="w-4 h-4"/>
-          </button>
+          </div>
         </div>
-        <div className="text-xs text-slate-500 mt-2">Agents need a PIN to redeem prizes or set savings goals.</div>
-      </div>
+      )}
+
+      {/* history */}
+      {adminTab==="history" && (
+        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">All activity</div>
+          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+            {txns.map(t=>(
+              <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div className="text-sm">
+                  <div className="font-medium">{t.memo || (t.kind==="credit"?"Credit":"Debit")}</div>
+                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                </div>
+                <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
+                  {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* users */}
+      {adminTab==="users" && (
+        <div className={classNames("rounded-2xl border p-4 grid md:grid-cols-2 gap-4", neonBox(theme))}>
+          <div className="rounded-xl border p-4">
+            <div className="text-sm opacity-70 mb-2">Add agent</div>
+            <div className="flex items-center gap-2">
+              <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={newAgent} onChange={(e)=>setNewAgent(e.target.value)} placeholder="Full name"/>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> newAgent && onAddAgent(newAgent)}>
+                <Plus className="w-4 h-4 inline mr-1"/> Add
+              </button>
+            </div>
+          </div>
+          <div className="rounded-xl border p-4">
+            <div className="text-sm opacity-70 mb-2">Set / reset PIN (5 digits)</div>
+            <div className="grid sm:grid-cols-3 gap-2">
+              <select className="border rounded-xl px-3 py-2 bg-white dark:bg-slate-800" value={pinAgent} onChange={(e)=>setPinAgent(e.target.value)}>
+                <option value="">Choose agent…</option>
+                {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+              </select>
+              <input className="border rounded-xl px-3 py-2 bg-white dark:bg-slate-800" placeholder="12345" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5))}/>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal.length===5 && onSetPin(pinAgent, pinVal)}>
+                <Check className="w-4 h-4 inline mr-1"/> Save PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---------- Sandbox Page ---------- */
+/* ========== Sandbox ========== */
 function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
   return (
-    <div className={`rounded-2xl border p-6 shadow-sm ${theme==="neon"?"bg-orange-900 border-orange-700":"bg-white dark:bg-slate-800"}`}>
-      <div className="text-xl font-semibold mb-2 flex items-center gap-2"><Shield className="w-5 h-5"/> Sandbox Mode</div>
-      <p className="text-sm text-slate-600 dark:text-slate-300">
-        This is an isolated page for testing UI flows. It resets every time you exit.
-      </p>
-      <button className={`mt-4 px-4 py-2 rounded-xl border ${theme==="neon"?"bg-orange-700 text-orange-50 border-orange-600":"bg-black text-white"}`} onClick={onExit}>
-        Exit Sandbox (Reset)
-      </button>
-    </div>
+    <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
+      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
+        <div className="text-xl font-semibold mb-2">Sandbox</div>
+        <div className="opacity-80 text-sm">
+          Use this area to experiment. Data here is temporary and resets when you exit.
+        </div>
+        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={onExit}>
+          Exit Sandbox
+        </button>
+      </div>
+    </motion.div>
   );
 }
-
-/* ---------- Small helpers ---------- */
-function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
