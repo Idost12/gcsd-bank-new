@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X,
-  Sun, Moon, Users
+  Sun, Moon, Users, Home as HomeIcon, RotateCcw
 } from "lucide-react";
 
 /** =========================
@@ -66,7 +66,7 @@ const PRIZE_ITEMS: PrizeItem[] = [
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
   soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
-  flight_madrid: 1, flight_london: 1, flight_milan: 1, // Madrid = 1
+  flight_madrid: 1, flight_london: 1, flight_milan: 1,
 };
 
 const MAX_PRIZES_PER_AGENT = 2;
@@ -117,7 +117,7 @@ export default function GCSDApp() {
 
   const [showIntro, setShowIntro] = useState<boolean>(true);
 
-  const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"history"|"transfer">("dashboard");
+  const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"history"|"transfer"|"corrections">("dashboard");
 
   const [theme, setTheme] = useState<"light"|"dark">((localStorage.getItem(THEME_KEY) as any) || "light");
   const [clock, setClock] = useState<string>(fmtTime(new Date()));
@@ -193,6 +193,7 @@ export default function GCSDApp() {
     toast.success(`Redeemed ${prize.label}`);
   }
 
+  // ADMIN: credit based on sale rule
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     if (!isAdmin) return toast.error("Admin only");
     const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if(!rule) return;
@@ -208,11 +209,28 @@ export default function GCSDApp() {
     toast.success(`Transferred ${amount} GCSD to ${accounts.find(a=>a.id===agentId)?.name}`);
   }
 
+  // ADMIN: corrections (undo)
+  function undoSale(txId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
+    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo}` });
+    toast.success("Sale reversed");
+  }
+  function undoRedemption(txId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="debit" || !t.fromId) return;
+    const label = (t.memo||"").replace("Redeem: ","");
+    const prize = PRIZE_ITEMS.find(p=>p.label===label);
+    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}` });
+    if (prize) setStock(s=> ({...s, [prize.key]: (s[prize.key]??0)+1}));
+    toast.success("Redemption reversed & stock restored");
+  }
+
   return (
     <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200">
       <Toaster position="top-center" richColors />
 
-      {/* Theme overlay (quick, to soften switch) */}
+      {/* Theme overlay */}
       <AnimatePresence>
         <motion.div
           key={themeFlip}
@@ -251,8 +269,15 @@ export default function GCSDApp() {
           <motion.div layout className="flex items-center gap-3">
             <img src={LOGO_URL} alt="logo" className="h-6 w-6 rounded" />
             <span className="font-semibold">{APP_NAME}</span>
+            <button
+              className="ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg border bg-white dark:bg-slate-800"
+              onClick={()=> setPortal("none")}
+              title="Go Home"
+            >
+              <HomeIcon className="w-4 h-4"/> Home
+            </button>
           </motion.div>
-        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <span className="text-xs font-mono text-slate-600 dark:text-slate-300">{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
             <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
@@ -275,7 +300,6 @@ export default function GCSDApp() {
               setPortal("admin");
               setIsAdmin(false);
               setPickerOpen(false);
-              // PIN modal will auto-appear via AdminPinMount
             }}
             onChooseAgent={(id)=>{
               setCurrentAgentId(id);
@@ -318,6 +342,8 @@ export default function GCSDApp() {
             txns={txns}
             onCredit={adminCredit}
             onManualTransfer={(a,m,n)=>manualTransfer(a,m,n)}
+            onUndoSale={undoSale}
+            onUndoRedemption={undoRedemption}
             adminTab={adminTab} setAdminTab={setAdminTab}
           />
         ) : (
@@ -329,6 +355,8 @@ export default function GCSDApp() {
             stock={stock}
             starOfDay={starOfDay}
             leaderOfMonth={leaderOfMonth}
+            txns={txns}
+            accounts={accounts}
           />
         )}
       </div>
@@ -355,44 +383,28 @@ function TypeLabel({ text }:{ text:string }) {
   );
 }
 
+/* cleaned-up icon-only theme toggle */
 function ThemeToggle({theme, setTheme}:{theme:"light"|"dark"; setTheme:(t:"light"|"dark")=>void}) {
   const isDark = theme === "dark";
-  const label = isDark ? "Light" : "Dark";
   return (
-    <motion.button
-      whileTap={{ scale: 0.96 }}
-      whileHover={{ scale: 1.05 }}
+    <button
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800 overflow-hidden transition-colors"
+      className={`h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800`}
+      aria-label={isDark ? "Switch to light" : "Switch to dark"}
+      title={isDark ? "Light mode" : "Dark mode"}
     >
-      <div className="inline-flex items-center gap-2">
-        <AnimatePresence initial={false} mode="wait">
-          {isDark ? (
-            <motion.span key="moon" initial={{ rotate:-20, scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
-              <Moon className="w-4 h-4" />
-            </motion.span>
-          ) : (
-            <motion.span key="sun"  initial={{ rotate:20,  scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:-20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
-              <Sun className="w-4 h-4" />
-            </motion.span>
-          )}
-        </AnimatePresence>
-        <span className="relative inline-block w-[42px]">
-          <AnimatePresence initial={false} mode="wait">
-            <motion.span
-              key={label}
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              transition={{ duration: 0.1 }}
-              className="absolute left-0 top-0"
-            >
-              {label}
-            </motion.span>
-          </AnimatePresence>
-        </span>
-      </div>
-    </motion.button>
+      <AnimatePresence initial={false} mode="wait">
+        {isDark ? (
+          <motion.span key="moon" initial={{ rotate:-20, scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
+            <Moon className="w-4 h-4" />
+          </motion.span>
+        ) : (
+          <motion.span key="sun"  initial={{ rotate:20,  scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:-20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
+            <Sun className="w-4 h-4" />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </button>
   );
 }
 
@@ -483,11 +495,27 @@ function HomeDashboard(props:{
   prizes: PrizeItem[]; stock: Record<string,number>;
   starOfDay: {name:string; amount:number} | null;
   leaderOfMonth: {name:string; amount:number} | null;
+  txns: Transaction[];
+  accounts: Account[];
 }) {
-  const { totalEarned, totalSpent, purchases, prizes, stock, starOfDay, leaderOfMonth } = props;
-  const max = Math.max(totalEarned, totalSpent, 1);
-  const ePerc = (totalEarned / max) * 100;
-  const sPerc = (totalSpent  / max) * 100;
+  const { totalEarned, totalSpent, purchases, prizes, stock, starOfDay, leaderOfMonth, txns, accounts } = props;
+
+  // Build 30-day earned/spent series (non-system)
+  const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
+  const days = Array.from({length:30}, (_,i)=> {
+    const d = new Date(); d.setDate(d.getDate()-(29-i)); d.setHours(0,0,0,0);
+    return d;
+  });
+  const earnedSeries = days.map(d=>{
+    const next = new Date(d); next.setDate(d.getDate()+1);
+    return txns.filter(t=> t.kind==="credit" && t.toId && nonSystemIds.has(t.toId) && t.memo!=="Mint" && new Date(t.dateISO)>=d && new Date(t.dateISO)<next)
+               .reduce((a,b)=>a+b.amount,0);
+  });
+  const spentSeries = days.map(d=>{
+    const next = new Date(d); next.setDate(d.getDate()+1);
+    return txns.filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId) && new Date(t.dateISO)>=d && new Date(t.dateISO)<next)
+               .reduce((a,b)=>a+b.amount,0);
+  });
 
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
@@ -499,11 +527,8 @@ function HomeDashboard(props:{
           </div>
 
           <div className="mt-4">
-            <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Finance</div>
-            <div className="h-32 rounded-xl border p-3 flex items-end gap-3 bg-white dark:bg-slate-800">
-              <Bar label="Earned" percent={ePerc} colorClass="bg-emerald-500"/>
-              <Bar label="Spent"  percent={sPerc} colorClass="bg-rose-500"/>
-            </div>
+            <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Finance (30 days)</div>
+            <LineChart earned={earnedSeries} spent={spentSeries}/>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4 mt-4">
@@ -542,17 +567,33 @@ function HomeDashboard(props:{
           </div>
         </BigCard>
 
-        <BigCard title="Info">
-          <ul className="list-disc pl-5 space-y-2 text-sm text-slate-600 dark:text-slate-300">
-            <li>Use <b>Switch User</b> to open Admin or an Agent portal.</li>
-            <li>Admin can record sales via <b>Add Sale</b> and do manual transfers.</li>
-            <li>Agents can redeem up to <b>2 prizes</b> each (stock-limited).</li>
-          </ul>
-        </BigCard>
+        {/* Info card removed as requested */}
       </div>
     </motion.div>
   );
 }
+
+/* Simple responsive SVG line chart (no libs) */
+function LineChart({ earned, spent }:{earned:number[]; spent:number[]}) {
+  const width = 520, height = 140, pad = 8;
+  const max = Math.max(1, ...earned, ...spent);
+  const scaleX = (i:number)=> pad + (i*(width-2*pad))/29;
+  const scaleY = (v:number)=> height - pad - (v/max)*(height-2*pad);
+  const toPath = (arr:number[]) => arr.map((v,i)=> `${i===0?"M":"L"} ${scaleX(i)} ${scaleY(v)}`).join(" ");
+  return (
+    <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-36">
+        <path d={toPath(earned)} fill="none" stroke="currentColor" className="text-emerald-500" strokeWidth="2"/>
+        <path d={toPath(spent)}  fill="none" stroke="currentColor" className="text-rose-500" strokeWidth="2"/>
+      </svg>
+      <div className="flex justify-end gap-4 text-xs text-slate-500 dark:text-slate-300">
+        <div className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-emerald-500 inline-block"/><span>Earned</span></div>
+        <div className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-rose-500 inline-block"/><span>Spent</span></div>
+      </div>
+    </div>
+  );
+}
+
 function Bar({ label, percent, colorClass }:{ label:string; percent:number; colorClass:string }) {
   return (
     <div className="flex-1 grid gap-1 text-xs">
@@ -697,16 +738,18 @@ function AdminPortal(props:{
   txns:Transaction[];
   onCredit:(agent:string, rule:string, qty:number)=>void;
   onManualTransfer:(agent:string, amount:number, note:string)=>void;
-  adminTab:"dashboard"|"addsale"|"history"|"transfer";
-  setAdminTab:(t:"dashboard"|"addsale"|"history"|"transfer")=>void;
+  onUndoSale:(txId:string)=>void;
+  onUndoRedemption:(txId:string)=>void;
+  adminTab:"dashboard"|"addsale"|"history"|"transfer"|"corrections";
+  setAdminTab:(t:"dashboard"|"addsale"|"history"|"transfer"|"corrections")=>void;
 }) {
-  const { isAdmin, accounts, balances, stock, rules, txns, onCredit, onManualTransfer, adminTab, setAdminTab } = props;
+  const { isAdmin, accounts, balances, stock, rules, txns, onCredit, onManualTransfer, onUndoSale, onUndoRedemption, adminTab, setAdminTab } = props;
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
       <div className="flex items-center justify-between mb-4">
         <div className="font-semibold flex items-center gap-2"><Lock className="w-4 h-4"/> Admin</div>
         <div className="flex gap-2">
-          {(["dashboard","addsale","transfer","history"] as const).map(k=> (
+          {(["dashboard","addsale","transfer","corrections","history"] as const).map(k=> (
             <motion.button key={k} whileHover={{y:-2, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
               className={`px-3 py-1.5 rounded-xl border ${adminTab===k?"bg-black text-white":"bg-white dark:bg-slate-800"}`}
               onClick={()=>setAdminTab(k)}>{k==="addsale" ? "Add Sale" : k[0].toUpperCase()+k.slice(1)}</motion.button>
@@ -745,6 +788,7 @@ function AdminPortal(props:{
 
           {adminTab==="addsale" && <AddSale rules={rules} accounts={accounts} onCredit={onCredit} />}
           {adminTab==="transfer" && <ManualTransfer accounts={accounts} onTransfer={onManualTransfer} />}
+          {adminTab==="corrections" && <Corrections accounts={accounts} txns={txns} onUndoSale={onUndoSale} onUndoRedemption={onUndoRedemption} />}
           {adminTab==="history" && <AdminHistory txns={txns} accounts={accounts} />}
         </>
       )}
@@ -843,6 +887,65 @@ function ManualTransfer({ accounts, onTransfer }:{
     </div>
   );
 }
+
+/* Admin Corrections (Undo) */
+function Corrections({ accounts, txns, onUndoSale, onUndoRedemption }:{
+  accounts:Account[]; txns:Transaction[];
+  onUndoSale:(txId:string)=>void; onUndoRedemption:(txId:string)=>void;
+}) {
+  const [aid, setAid] = useState<string>("");
+
+  const agentTx = txns.filter(t => (t.toId===aid && t.kind==="credit" && t.memo!=="Mint") || (t.fromId===aid && t.kind==="debit"));
+  const sales   = agentTx.filter(t => t.kind==="credit");
+  const redeems = agentTx.filter(t => t.kind==="debit" && (t.memo||"").startsWith("Redeem:"));
+
+  return (
+    <div className="grid md:grid-cols-2 gap-4">
+      <div className="rounded-2xl border p-5 bg-white dark:bg-slate-800 shadow-sm">
+        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Choose Agent</div>
+        <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={aid} onChange={e=>setAid(e.target.value)}>
+          <option value="">—</option>
+          {accounts.filter(a=>a.role!=="system").map(a=>(
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="rounded-2xl border p-5 bg-white dark:bg-slate-800 shadow-sm">
+        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Sales (credits)</div>
+        <div className="space-y-2 max-h-[50vh] overflow-auto pr-2">
+          {sales.map(t=>(
+            <div key={t.id} className="flex items-center justify-between border rounded-xl px-3 py-2">
+              <div className="text-sm">{t.memo} — <b>+{t.amount}</b> <span className="text-xs text-slate-500">{new Date(t.dateISO).toLocaleString()}</span></div>
+              <button className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border bg-white dark:bg-slate-700"
+                onClick={()=>onUndoSale(t.id)} title="Undo sale">
+                <RotateCcw className="w-3.5 h-3.5"/> Undo
+              </button>
+            </div>
+          ))}
+          {sales.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No sales.</div>}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border p-5 bg-white dark:bg-slate-800 shadow-sm md:col-span-2">
+        <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Redemptions (purchases)</div>
+        <div className="space-y-2 max-h-[50vh] overflow-auto pr-2">
+          {redeems.map(t=>(
+            <div key={t.id} className="flex items-center justify-between border rounded-xl px-3 py-2">
+              <div className="text-sm">{t.memo} — <b>-{t.amount}</b> <span className="text-xs text-slate-500">{new Date(t.dateISO).toLocaleString()}</span></div>
+              <button className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border bg-white dark:bg-slate-700"
+                onClick={()=>onUndoRedemption(t.id)} title="Undo redemption (restock)">
+                <RotateCcw className="w-3.5 h-3.5"/> Undo & Restock
+              </button>
+            </div>
+          ))}
+          {redeems.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No redemptions.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminHistory({ txns, accounts }:{ txns:Transaction[]; accounts:Account[] }) {
   const credits = txns.filter(t=> t.kind==="credit" && t.toId && t.memo && t.memo !== "Mint");
   const byId = new Map(accounts.map(a=>[a.id, a.name]));
