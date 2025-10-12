@@ -1,20 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { toast } from "sonner";
+import { Toaster, toast } from "sonner";
 import {
-  Plus, Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X,
-  Sun, Moon, ArrowRight, Home as HomeIcon, Users
+  Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X,
+  Sun, Moon, Users
 } from "lucide-react";
 
 /** =========================
  *   GCS BANK — Public Home + Portals
  * ==========================*/
 
-// ---------- APP BRAND ----------
 const APP_NAME = "GCS Bank";
 const LOGO_URL = "/logo.png"; // MUST exist at /public/logo.png
 
-// ---------- TYPES ----------
 type TxnKind = "credit" | "debit";
 type Transaction = {
   id: string;
@@ -30,14 +28,12 @@ type Account = { id: string; name: string; role?: "system"|"agent"; balance: num
 type PrizeItem = { key: string; label: string; price: number };
 type ProductRule = { key: string; label: string; gcsd: number };
 
-// ---------- AGENTS ----------
 const AGENT_NAMES = [
   "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
   "Caitlyn Stone","Rebecca Brooks","Logan Noir","Christopher O'Connor","Viktor Parks",
   "Hope Marshall","Justin Frey","Kevin Nolan","Sofie Roy"
 ];
 
-// ---------- PRODUCT RULES (Admin) ----------
 const PRODUCT_RULES: ProductRule[] = [
   { key: "small_collection",         label: "Small Collection",          gcsd: 190 },
   { key: "big_whv",                  label: "Big WHV",                   gcsd: 320 },
@@ -50,7 +46,6 @@ const PRODUCT_RULES: ProductRule[] = [
   { key: "small_whv",                label: "Small WHV",                 gcsd: 200 },
 ];
 
-// ---------- PRIZES ----------
 const PRIZE_ITEMS: PrizeItem[] = [
   { key: "airfryer",        label: "Philips Airfryer",        price: 1600 },
   { key: "soundbar",        label: "LG Soundbar",             price: 2400 },
@@ -68,23 +63,19 @@ const PRIZE_ITEMS: PrizeItem[] = [
   { key: "flight_milan",    label: "Flight to Milan",         price: 11350 },
 ];
 
-// ---------- STOCK (Madrid=1) ----------
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
   soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
-  flight_madrid: 1, flight_london: 1, flight_milan: 1,
+  flight_madrid: 1, flight_london: 1, flight_milan: 1, // Madrid = 1
 };
 
-// ---------- LIMITS ----------
 const MAX_PRIZES_PER_AGENT = 2;
 
-// ---------- KEYS ----------
 const STORAGE_KEY = "gcs-v3-bank";
 const STOCK_KEY   = "gcs-v3-stock";
 const THEME_KEY   = "gcs-v3-theme";
 const ADMIN_PIN   = "13577531";
 
-// ---------- UTILS ----------
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
@@ -102,7 +93,6 @@ function computeBalances(accounts: Account[], txns: Transaction[]) {
 function loadJSON<T>(k: string, fallback: T): T { try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } }
 function saveJSON(k: string, v: any) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-// ---------- SEED ----------
 const seedAccounts: Account[] = [
   { id: uid(), name: "Bank Vault", role: "system", balance: 0 },
   ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent", balance: 0 })),
@@ -112,47 +102,39 @@ const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-// ---------- APP ----------
 type Portal = "none" | "agent" | "admin";
 
 export default function GCSDApp() {
   const persisted = loadJSON<{accounts:Account[]; txns:Transaction[] } | null>(STORAGE_KEY, null);
-  const [accounts, setAccounts] = useState<Account[]>(persisted?.accounts || seedAccounts);
+  const [accounts] = useState<Account[]>(persisted?.accounts || seedAccounts);
   const [txns, setTxns] = useState<Transaction[]>(persisted?.txns || seedTxns);
   const [stock, setStock] = useState<Record<string, number>>(loadJSON(STOCK_KEY, INITIAL_STOCK));
 
-  // Home is public; portal is chosen via "Switch User"
   const [portal, setPortal] = useState<Portal>("none");
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
 
-  // Always show intro splash each visit
   const [showIntro, setShowIntro] = useState<boolean>(true);
 
-  // Admin UI tabs
   const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"history"|"transfer">("dashboard");
 
-  // Theme + time/date
   const [theme, setTheme] = useState<"light"|"dark">((localStorage.getItem(THEME_KEY) as any) || "light");
   const [clock, setClock] = useState<string>(fmtTime(new Date()));
   const [dateStr, setDateStr] = useState<string>(fmtDate(new Date()));
-  const [themeFlip, setThemeFlip] = useState<number>(0); // to key overlay animation
+  const [themeFlip, setThemeFlip] = useState<number>(0);
 
-  // persist + timers
   useEffect(()=> saveJSON(STORAGE_KEY, {accounts, txns}), [accounts, txns]);
   useEffect(()=> saveJSON(STOCK_KEY, stock), [stock]);
   useEffect(()=> {
     localStorage.setItem(THEME_KEY, theme);
     document.documentElement.classList.toggle("dark", theme==="dark");
-    setThemeFlip(x=>x+1); // trigger overlay
+    setThemeFlip(x=>x+1);
   }, [theme]);
   useEffect(()=> {
     const t = setInterval(()=> { const d = new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
     return ()=> clearInterval(t);
   }, []);
-
-  // close intro after 2s unless user presses Enter
   useEffect(()=> {
     if (!showIntro) return;
     const timer = setTimeout(()=> setShowIntro(false), 2000);
@@ -163,7 +145,6 @@ export default function GCSDApp() {
 
   const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
 
-  // derived for agent
   const agent = accounts.find(a=>a.id===currentAgentId);
   const agentBalance = balances.get(currentAgentId)||0;
   const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
@@ -171,7 +152,6 @@ export default function GCSDApp() {
   const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
   const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit" && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
 
-  // HOME totals (exclude Mint + exclude system account activity)
   const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
   const totalEarned = txns
     .filter(t=> t.kind==="credit" && t.toId && nonSystemIds.has(t.toId) && t.memo!=="Mint")
@@ -180,13 +160,10 @@ export default function GCSDApp() {
     .filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId))
     .reduce((a,b)=>a+b.amount,0);
 
-  // HOME purchases (non-admin/system debits)
   const purchases = txns
     .filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId) && (t.memo||"").startsWith("Redeem:"))
     .map(t=> ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
-  const totalPurchases = purchases.length;
 
-  // Leaders
   const todayKey = new Date().toLocaleDateString();
   const curMonthKey = monthKey(new Date());
   const earnedTodayBy: Record<string, number> = {};
@@ -202,7 +179,6 @@ export default function GCSDApp() {
   const leaderId = Object.entries(earnedMonthBy).sort((a,b)=>b[1]-a[1])[0]?.[0];
   const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonthBy[leaderId] } : null;
 
-  // engine ops
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
     setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev]);
 
@@ -217,7 +193,6 @@ export default function GCSDApp() {
     toast.success(`Redeemed ${prize.label}`);
   }
 
-  // ADMIN ops
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     if (!isAdmin) return toast.error("Admin only");
     const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if(!rule) return;
@@ -233,23 +208,23 @@ export default function GCSDApp() {
     toast.success(`Transferred ${amount} GCSD to ${accounts.find(a=>a.id===agentId)?.name}`);
   }
 
-  /* ---------------- UI ---------------- */
-
   return (
     <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200">
-      {/* Theme overlay (faster) */}
+      <Toaster position="top-center" richColors />
+
+      {/* Theme overlay (quick, to soften switch) */}
       <AnimatePresence>
         <motion.div
           key={themeFlip}
           initial={{ opacity: 0 }}
           animate={{ opacity: 0 }}
           exit={{ opacity: 0.18 }}
-          transition={{ duration: 0.18 }}
+          transition={{ duration: 0.1 }}
           className="pointer-events-none fixed inset-0 z-40 bg-white dark:bg-slate-900"
         />
       </AnimatePresence>
 
-      {/* Intro — shows EVERY visit (2s or press Enter/Skip) */}
+      {/* Intro — EVERY visit */}
       <AnimatePresence>
         {showIntro && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
@@ -277,7 +252,7 @@ export default function GCSDApp() {
             <img src={LOGO_URL} alt="logo" className="h-6 w-6 rounded" />
             <span className="font-semibold">{APP_NAME}</span>
           </motion.div>
-          <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3">
             <span className="text-xs font-mono text-slate-600 dark:text-slate-300">{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
             <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
@@ -289,7 +264,7 @@ export default function GCSDApp() {
         </div>
       </div>
 
-      {/* User Picker modal (Admin/Agents) */}
+      {/* User Picker modal */}
       <AnimatePresence>
         {pickerOpen && (
           <Picker
@@ -300,8 +275,7 @@ export default function GCSDApp() {
               setPortal("admin");
               setIsAdmin(false);
               setPickerOpen(false);
-              // ask PIN immediately
-              setImmediate(()=> setShowPinModal(true));
+              // PIN modal will auto-appear via AdminPinMount
             }}
             onChooseAgent={(id)=>{
               setCurrentAgentId(id);
@@ -313,7 +287,7 @@ export default function GCSDApp() {
         )}
       </AnimatePresence>
 
-      {/* Admin PIN modal (always ask when entering admin) */}
+      {/* Admin PIN modal — auto when admin chosen */}
       <AdminPinMount
         active={portal==="admin" && !isAdmin}
         onCancel={()=>{ setPortal("none"); }}
@@ -362,7 +336,7 @@ export default function GCSDApp() {
   );
 }
 
-/* ---------------- Small shared components ---------------- */
+/* ---------- Small shared components ---------- */
 
 function TypeLabel({ text }:{ text:string }) {
   return (
@@ -372,7 +346,7 @@ function TypeLabel({ text }:{ text:string }) {
           key={i}
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.12, delay: i * 0.02 }}
+          transition={{ duration: 0.08, delay: i * 0.015 }}
         >
           {ch}
         </motion.span>
@@ -394,24 +368,23 @@ function ThemeToggle({theme, setTheme}:{theme:"light"|"dark"; setTheme:(t:"light
       <div className="inline-flex items-center gap-2">
         <AnimatePresence initial={false} mode="wait">
           {isDark ? (
-            <motion.span key="moon" initial={{ rotate:-20, scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:20, scale:0.7, opacity:0 }} transition={{ duration:0.12 }}>
+            <motion.span key="moon" initial={{ rotate:-20, scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
               <Moon className="w-4 h-4" />
             </motion.span>
           ) : (
-            <motion.span key="sun"  initial={{ rotate:20,  scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:-20, scale:0.7, opacity:0 }} transition={{ duration:0.12 }}>
+            <motion.span key="sun"  initial={{ rotate:20,  scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:-20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
               <Sun className="w-4 h-4" />
             </motion.span>
           )}
         </AnimatePresence>
         <span className="relative inline-block w-[42px]">
-          {/* typed label */}
           <AnimatePresence initial={false} mode="wait">
             <motion.span
               key={label}
               initial={{ opacity: 0, x: 8 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -8 }}
-              transition={{ duration: 0.12 }}
+              transition={{ duration: 0.1 }}
               className="absolute left-0 top-0"
             >
               {label}
@@ -455,7 +428,6 @@ function Picker({ accounts, balances, onClose, onChooseAdmin, onChooseAgent }:{
     </motion.div>
   );
 }
-
 function HoverCard({ children, onClick, delay=0.03 }:{children:React.ReactNode; onClick:()=>void; delay?:number}) {
   return (
     <motion.button
@@ -468,8 +440,6 @@ function HoverCard({ children, onClick, delay=0.03 }:{children:React.ReactNode; 
     </motion.button>
   );
 }
-
-/* Ask PIN immediately when admin chosen */
 function AdminPinMount({ active, onCancel, onUnlocked }:{ active:boolean; onCancel:()=>void; onUnlocked:()=>void }) {
   const [show, setShow] = useState<boolean>(false);
   useEffect(()=> { if (active) setShow(true); else setShow(false); }, [active]);
@@ -484,7 +454,6 @@ function AdminPinMount({ active, onCancel, onUnlocked }:{ active:boolean; onCanc
     </AnimatePresence>
   );
 }
-
 function PinModal({ onClose, onOk }:{ onClose:()=>void; onOk:()=>void }) {
   const [pin, setPin] = useState("");
   return (
@@ -506,7 +475,7 @@ function PinModal({ onClose, onOk }:{ onClose:()=>void; onOk:()=>void }) {
   );
 }
 
-/* ---------------- Home (Public) ---------------- */
+/* ---------- Home (Public) ---------- */
 
 function HomeDashboard(props:{
   totalEarned:number; totalSpent:number;
@@ -516,8 +485,6 @@ function HomeDashboard(props:{
   leaderOfMonth: {name:string; amount:number} | null;
 }) {
   const { totalEarned, totalSpent, purchases, prizes, stock, starOfDay, leaderOfMonth } = props;
-
-  // compact bar comparison
   const max = Math.max(totalEarned, totalSpent, 1);
   const ePerc = (totalEarned / max) * 100;
   const sPerc = (totalSpent  / max) * 100;
@@ -578,7 +545,7 @@ function HomeDashboard(props:{
         <BigCard title="Info">
           <ul className="list-disc pl-5 space-y-2 text-sm text-slate-600 dark:text-slate-300">
             <li>Use <b>Switch User</b> to open Admin or an Agent portal.</li>
-            <li>Admin can record sales via <b>Add Sale</b> and also do manual transfers.</li>
+            <li>Admin can record sales via <b>Add Sale</b> and do manual transfers.</li>
             <li>Agents can redeem up to <b>2 prizes</b> each (stock-limited).</li>
           </ul>
         </BigCard>
@@ -619,7 +586,7 @@ function Highlight({ title, value }:{ title:string; value:string }){
   );
 }
 
-/* ---------------- Agent Portal ---------------- */
+/* ---------- Agent Portal ---------- */
 
 function AgentPortal(props:{
   agentName:string; agentBalance:number; lifetimeEarn:number; lifetimeSpend:number;
@@ -719,7 +686,7 @@ function StatCard({ icon, label, value }:{icon:React.ReactNode, label:string, va
   );
 }
 
-/* ---------------- Admin Portal ---------------- */
+/* ---------- Admin Portal ---------- */
 
 function AdminPortal(props:{
   isAdmin:boolean;
