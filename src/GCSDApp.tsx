@@ -3,24 +3,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Plus, Wallet, Gift, History, Download, Upload,
-  Sparkles, UserCircle2, Lock, Check, X, Sun, Moon
+  Sparkles, UserCircle2, Lock, Check, X, Sun, Moon, ArrowRight
 } from "lucide-react";
 
 /** =========================
- *   GCS BANK — Worker + Admin portals
- *   - Admin PIN gate after choosing Admin tile
- *   - Add Sale via product blocks -> modal (select agent)
- *   - Admin Dashboard (balances, prize stock) + History
- *   - Worker portal (Overview / Shop / Activity)
- *   - Dark/Light mode toggle (persists)
+ *   GCS BANK — Full UI
  * ==========================*/
 
 // ---------- APP BRAND ----------
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png"; // upload logo.png at repo root to show it
+const LOGO_URL = "/logo.png"; // Put logo.png at repo root
 
 // ---------- TYPES ----------
-type TxnKind = "credit" | "debit" | "transfer";
+type TxnKind = "credit" | "debit";
 type Transaction = {
   id: string;
   kind: TxnKind;
@@ -55,7 +50,7 @@ const PRODUCT_RULES: ProductRule[] = [
   { key: "small_whv",                label: "Small WHV",                 gcsd: 200 },
 ];
 
-// ---------- PRIZES (with prices) ----------
+// ---------- PRIZES ----------
 const PRIZE_ITEMS: PrizeItem[] = [
   { key: "airfryer",        label: "Philips Airfryer",        price: 1600 },
   { key: "soundbar",        label: "LG Soundbar",             price: 2400 },
@@ -73,7 +68,7 @@ const PRIZE_ITEMS: PrizeItem[] = [
   { key: "flight_milan",    label: "Flight to Milan",         price: 11350 },
 ];
 
-// ---------- INITIAL STOCK ----------
+// ---------- INITIAL STOCK (Madrid set to 1) ----------
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1,
   soundbar: 1,
@@ -86,7 +81,7 @@ const INITIAL_STOCK: Record<string, number> = {
   cinema_tickets: 2,
   neo_massager: 1,
   logi_g102: 1,
-  flight_madrid: 2,
+  flight_madrid: 1,    // ← changed to 1
   flight_london: 1,
   flight_milan: 1,
 };
@@ -98,14 +93,23 @@ const MAX_PRIZES_PER_AGENT = 2;
 const STORAGE_KEY = "gcs-v3-bank";
 const STOCK_KEY   = "gcs-v3-stock";
 const INTRO_SEEN_KEY = "gcs-v3-intro";
+const SPLASH_SEEN_KEY = "gcs-v3-splash";
 const CURRENT_AGENT_KEY = "gcs-v3-current-agent";
-const ADMIN_FLAG_KEY = "gcs-v3-admin";
 const THEME_KEY = "gcs-v3-theme";
-const ADMIN_PIN = "13577531"; // <- your PIN
+const ADMIN_PIN = "13577531";
 
 // ---------- UTILS ----------
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
+const fmtTime = (d: Date) =>
+  [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2,"0")).join(":");
+
+function startOfLocalDay(d = new Date()) {
+  const x = new Date(d);
+  x.setHours(0,0,0,0);
+  return x;
+}
 
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>(accounts.map(a => [a.id, 0]));
@@ -115,22 +119,12 @@ function computeBalances(accounts: Account[], txns: Transaction[]) {
   }
   return map;
 }
-function summarizeMonthly(txns: Transaction[]) {
-  const byMonth = new Map<string, number>();
-  for (const t of txns) {
-    const d = new Date(t.dateISO);
-    const k = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}`;
-    byMonth.set(k, (byMonth.get(k) || 0) + t.amount);
-  }
-  return Array.from(byMonth, ([month, volume]) => ({ month, volume })).sort((a,b)=>a.month.localeCompare(b.month));
-}
 function loadJSON<T>(k: string, fallback: T): T {
   try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) as T : fallback; }
   catch { return fallback; }
 }
-function saveJSON(k: string, v: any) {
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
-}
+function saveJSON(k: string, v: any) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function monthKey(d: Date){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 
 // ---------- SEED ----------
 const seedAccounts: Account[] = [
@@ -139,7 +133,7 @@ const seedAccounts: Account[] = [
 ];
 const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
-  { id: uid(), kind: "credit", amount: 8000, memo: "Initial mint", dateISO: nowISO(), toId: VAULT_ID },
+  { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
 // ---------- APP ----------
@@ -152,31 +146,66 @@ export default function GCSDApp() {
   const [stock, setStock] = useState<Record<string, number>>(loadJSON(STOCK_KEY, INITIAL_STOCK));
 
   const [introSeen, setIntroSeen] = useState<boolean>(Boolean(localStorage.getItem(INTRO_SEEN_KEY)));
+  const [splashSeen, setSplashSeen] = useState<boolean>(Boolean(localStorage.getItem(SPLASH_SEEN_KEY)));
   const [portal, setPortal] = useState<Portal>("none");
   const [currentAgentId, setCurrentAgentId] = useState<string>(localStorage.getItem(CURRENT_AGENT_KEY) || "");
-  const [isAdmin, setIsAdmin] = useState<boolean>(Boolean(localStorage.getItem(ADMIN_FLAG_KEY)));
+  const [isAdmin, setIsAdmin] = useState<boolean>(false); // ask PIN every time
   const [showPinModal, setShowPinModal] = useState(false);
   const [tab, setTab] = useState<"overview"|"shop"|"activity">("overview");
-  const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"history">("dashboard");
+  const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"history"|"transfer">("dashboard");
   const [theme, setTheme] = useState<"light"|"dark">((localStorage.getItem(THEME_KEY) as any) || "light");
+  const [clock, setClock] = useState<string>(fmtTime(new Date()));
 
-  // persist
+  // persist + timers
   useEffect(()=> saveJSON(STORAGE_KEY, {accounts, txns}), [accounts, txns]);
   useEffect(()=> saveJSON(STOCK_KEY, stock), [stock]);
   useEffect(()=> { if(currentAgentId) localStorage.setItem(CURRENT_AGENT_KEY, currentAgentId); }, [currentAgentId]);
-  useEffect(()=> { if(isAdmin) localStorage.setItem(ADMIN_FLAG_KEY, "1"); else localStorage.removeItem(ADMIN_FLAG_KEY); }, [isAdmin]);
   useEffect(()=> { localStorage.setItem(THEME_KEY, theme); document.documentElement.classList.toggle("dark", theme==="dark"); }, [theme]);
+  useEffect(()=> {
+    const t = setInterval(()=> setClock(fmtTime(new Date())), 1000);
+    return ()=> clearInterval(t);
+  }, []);
+
+  // splash (2s once, with Skip)
+  useEffect(()=> {
+    if (!splashSeen) {
+      const timer = setTimeout(()=>{
+        setSplashSeen(true);
+        localStorage.setItem(SPLASH_SEEN_KEY, "1");
+      }, 2000);
+      return ()=> clearTimeout(timer);
+    }
+  }, [splashSeen]);
 
   const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
-  const monthly = useMemo(()=>summarizeMonthly(txns), [txns]);
 
   // derived for agent
   const agent = accounts.find(a=>a.id===currentAgentId);
   const agentBalance = balances.get(currentAgentId)||0;
   const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
   const agentPrizeCount = agentTxns.filter(t=> t.kind==="debit" && t.fromId===currentAgentId).length;
-  const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
   const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit" && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+
+  // home metrics
+  const totalEarned = txns.filter(t=> t.kind==="credit" && t.toId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+  const totalSpent  = txns.filter(t=> t.kind==="debit").reduce((a,b)=>a+b.amount,0);
+
+  // leaders
+  const todayKey = new Date().toLocaleDateString();
+  const earnedTodayBy: Record<string, number> = {};
+  const earnedMonthBy: Record<string, number> = {};
+  const curMonthKey = monthKey(new Date());
+  for (const t of txns) {
+    if (t.kind!=="credit" || !t.toId || t.memo==="Mint") continue;
+    const d = new Date(t.dateISO);
+    if (d.toLocaleDateString() === todayKey) earnedTodayBy[t.toId] = (earnedTodayBy[t.toId] || 0) + t.amount;
+    if (monthKey(d) === curMonthKey)       earnedMonthBy[t.toId] = (earnedMonthBy[t.toId] || 0) + t.amount;
+  }
+  const starId = Object.entries(earnedTodayBy).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedTodayBy[starId] } : null;
+  const leaderId = Object.entries(earnedMonthBy).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonthBy[leaderId] } : null;
 
   // engine ops
   function postTxn(partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) {
@@ -204,32 +233,51 @@ export default function GCSDApp() {
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     toast.success(`Added ${amount} GCSD to ${accounts.find(a=>a.id===agentId)?.name}`);
   }
-  function mintToVault(amount:number){
+  function manualTransfer(agentId:string, amount:number, note:string){
     if (!isAdmin) return toast.error("Admin only");
-    if (!amount || amount<=0) return toast.error("Enter amount");
-    postTxn({ kind:"credit", amount, toId: VAULT_ID, memo:"Mint" });
+    if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
+    postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
+    toast.success(`Transferred ${amount} GCSD to ${accounts.find(a=>a.id===agentId)?.name}`);
   }
 
   // UI
   return (
-    <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100">
-      {/* Intro */}
+    <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-300">
+      {/* Splash (2s) */}
       <AnimatePresence>
-        {!introSeen && (
+        {!splashSeen && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
             className="fixed inset-0 z-50 grid place-items-center bg-black/80 text-white">
-            <motion.div initial={{scale:0.9, y:20}} animate={{scale:1, y:0}}
-              transition={{type:"spring", stiffness:120, damping:14}} className="text-center p-8 max-w-lg">
-              <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{delay:0.1}}
-                className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-white/10 grid place-items-center">
-                <Sparkles className="w-8 h-8"/>
-              </motion.div>
-              <h1 className="text-3xl font-bold mb-2">Welcome to {APP_NAME}</h1>
-              <p className="text-white/80 mb-6">Choose Admin or your Agent portal.</p>
-              <motion.button whileHover={{scale:1.03}} whileTap={{scale:0.97}}
-                className="px-5 py-2 rounded-2xl bg-white text-black font-medium"
+            <motion.div initial={{scale:0.95}} animate={{scale:1}} className="text-center p-8">
+              <div className="mx-auto mb-5 w-20 h-20 rounded-3xl bg-white/10 grid place-items-center">
+                {LOGO_URL ? <img src={LOGO_URL} className="w-10 h-10 rounded" /> : <Sparkles className="w-10 h-10" />}
+              </div>
+              <div className="text-2xl font-semibold mb-2">Loading {APP_NAME}…</div>
+              <div className="text-white/70 mb-6">Setting the stage for something shiny ✨</div>
+              <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.97}}
+                className="px-4 py-2 rounded-xl bg-white text-black"
+                onClick={()=>{ setSplashSeen(true); localStorage.setItem(SPLASH_SEEN_KEY,"1"); }}>
+                Skip
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Intro gate (once) */}
+      <AnimatePresence>
+        {splashSeen && !introSeen && (
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-40 grid place-items-center bg-white/80 backdrop-blur dark:bg-slate-900/70">
+            <motion.div initial={{y:10, opacity:0}} animate={{y:0, opacity:1}} className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-xl w-[min(640px,92vw)] text-center">
+              <div className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 grid place-items-center">
+                {LOGO_URL ? <img src={LOGO_URL} className="w-8 h-8 rounded" /> : <Sparkles className="w-8 h-8" />}
+              </div>
+              <h1 className="text-2xl font-bold mb-2">Welcome to {APP_NAME}</h1>
+              <p className="text-slate-600 dark:text-slate-300 mb-6">Pick Admin or your Agent portal. Everything is animated & smooth.</p>
+              <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.97}}
+                className="px-5 py-2 rounded-xl bg-black text-white inline-flex items-center gap-2"
                 onClick={()=>{ setIntroSeen(true); localStorage.setItem(INTRO_SEEN_KEY,"1"); }}>
-                Continue
+                Enter <ArrowRight className="w-4 h-4" />
               </motion.button>
             </motion.div>
           </motion.div>
@@ -240,38 +288,32 @@ export default function GCSDApp() {
       <AnimatePresence>
         {introSeen && portal==="none" && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-            className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
+            className="fixed inset-0 z-30 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
             <motion.div initial={{y:20, opacity:0}} animate={{y:0, opacity:1}}
               transition={{type:"spring", stiffness:120, damping:16}}
               className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2"><UserCircle2/><h2 className="text-xl font-semibold">Choose portal</h2></div>
-                <ThemeToggle theme={theme} setTheme={setTheme}/>
+                <div className="flex items-center gap-2">
+                  <ClockDisplay value={clock}/>
+                  <ThemeToggle theme={theme} setTheme={setTheme}/>
+                </div>
               </div>
 
               <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-2">
                 {/* Admin tile */}
-                <motion.button
-                  initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay:0.03}}
-                  whileHover={{y:-2}} whileTap={{scale:0.98}}
-                  onClick={()=>{ setPortal("admin"); if(!isAdmin) setShowPinModal(true); }}
-                  className="border rounded-2xl px-3 py-3 text-left bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">
+                <HoverCard onClick={()=>{ setPortal("admin"); setIsAdmin(false); setShowPinModal(true); }}>
                   <div className="font-semibold flex items-center gap-2"><Lock className="w-4 h-4"/> Admin Portal</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    {isAdmin ? "Logged in" : "PIN required"}
-                  </div>
-                </motion.button>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">PIN required</div>
+                </HoverCard>
 
                 {/* Agents */}
                 {accounts.filter(a=>a.role!=="system").map((a,i)=>(
-                  <motion.button key={a.id}
-                    initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay:0.04 + i*0.02}}
-                    whileHover={{y:-2}} whileTap={{scale:0.98}}
-                    onClick={()=>{ setCurrentAgentId(a.id); setPortal("agent"); setTab("overview"); }}
-                    className="border rounded-2xl px-3 py-3 text-left bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <HoverCard key={a.id} delay={0.04 + i*0.02}
+                    onClick={()=>{ setCurrentAgentId(a.id); setPortal("agent"); setTab("overview"); }}>
                     <div className="font-medium">{a.name}</div>
                     <div className="text-xs text-slate-500 dark:text-slate-400">Balance: {(balances.get(a.id)||0).toLocaleString()} GCSD</div>
-                  </motion.button>
+                  </HoverCard>
                 ))}
               </div>
             </motion.div>
@@ -280,29 +322,31 @@ export default function GCSDApp() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="sticky top-0 z-10 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800">
+      <div className="sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 transition-colors duration-300">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
           <motion.div layout className="flex items-center gap-3">
             {LOGO_URL ? <img src={LOGO_URL} alt="logo" className="h-6 w-6 rounded" /> : <Sparkles className="w-5 h-5" />}
             <span className="font-semibold">{APP_NAME}</span>
           </motion.div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <ClockDisplay value={clock}/>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
             {portal!=="none" && (
-              <motion.button whileHover={{scale:1.03}} whileTap={{scale:0.97}}
+              <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
                 className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800"
-                onClick={()=>{ setPortal("none"); setCurrentAgentId(""); }}>
-                Switch portal
+                onClick={()=>{ setPortal("none"); setCurrentAgentId(""); setIsAdmin(false); }}>
+                Switch Portal
               </motion.button>
             )}
           </div>
         </div>
       </div>
 
-      {/* PIN modal */}
+      {/* PIN modal (always required for admin) */}
       <AnimatePresence>
         {showPinModal && (
-          <PinModal onClose={()=>setShowPinModal(false)} onOk={()=>{ setIsAdmin(true); setShowPinModal(false); toast.success("Admin unlocked"); }}/>
+          <PinModal onClose={()=>{ setPortal("none"); setShowPinModal(false); }}
+                   onOk={()=>{ setIsAdmin(true); setShowPinModal(false); toast.success("Admin unlocked"); }}/>
         )}
       </AnimatePresence>
 
@@ -310,7 +354,6 @@ export default function GCSDApp() {
       <div className="max-w-6xl mx-auto px-4 py-6">
         {portal==="agent" && currentAgentId ? (
           <AgentPortal
-            monthly={monthly}
             tab={tab} setTab={setTab}
             agentName={agent?.name||""}
             agentBalance={agentBalance}
@@ -328,29 +371,83 @@ export default function GCSDApp() {
             accounts={accounts}
             balances={balances}
             stock={stock}
-            setStock={setStock}
             rules={PRODUCT_RULES}
             txns={txns}
             onCredit={adminCredit}
-            onMint={mintToVault}
+            onManualTransfer={manualTransfer}
             adminTab={adminTab} setAdminTab={setAdminTab}
           />
         ) : (
-          <HomeDashboard accounts={accounts} balances={balances} monthly={monthly}/>
+          <HomeDashboard
+            totalEarned={totalEarned}
+            totalSpent={totalSpent}
+            starOfDay={starOfDay}
+            leaderOfMonth={leaderOfMonth}
+            prizes={PRIZE_ITEMS}
+            stock={stock}
+          />
         )}
       </div>
     </div>
   );
 }
 
-/* ---------------- Components ---------------- */
+/* ---------------- Reusable bits ---------------- */
+
+function ClockDisplay({ value }:{ value:string }) {
+  return <span className="text-xs font-mono text-slate-600 dark:text-slate-300">{value}</span>;
+}
+
+function HoverCard({ children, onClick, delay=0.03 }:{children:React.ReactNode; onClick:()=>void; delay?:number}) {
+  return (
+    <motion.button
+      initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay}}
+      whileHover={{y:-3, boxShadow:"0 10px 22px rgba(0,0,0,.10)"}} whileTap={{scale:0.98}}
+      onClick={onClick}
+      className="border rounded-2xl px-3 py-3 text-left bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+    >
+      {children}
+    </motion.button>
+  );
+}
 
 function ThemeToggle({theme, setTheme}:{theme:"light"|"dark"; setTheme:(t:"light"|"dark")=>void}) {
+  const isDark = theme === "dark";
   return (
-    <button className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800 flex items-center gap-2"
-      onClick={()=> setTheme(theme==="light"?"dark":"light")}>
-      {theme==="light" ? <><Moon className="w-4 h-4"/> Dark</> : <><Sun className="w-4 h-4"/> Light</>}
-    </button>
+    <motion.button
+      whileTap={{ scale: 0.96 }}
+      whileHover={{ scale: 1.03 }}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800 overflow-hidden transition-colors"
+    >
+      <AnimatePresence initial={false} mode="wait">
+        {isDark ? (
+          <motion.span
+            key="moon"
+            initial={{ rotate: -90, scale: 0.6, opacity: 0 }}
+            animate={{ rotate: 0,   scale: 1.0, opacity: 1 }}
+            exit={{   rotate: 90,  scale: 0.6, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 18 }}
+            className="inline-flex items-center gap-2"
+          >
+            <Moon className="w-4 h-4" />
+            <span>Light</span>
+          </motion.span>
+        ) : (
+          <motion.span
+            key="sun"
+            initial={{ rotate: 90,  scale: 0.6, opacity: 0 }}
+            animate={{ rotate: 0,   scale: 1.0, opacity: 1 }}
+            exit={{   rotate: -90, scale: 0.6, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 18 }}
+            className="inline-flex items-center gap-2"
+          >
+            <Sun className="w-4 h-4" />
+            <span>Dark</span>
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </motion.button>
   );
 }
 
@@ -358,7 +455,7 @@ function PinModal({ onClose, onOk }:{ onClose:()=>void; onOk:()=>void }) {
   const [pin, setPin] = useState("");
   return (
     <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-      <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(420px,92vw)]">
+      <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(440px,92vw)]">
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold flex items-center gap-2"><Lock className="w-4 h-4"/> Admin PIN</div>
           <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}><X className="w-4 h-4"/></button>
@@ -375,14 +472,113 @@ function PinModal({ onClose, onOk }:{ onClose:()=>void; onOk:()=>void }) {
   );
 }
 
+/* ---------------- Home Page ---------------- */
+
+function HomeDashboard(props:{
+  totalEarned:number; totalSpent:number;
+  starOfDay: {name:string; amount:number} | null;
+  leaderOfMonth: {name:string; amount:number} | null;
+  prizes: PrizeItem[]; stock: Record<string,number>;
+}) {
+  const { totalEarned, totalSpent, starOfDay, leaderOfMonth, prizes, stock } = props;
+
+  // tiny bar graph
+  const max = Math.max(totalEarned, totalSpent, 1);
+  const ePerc = (totalEarned / max) * 100;
+  const sPerc = (totalSpent  / max) * 100;
+
+  return (
+    <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:120, damping:16}}>
+      <div className="grid md:grid-cols-3 gap-4">
+        <BigCard title="Dashboard">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <TileRow label="Total GCSD Earned" value={totalEarned}/>
+            <TileRow label="Total GCSD Spent"  value={totalSpent}/>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Finance Graph</div>
+            <div className="h-32 rounded-xl border p-3 flex items-end gap-3 bg-white dark:bg-slate-800">
+              <Bar label="Earned" percent={ePerc} colorClass="bg-emerald-500"/>
+              <Bar label="Spent"  percent={sPerc} colorClass="bg-rose-500"/>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4 mt-4">
+            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
+            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
+          </div>
+        </BigCard>
+
+        <BigCard title="Prizes (Available)">
+          <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+            {prizes.map(p=>(
+              <div key={p.key} className="flex justify-between items-center bg-white dark:bg-slate-800 border rounded-xl px-3 py-2">
+                <div className="font-medium">{p.label}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-300 flex items-center gap-4">
+                  <span>{p.price.toLocaleString()} GCSD</span>
+                  <span className="badge dark:bg-slate-700">Stock: {stock[p.key] ?? 0}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </BigCard>
+
+        <BigCard title="Tips">
+          <ul className="list-disc pl-5 space-y-2 text-sm text-slate-600 dark:text-slate-300">
+            <li>Open <b>Admin Portal</b> to record sales or do a manual transfer.</li>
+            <li>Use the <b>theme switch</b> (top-right) for dark or light.</li>
+            <li>Agents can redeem up to <b>2 prizes</b> each.</li>
+          </ul>
+        </BigCard>
+      </div>
+    </motion.div>
+  );
+}
+
+function Bar({ label, percent, colorClass }:{ label:string; percent:number; colorClass:string }) {
+  return (
+    <div className="flex-1 grid gap-1 text-xs">
+      <div className={`rounded-md ${colorClass}`} style={{ height: `${Math.max(8, percent)}%` }} />
+      <div className="text-center text-slate-500 dark:text-slate-300">{label}</div>
+    </div>
+  );
+}
+
+function BigCard({ title, children }:{ title:string; children:React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border p-4 bg-white dark:bg-slate-800 shadow-sm">
+      <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">{title}</div>
+      {children}
+    </div>
+  );
+}
+function TileRow({label, value}:{label:string; value:number}){
+  return (
+    <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
+      <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="text-2xl font-semibold">{value.toLocaleString()} GCSD</div>
+    </div>
+  );
+}
+function Highlight({ title, value }:{ title:string; value:string }){
+  return (
+    <div className="rounded-xl border p-3 bg-white dark:bg-slate-800">
+      <div className="text-sm text-slate-500 dark:text-slate-400">{title}</div>
+      <div className="mt-1 font-medium">{value}</div>
+    </div>
+  );
+}
+
+/* ---------------- Agent Portal ---------------- */
+
 function AgentPortal(props:{
-  monthly:{month:string; volume:number}[];
   tab:"overview"|"shop"|"activity"; setTab:(t:any)=>void;
   agentName:string; agentBalance:number; lifetimeEarn:number; lifetimeSpend:number;
   txns:Transaction[]; prizes:PrizeItem[]; stock:Record<string,number>; prizeCount:number;
   onRedeem:(k:string)=>void;
 }) {
-  const { monthly, tab, setTab, agentName, agentBalance, lifetimeEarn, lifetimeSpend, txns, prizes, stock, prizeCount, onRedeem } = props;
+  const { tab, setTab, agentName, agentBalance, lifetimeEarn, lifetimeSpend, txns, prizes, stock, prizeCount, onRedeem } = props;
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:120, damping:16}}>
       <div className="flex items-center justify-between mb-4">
@@ -395,8 +591,10 @@ function AgentPortal(props:{
         </div>
         <div className="flex gap-2">
           {(["overview","shop","activity"] as const).map(k=> (
-            <motion.button key={k} whileHover={{y:-2}} whileTap={{scale:0.98}}
-              className={`px-3 py-1.5 rounded-xl border ${tab===k?"bg-black text-white":"bg-white dark:bg-slate-800"}`}
+            <motion.button key={k}
+              whileHover={{y:-2, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}}
+              whileTap={{scale:0.98}}
+              className={`px-3 py-1.5 rounded-xl border transition-colors ${tab===k?"bg-black text-white":"bg-white dark:bg-slate-800"}`}
               onClick={()=>setTab(k)}>
               {k[0].toUpperCase()+k.slice(1)}
             </motion.button>
@@ -407,19 +605,9 @@ function AgentPortal(props:{
       <AnimatePresence mode="wait">
         {tab==="overview" && (
           <motion.div key="overview" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="grid md:grid-cols-3 gap-4">
-            <Tile icon={<Wallet/>} label="Current Balance" value={`${agentBalance.toLocaleString()} GCSD`} />
-            <Tile icon={<Sparkles/>} label="Lifetime Earned" value={`${lifetimeEarn.toLocaleString()} GCSD`} />
-            <Tile icon={<Gift/>} label="Lifetime Spent" value={`${lifetimeSpend.toLocaleString()} GCSD`} />
-            <div className="md:col-span-3 card dark:bg-slate-800">
-              <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Monthly Volume</div>
-              <div className="flex flex-wrap gap-2">
-                {monthly.map((m,i)=> (
-                  <motion.span key={m.month} initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay:i*0.03}} className="badge dark:bg-slate-700">
-                    {m.month}: {m.volume.toLocaleString()}
-                  </motion.span>
-                ))}
-              </div>
-            </div>
+            <StatCard icon={<Wallet/>} label="Current Balance" value={`${agentBalance.toLocaleString()} GCSD`} />
+            <StatCard icon={<Sparkles/>} label="Lifetime Earned" value={`${lifetimeEarn.toLocaleString()} GCSD`} />
+            <StatCard icon={<Gift/>} label="Lifetime Spent" value={`${lifetimeSpend.toLocaleString()} GCSD`} />
           </motion.div>
         )}
 
@@ -450,7 +638,7 @@ function AgentPortal(props:{
         )}
 
         {tab==="activity" && (
-          <motion.div key="activity" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="card dark:bg-slate-800">
+          <motion.div key="activity" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="rounded-2xl border p-4 bg-white dark:bg-slate-800">
             <div className="flex items-center justify-between mb-2">
               <div className="text-lg font-semibold flex items-center gap-2"><History className="w-4 h-4"/> Activity</div>
               <div className="text-xs text-slate-500 dark:text-slate-400">Newest first</div>
@@ -474,67 +662,74 @@ function AgentPortal(props:{
   );
 }
 
+function StatCard({ icon, label, value }:{icon:React.ReactNode, label:string, value:string}){
+  return (
+    <motion.div initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:120, damping:14}}
+      className="rounded-2xl border p-4 bg-white dark:bg-slate-800 shadow-sm">
+      <div className="flex items-center gap-3">{icon}<div><div className="text-sm text-slate-500 dark:text-slate-400">{label}</div><div className="text-2xl font-semibold">{value}</div></div></div>
+    </motion.div>
+  );
+}
+
+/* ---------------- Admin Portal ---------------- */
+
 function AdminPortal(props:{
   isAdmin:boolean;
   accounts:Account[];
   balances:Map<string,number>;
   stock:Record<string,number>;
-  setStock:React.Dispatch<React.SetStateAction<Record<string,number>>>;
   rules:ProductRule[];
   txns:Transaction[];
   onCredit:(agent:string, rule:string, qty:number)=>void;
-  onMint:(amt:number)=>void;
-  adminTab:"dashboard"|"addsale"|"history";
-  setAdminTab:(t:"dashboard"|"addsale"|"history")=>void;
+  onManualTransfer:(agent:string, amount:number, note:string)=>void;
+  adminTab:"dashboard"|"addsale"|"history"|"transfer";
+  setAdminTab:(t:"dashboard"|"addsale"|"history"|"transfer")=>void;
 }) {
-  const { isAdmin, accounts, balances, stock, rules, txns, onCredit, onMint, adminTab, setAdminTab } = props;
+  const { isAdmin, accounts, balances, stock, rules, txns, onCredit, onManualTransfer, adminTab, setAdminTab } = props;
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:120, damping:16}}>
       <div className="flex items-center justify-between mb-4">
         <div className="font-semibold flex items-center gap-2"><Lock className="w-4 h-4"/> Admin</div>
         <div className="flex gap-2">
-          {(["dashboard","addsale","history"] as const).map(k=> (
-            <button key={k} className={`px-3 py-1.5 rounded-xl border ${adminTab===k?"bg-black text-white":"bg-white dark:bg-slate-800"}`}
-              onClick={()=>setAdminTab(k)}>{k[0].toUpperCase()+k.slice(1)}</button>
+          {(["dashboard","addsale","transfer","history"] as const).map(k=> (
+            <motion.button key={k} whileHover={{y:-2, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
+              className={`px-3 py-1.5 rounded-xl border ${adminTab===k?"bg-black text-white":"bg-white dark:bg-slate-800"}`}
+              onClick={()=>setAdminTab(k)}>{k[0].toUpperCase()+k.slice(1)}</motion.button>
           ))}
         </div>
       </div>
 
       {!isAdmin ? (
-        <div className="card dark:bg-slate-800">Enter PIN from the portal screen to unlock.</div>
+        <div className="rounded-2xl border p-4 bg-white dark:bg-slate-800">Enter PIN from the portal screen to unlock.</div>
       ) : (
         <>
           {adminTab==="dashboard" && (
             <motion.div key="dashboard" initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}} className="grid md:grid-cols-3 gap-4">
-              <div className="card dark:bg-slate-800">
-                <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">All Balances</div>
-                <ul className="space-y-1 max-h-72 overflow-auto pr-1">
+              <div className="rounded-2xl border p-5 bg-white dark:bg-slate-800 shadow-sm md:col-span-2">
+                <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">All Balances</div>
+                <ul className="space-y-2 max-h-[520px] overflow-auto pr-2">
                   {accounts.filter(a=>a.role!=="system").sort((a,b)=>(balances.get(b.id)||0)-(balances.get(a.id)||0)).map(a=>(
-                    <li key={a.id} className="flex justify-between">
-                      <span>{a.name}</span><span className="font-medium">{(balances.get(a.id)||0).toLocaleString()} GCSD</span>
+                    <li key={a.id} className="flex justify-between text-lg bg-slate-50 dark:bg-slate-700/40 rounded-xl px-3 py-2">
+                      <span>{a.name}</span><span className="font-semibold">{(balances.get(a.id)||0).toLocaleString()} GCSD</span>
                     </li>
                   ))}
                 </ul>
               </div>
-              <div className="card dark:bg-slate-800">
-                <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">Prize Stock</div>
-                <ul className="space-y-1 max-h-72 overflow-auto pr-1">
+              <div className="rounded-2xl border p-5 bg-white dark:bg-slate-800 shadow-sm">
+                <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Prize Stock</div>
+                <ul className="space-y-2 max-h-[520px] overflow-auto pr-2">
                   {PRIZE_ITEMS.map(p=>(
-                    <li key={p.key} className="flex justify-between">
-                      <span>{p.label}</span><span className="font-medium">{stock[p.key] ?? 0}</span>
+                    <li key={p.key} className="flex justify-between text-lg bg-slate-50 dark:bg-slate-700/40 rounded-xl px-3 py-2">
+                      <span>{p.label}</span><span className="font-semibold">{stock[p.key] ?? 0}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
-              <div className="card dark:bg-slate-800">
-                <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Mint (optional)</div>
-                <MintPanel onMint={onMint}/>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">Adds GCSD to the Vault; does not credit an agent.</div>
               </div>
             </motion.div>
           )}
 
           {adminTab==="addsale" && <AddSale rules={rules} accounts={accounts} onCredit={onCredit} />}
+          {adminTab==="transfer" && <ManualTransfer accounts={accounts} onTransfer={onManualTransfer} />}
           {adminTab==="history" && <AdminHistory txns={txns} accounts={accounts} />}
         </>
       )}
@@ -560,7 +755,9 @@ function AddSale({ rules, accounts, onCredit }:{
     <>
       <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
         {rules.map((r,i)=>(
-          <motion.button key={r.key} initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{delay:i*0.03}}
+          <motion.button key={r.key}
+            initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{delay:i*0.03}}
+            whileHover={{y:-2, boxShadow:"0 10px 22px rgba(0,0,0,.12)"}}
             className="border rounded-2xl p-4 bg-white dark:bg-slate-800 text-left hover:bg-slate-50 dark:hover:bg-slate-700"
             onClick={()=>open(r)}>
             <div className="font-semibold">{r.label}</div>
@@ -604,11 +801,49 @@ function AddSale({ rules, accounts, onCredit }:{
   );
 }
 
+function ManualTransfer({ accounts, onTransfer }:{
+  accounts:Account[];
+  onTransfer:(agent:string, amount:number, note:string)=>void
+}) {
+  const [agent, setAgent] = useState("");
+  const [amount, setAmount] = useState<number>(100);
+  const [note, setNote] = useState<string>("Manual transfer");
+  return (
+    <div className="rounded-2xl border p-5 bg-white dark:bg-slate-800 shadow-sm max-w-xl">
+      <div className="text-sm text-slate-500 dark:text-slate-400 mb-3">Admin has infinite balance; use this to add credits manually.</div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Agent</div>
+          <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={agent} onChange={e=>setAgent(e.target.value)}>
+            <option value="">Choose agent</option>
+            {accounts.filter(a=>a.role!=="system").map(a=>(
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Amount</div>
+          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" type="number" min={1} value={amount} onChange={e=>setAmount(Math.max(1, Number(e.target.value)||1))}/>
+        </div>
+      </div>
+      <div className="mt-3">
+        <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Note</div>
+        <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={note} onChange={e=>setNote(e.target.value)}/>
+      </div>
+      <motion.button whileHover={{y:-1, boxShadow:"0 8px 18px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
+        className="mt-4 px-4 py-2 rounded-xl border bg-black text-white"
+        onClick={()=> onTransfer(agent, amount, note)}>
+        Transfer
+      </motion.button>
+    </div>
+  );
+}
+
 function AdminHistory({ txns, accounts }:{ txns:Transaction[]; accounts:Account[] }) {
   const credits = txns.filter(t=> t.kind==="credit" && t.toId && t.memo && t.memo !== "Mint");
   const byId = new Map(accounts.map(a=>[a.id, a.name]));
   return (
-    <div className="card dark:bg-slate-800">
+    <div className="rounded-2xl border p-4 bg-white dark:bg-slate-800 shadow-sm">
       <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Sales History</div>
       <div className="space-y-2 max-h-[65vh] overflow-auto pr-2">
         {credits.map((t,i)=>(
@@ -624,93 +859,5 @@ function AdminHistory({ txns, accounts }:{ txns:Transaction[]; accounts:Account[
         {credits.length===0 && <div className="text-sm text-slate-500 dark:text-slate-400">No sales yet.</div>}
       </div>
     </div>
-  );
-}
-
-function Tile({ icon, label, value }:{icon:React.ReactNode, label:string, value:string}){
-  return (
-    <motion.div initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:120, damping:14}} className="card dark:bg-slate-800">
-      <div className="flex items-center gap-3">{icon}<div><div className="text-sm text-slate-500 dark:text-slate-400">{label}</div><div className="text-2xl font-semibold">{value}</div></div></div>
-    </motion.div>
-  );
-}
-
-function MintPanel({ onMint }:{onMint:(amt:number)=>void}){
-  const [amt, setAmt] = useState<number>(1000);
-  return (
-    <div className="inline-flex gap-2">
-      <input className="border rounded-xl px-3 py-1.5 w-28 bg-white dark:bg-slate-800" type="number" value={amt} onChange={e=>setAmt(Number(e.target.value))} />
-      <motion.button whileHover={{scale:1.03}} whileTap={{scale:0.97}} className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800" onClick={()=> onMint(amt)}>
-        <Plus className="w-4 h-4 mr-1 inline"/> Mint
-      </motion.button>
-    </div>
-  );
-}
-
-function ImportExport({ accounts, txns, setAll }:{
-  accounts:Account[]; txns:Transaction[]; setAll:(a:Account[],t:Transaction[])=>void
-}) {
-  function exportJSON() {
-    const blob = new Blob([JSON.stringify({ accounts, txns }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = `gcs-bank-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
-  }
-  function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const obj:any = JSON.parse(String(reader.result));
-        if (obj.accounts && obj.txns) setAll(obj.accounts, obj.txns);
-        else toast.error("Invalid file");
-      } catch { toast.error("Failed to import"); }
-    };
-    reader.readAsText(file);
-  }
-  return (
-    <div className="flex gap-2">
-      <motion.button whileHover={{scale:1.03}} whileTap={{scale:0.97}} className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800" onClick={exportJSON}>
-        <Download className="w-4 h-4 mr-1 inline"/> Export
-      </motion.button>
-      <label className="px-3 py-1.5 rounded-xl border bg-white dark:bg-slate-800 cursor-pointer">
-        <Upload className="w-4 h-4 mr-1 inline"/> Import
-        <input type="file" accept="application/json" className="hidden" onChange={onImportFile} />
-      </label>
-    </div>
-  );
-}
-
-function HomeDashboard({ accounts, balances, monthly }:{
-  accounts:Account[]; balances:Map<string,number>; monthly:{month:string; volume:number}[];
-}) {
-  return (
-    <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:120, damping:16}}>
-      <div className="grid md:grid-cols-3 gap-4">
-        <Tile icon={<Wallet/>} label="Total Circulating" value={`${Array.from(balances.values()).reduce((a,b)=>a+b,0).toLocaleString()} GCSD`} />
-        <div className="card dark:bg-slate-800">
-          <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">Top Balances</div>
-          <ul className="space-y-1 max-h-56 overflow-auto pr-1">
-            {[...accounts.filter(a=>a.role!=="system")]
-              .sort((a,b)=>(balances.get(b.id)||0)-(balances.get(a.id)||0))
-              .slice(0,10)
-              .map(a=> (
-                <li key={a.id} className="flex justify-between">
-                  <span>{a.name}</span><span className="font-medium">{(balances.get(a.id)||0).toLocaleString()} GCSD</span>
-                </li>
-              ))}
-          </ul>
-        </div>
-        <div className="card dark:bg-slate-800">
-          <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Monthly Volume</div>
-          <div className="flex flex-wrap gap-2">
-            {monthly.map((m,i)=> (
-              <motion.span key={m.month} initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay:i*0.03}} className="badge dark:bg-slate-700">
-                {m.month}: {m.volume.toLocaleString()}
-              </motion.span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </motion.div>
   );
 }
