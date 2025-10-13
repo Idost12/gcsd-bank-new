@@ -107,61 +107,17 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   return Array.from(map.values());
 }
 
-/* Transaction classifiers */
-const isCorrectionDebit = (t: Transaction) =>
-  t.kind === "debit" && !!t.memo && (
-    t.memo.startsWith("Reversal of sale") ||
-    t.memo.startsWith("Correction (withdraw)") ||
-    t.memo.startsWith("Balance reset to 0")
-  );
-
-function isRedeem(t: Transaction) {
-  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
+// Debounce to avoid writing on every keystroke
+function debounce<T extends (...args:any[])=>any>(fn:T, ms:number) {
+  let t:any; return (...args:any[]) => { clearTimeout(t); t=setTimeout(()=>fn(...args), ms) }
 }
-function isReversalOfRedemption(t: Transaction) {
-  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
-}
+const kvSaveDebounced = debounce(kvSet, 350);
 
-/* ===== Epoch helpers (hide history prior to reset) ===== */
-function afterEpoch(
-  epochs: Record<string, string>,
-  agentId: string | undefined,
-  dateISO: string
-) {
-  if (!agentId) return true;
-  const e = epochs[agentId];
-  if (!e) return true;
-  return new Date(dateISO).getTime() >= new Date(e).getTime();
-}
+const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
+const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
-/* Treat undo-redeem credits as non-earnings */
-function isReversalOfRedemption(t: Transaction) {
-  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
-}
-
-function isRedeem(t: Transaction) {
-  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
-}
-
-/* For purchases list, exclude redeems that have a later matching reversal */
-function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
-  if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
-  const after = new Date(redeemTxn.dateISO).getTime();
-
-  // If we find a later reversal for the same agent & label, this redeem is not active
-  return !all.some(
-    (t) =>
-      isReversalOfRedemption(t) &&
-      t.toId === redeemTxn.fromId &&
-      (t.memo || "") === `Reversal of redemption: ${label}` &&
-      new Date(t.dateISO).getTime() >= after
-  );
-}
-
-
-/* ========== Seed data ========== */
-
+/* ---------- seed ---------- */
 const seedAccounts: Account[] = [
   { id: uid(), name: "Bank Vault", role: "system" },
   ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
@@ -211,7 +167,7 @@ function bucketByDay(txns: Transaction[], nonSystem: Set<string>, epochs: Record
   const by: Record<string, Set<string>> = {};
   for (const t of txns) {
     if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
-    if (t.kind === "credit" && t.toId && nonSystem.has(t.toId) && t.memo !== "Mint" && !isReversalOfRedemption(t)) {
+  if (t.kind === "credit" && t.toId && nonSystem.has(t.toId) && t.memo !== "Mint" && !isRevRedeem(t)) {
       const d = new Date(t.dateISO); d.setHours(0, 0, 0, 0);
       const day = d.toISOString();
       by[t.toId] = by[t.toId] || new Set<string>();
@@ -238,6 +194,27 @@ function computeStreaks(by: Record<string, Set<string>>) {
 /* ========== Shared helpers (only one copy!) ========== */
 function classNames(...x: (string | false | undefined)[]) {
   return x.filter(Boolean).join(" ");
+}
+/* ---- canonical helpers: names are unique to avoid re-declare ---- */
+function isRevRedeem(t: Transaction) {
+  // credit posted to undo a previous redemption
+  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
+}
+function isRedeemTxn(t: Transaction) {
+  // a redemption purchase
+  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
+}
+/* For purchases list, exclude redeems that have a later matching reversal */
+function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
+  if (!isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
+  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
+  const after = new Date(redeemTxn.dateISO).getTime();
+  return !all.some(t =>
+    isRevRedeem(t) &&
+    t.toId === redeemTxn.fromId &&
+    (t.memo || "") === `Reversal of redemption: ${label}` &&
+    new Date(t.dateISO).getTime() >= after
+  );
 }
 const neonBox = (theme: Theme) =>
   theme === "neon" ? "bg-[#14110B] border border-orange-800 text-orange-50"
@@ -360,40 +337,20 @@ export default function GCSDApp() {
   const balances = useMemo(() => computeBalances(accounts, txns, epochs), [accounts, txns, epochs]);
   const nonSystemIds = new Set(accounts.filter(a => a.role !== "system").map(a => a.id));
 
-  const agent = accounts.find(a => a.id === currentAgentId);
-  const agentTxns = txns.filter(t =>
-    afterEpoch(epochs, t.fromId, t.dateISO) &&
-    afterEpoch(epochs, t.toId, t.dateISO) &&
-    (t.fromId === currentAgentId || t.toId === currentAgentId)
-  );
-
-  const agentBalance = balances.get(currentAgentId) || 0;
-
-  const lifetimeEarn = agentTxns
-    .filter(t => t.kind === "credit" && t.toId === currentAgentId && t.memo !== "Mint" && !isReversalOfRedemption(t))
-    .reduce((a, b) => a + b.amount, 0)
-    - agentTxns.filter(t => isCorrectionDebit(t) && t.fromId === currentAgentId).reduce((a, b) => a + b.amount, 0);
-
-  const lifetimeSpend = agentTxns
-    .filter(t => t.kind === "debit" && t.fromId === currentAgentId && !isCorrectionDebit(t))
-    .reduce((a, b) => a + b.amount, 0);
-
-  const prizeCount = agentTxns.filter(t => isRedeem(t)).length;
+  const agent = accounts.find(a=>a.id===currentAgentId);
+  const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
+  const agentBalance = balances.get(currentAgentId)||0;
+  const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const prizeCount = agentTxns.filter(t=> t.kind==="debit" && (t.memo||"").startsWith("Redeem:")).length;
 
   /* Leaderboard */
   const dayBuckets = bucketByDay(txns, nonSystemIds, epochs);
   const streaks = computeStreaks(dayBuckets);
   const leaderboard = Array.from(nonSystemIds).map(id => {
-    const earnedCredits = txns.filter(t =>
-      t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !isReversalOfRedemption(t) &&
-      afterEpoch(epochs, t.toId, t.dateISO)
-    ).reduce((a, b) => a + b.amount, 0);
-    const withdrawn = txns.filter(t =>
-      isCorrectionDebit(t) && t.fromId === id && afterEpoch(epochs, t.fromId, t.dateISO)
-    ).reduce((a, b) => a + b.amount, 0);
-    const earned = earnedCredits - withdrawn;
-    return { id, name: accounts.find(a => a.id === id)?.name || "—", earned, streak: streaks[id] || 0 };
-  }).sort((a, b) => b.earned - a.earned);
+    const earned = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+    return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
+  }).sort((a,b)=> b.earned - a.earned);
 
   /* Star of the day / leader of month */
   const todayKey = new Date().toLocaleDateString();
@@ -402,8 +359,7 @@ export default function GCSDApp() {
   const earnedMonth: Record<string, number> = {};
 
   for (const t of txns) {
-    if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
-    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+    if (t.kind!=="credit" || !t.toId || t.memo==="Mint" || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
     if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     if (monthKey(d) === curMonth)         earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
@@ -466,7 +422,7 @@ export default function GCSDApp() {
     const prize = PRIZE_ITEMS.find(p => p.key === prizeKey); if (!prize) return;
     const left = stock[prizeKey] ?? 0;
     const bal = balances.get(agentId) || 0;
-    const count = txns.filter(t => isRedeem(t) && t.fromId === agentId).length;
+  const count = txns.filter(t => isRedeemTxn(t) && t.fromId === agentId).length;
     if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
     if (bal < prize.price) return toast.error("Insufficient balance");
@@ -1191,8 +1147,8 @@ function Home({
 
   // Purchased prizes (active only)
   const purchases = txns
-    .filter((t) => isRedeem(t) && !!t.fromId && nonSystemIds.has(t.fromId) && isRedeemStillActive(t, txns))
-    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
+    .filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId) && (t.memo||"").startsWith("Redeem:"))
+    .map(t=> ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
   // 30-day finance (earned minus withdrawals/corrections)
   const days = Array.from({ length: 30 }, (_, i) => {
@@ -1207,9 +1163,9 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo !== "Mint" && !isReversalOfRedemption(t)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo !== "Mint" && !isRevRedeem(t)
     );
-    const withdrawals = sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && (t.memo?.startsWith("Reversal of sale") || t.memo?.startsWith("Correction (withdraw)") || t.memo?.startsWith("Balance reset to 0")));
+  const withdrawals = sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && ((t.memo?.startsWith("Reversal of sale") ?? false) || (t.memo?.startsWith("Correction (withdraw)") ?? false) || (t.memo?.startsWith("Balance reset to 0") ?? false)));
     return Math.max(0, credits - withdrawals);
   });
 
