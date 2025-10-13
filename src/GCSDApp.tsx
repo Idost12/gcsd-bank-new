@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
-  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
+  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown, BellRing
 } from "lucide-react";
-import { kvGet, kvSet, onKVChange } from "./lib/db";
+import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 
 /* ===========================
    G C S  B A N K
@@ -15,7 +15,7 @@ const APP_NAME = "GCS Bank";
 const LOGO_URL = "/logo.png"; // put high-res in /public/logo.png
 
 type Theme  = "light" | "dark" | "neon";
-type Portal = "home" | "agent" | "admin" | "sandbox";
+type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
 
 type TxnKind = "credit" | "debit";
 type Transaction = {
@@ -55,7 +55,7 @@ const PRODUCT_RULES: ProductRule[] = [
 
 const PRIZE_ITEMS: PrizeItem[] = [
   { key: "airfryer",        label: "Philips Airfryer",        price: 1600 },
-  { key: "soundbar",        label: "LG Soundbar",             price: 11000 },
+  { key: "soundbar",        label: "LG Soundbar",             price: 2400 },
   { key: "burger_lunch",    label: "Burger Lunch",            price: 180  },
   { key: "voucher_50",      label: "Cash Voucher (50 лв)",    price: 600  },
   { key: "poker",           label: "Texas Poker Set",         price: 900  },
@@ -99,7 +99,7 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   return Array.from(map.values());
 }
 const isCorrectionDebit = (t: Transaction) =>
-  t.kind === "debit" && !!t.memo && (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)"));
+  t.kind === "debit" && !!t.memo && (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)") || t.memo.startsWith("Balance reset to 0"));
 
 /* ---------- seed ---------- */
 const seedAccounts: Account[] = [
@@ -110,6 +110,30 @@ const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
+
+/* ---------- Small animated number ---------- */
+function NumberFlash({ value }:{ value:number }) {
+  const prev = useRef(value);
+  const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
+
+  useEffect(()=>{
+    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 500); }
+    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 500); }
+    prev.current = value;
+  }, [value]);
+
+  return (
+    <motion.span
+      key={value}
+      initial={{ y: 4, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: .15 }}
+      className={pulse==="up" ? "text-emerald-500" : pulse==="down" ? "text-rose-500" : undefined}
+    >
+      {value.toLocaleString()} GCSD
+    </motion.span>
+  );
+}
 
 /* =================================
    App
@@ -138,6 +162,7 @@ export default function GCSDApp() {
   const [sandboxActive, setSandboxActive] = useState(false);
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
+  const [unread, setUnread] = useState(0);
 
   // theme side effect
   useEffect(() => {
@@ -215,15 +240,20 @@ export default function GCSDApp() {
   const agent = accounts.find(a=>a.id===currentAgentId);
   const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
   const agentBalance = balances.get(currentAgentId)||0;
-  const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
-  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const lifetimeEarn = agentTxns
+    .filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint")
+    .reduce((a,b)=>a+b.amount,0)
+    - agentTxns.filter(t=> isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId && !isCorrectionDebit(t)).reduce((a,b)=>a+b.amount,0);
   const prizeCount = agentTxns.filter(t=> t.kind==="debit" && (t.memo||"").startsWith("Redeem:")).length;
 
   // leaderboard + streaks
   const dayBuckets = bucketByDay(txns, nonSystemIds);
   const streaks = computeStreaks(dayBuckets);
   const leaderboard = Array.from(nonSystemIds).map(id => {
-    const earned = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+    const credited = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+    const withdrawn = txns.filter(t=> isCorrectionDebit(t) && t.fromId===id).reduce((a,b)=>a+b.amount,0);
+    const earned = credited - withdrawn;
     return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
   }).sort((a,b)=> b.earned - a.earned);
 
@@ -245,7 +275,10 @@ export default function GCSDApp() {
   /* helpers */
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
     setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev ]);
-  const notify = (text:string) => setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
+  const notify = (text:string) => {
+    setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
+    setUnread(c => c + 1);
+  };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
@@ -257,7 +290,8 @@ export default function GCSDApp() {
     const amount = rule.gcsd * Math.max(1, qty||1);
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
-    const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount;
+    const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount
+      - txns.filter(t=> isCorrectionDebit(t) && t.fromId===agentId).reduce((a,b)=>a+b.amount,0);
     if (newLifetime % 1000 === 0) confettiBurst();
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
   }
@@ -266,7 +300,8 @@ export default function GCSDApp() {
     if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
     postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
-    const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount;
+    const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount
+      - txns.filter(t=> isCorrectionDebit(t) && t.fromId===agentId).reduce((a,b)=>a+b.amount,0);
     if (newLifetime % 1000 === 0) confettiBurst();
     toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
   }
@@ -317,10 +352,15 @@ export default function GCSDApp() {
   }
   function addAgent(name:string){
     if (!isAdmin) return toast.error("Admin only");
-    const a: Account = { id: uid(), name, role: "agent" };
+    const trimmed = name.trim();
+    if (!trimmed) return toast.error("Enter a name");
+    if (accounts.some(a => a.role==="agent" && a.name.toLowerCase()===trimmed.toLowerCase())) {
+      return toast.error("Agent already exists");
+    }
+    const a: Account = { id: uid(), name: trimmed, role: "agent" };
     setAccounts(prev=> [...prev, a]);
-    notify(`👤 New agent added: ${name}`);
-    toast.success(`Added agent ${name}`);
+    notify(`👤 New agent added: ${trimmed}`);
+    toast.success(`Added agent ${trimmed}`);
   }
   function setAgentPin(agentId:string, pin:string){
     if (!isAdmin) return toast.error("Admin only");
@@ -328,6 +368,12 @@ export default function GCSDApp() {
     setPins(prev=> ({...prev, [agentId]: pin}));
     notify(`🔐 PIN set/reset for ${getName(agentId)}`);
     toast.success("PIN updated");
+  }
+  function resetPin(agentId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    setPins(prev=> { const next = {...prev}; delete next[agentId]; return next; });
+    notify(`🔐 PIN cleared for ${getName(agentId)}`);
+    toast.success("PIN reset (cleared)");
   }
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
@@ -337,6 +383,19 @@ export default function GCSDApp() {
       notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
       toast.success("Goal updated");
     });
+  }
+  function resetAgentBalance(agentId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const bal = balances.get(agentId)||0;
+    if (bal === 0) return toast.info("Balance already zero");
+    if (bal > 0) {
+      postTxn({ kind:"debit", amount: bal, fromId: agentId, memo:`Balance reset to 0` });
+      notify(`🧮 Reset balance of ${getName(agentId)} by −${bal} GCSD`);
+    } else {
+      postTxn({ kind:"credit", amount: -bal, toId: agentId, memo:`Balance reset to 0` });
+      notify(`🧮 Reset balance of ${getName(agentId)} by +${-bal} GCSD`);
+    }
+    toast.success("Balance reset");
   }
 
   /* Sandbox (require PIN first, then stay until exit) */
@@ -371,8 +430,8 @@ export default function GCSDApp() {
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
             className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
             <motion.div initial={{scale:0.96}} animate={{scale:1}} className="text-center p-8">
-              <div className="mx-auto mb-6 w-40 h-40 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
-                <img src={LOGO_URL} alt="GCS Bank logo" className="w-32 h-32 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]"/>
+              <div className="mx-auto mb-6 w-48 h-48 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
+                <img src={LOGO_URL} alt="GCS Bank logo" className="w-40 h-40 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]"/>
               </div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <div className="text-white/70 mt-2 mb-6">Press Enter to continue</div>
@@ -396,7 +455,7 @@ export default function GCSDApp() {
       >
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={LOGO_URL} alt="GCS Bank logo" className="h-12 w-12 rounded drop-shadow-sm" />
+            <img src={LOGO_URL} alt="GCS Bank logo" className="h-14 w-14 rounded drop-shadow-sm" />
             <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
@@ -414,7 +473,7 @@ export default function GCSDApp() {
             </button>
           </div>
           <div className="flex items-center gap-3">
-            <NotificationsBell notifs={notifs} theme={theme}/>
+            <NotificationsBell notifs={notifs} theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
             <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
             <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
@@ -539,11 +598,16 @@ export default function GCSDApp() {
             onWithdraw={withdrawAgentCredit}
             onAddAgent={addAgent}
             onSetPin={setAgentPin}
+            onResetPin={(id)=>resetPin(id)}
+            onResetBalance={(id)=>resetAgentBalance(id)}
+            pins={pins}
             adminTab={adminTab} setAdminTab={setAdminTab}
           />
         )}
 
         {portal==="sandbox" && <SandboxPage onExit={exitSandbox} theme={theme}/>}
+
+        {portal==="feed" && <FeedPage theme={theme} notifs={notifs} />}
       </div>
     </div>
   );
@@ -641,43 +705,25 @@ function ThemeToggle({theme, setTheme}:{theme:Theme; setTheme:(t:Theme)=>void}) 
   );
 }
 
-function NotificationsBell({ notifs, theme }:{ notifs: Notification[]; theme:Theme }) {
-  const [open, setOpen] = useState(false);
+function NotificationsBell({ notifs, theme, unread, onOpenFeed }:{
+  notifs: Notification[]; theme:Theme; unread:number; onOpenFeed:()=>void;
+}) {
   return (
-    <>
-      <button
-        className={
-          theme==="neon"
-            ? "h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60"
-            : "h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
-        }
-        onClick={()=> setOpen(true)}
-        title="Notifications"
-      >
-        <Bell className="w-4 h-4" />
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-40 bg-black/30" onClick={()=>setOpen(false)}>
-            <motion.div initial={{y:24, opacity:0}} animate={{y:0, opacity:1}} exit={{y:24, opacity:0}}
-              transition={{type:"spring", stiffness:160, damping:18}}
-              className={classNames("absolute right-4 top-16 w-[min(520px,92vw)] rounded-2xl p-4", neonBox(theme))}
-              onClick={e=>e.stopPropagation()}>
-              <div className="text-sm font-semibold mb-3 flex items-center gap-2"><Bell className="w-4 h-4"/> Notifications</div>
-              <div className="space-y-2 max-h-[60vh] overflow-auto pr-2">
-                {notifs.length===0 && <div className="text-sm opacity-70">No notifications yet.</div>}
-                {notifs.map(n=>(
-                  <div key={n.id} className="text-sm border rounded-xl px-3 py-2">
-                    <div>{n.text}</div>
-                    <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+    <button
+      className={ theme==="neon"
+        ? "relative h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60"
+        : "relative h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
+      }
+      onClick={onOpenFeed}
+      title="Notifications"
+    >
+      {unread>0 && (
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] text-[11px] rounded-full grid place-items-center bg-rose-600 text-white px-1">
+          {Math.min(99, unread)}
+        </span>
+      )}
+      <Bell className="w-4 h-4" />
+    </button>
   );
 }
 
@@ -722,14 +768,13 @@ function HoverCard({ children, onClick, delay=0.03, theme }:{
       initial={{opacity:0, y:6}} animate={{opacity:1, y:0}} transition={{delay}}
       whileHover={{y:-3, boxShadow:"0 10px 22px rgba(0,0,0,.10)"}} whileTap={{scale:0.98}}
       onClick={onClick}
-      className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}
-    >
+      className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}>
       {children}
     </motion.button>
   );
 }
 
-/* Reusable pretty select (looks good in Neon/Light/Dark) */
+/* Reusable pretty select (neon fix) */
 function FancySelect({
   value, onChange, children, theme, placeholder
 }:{
@@ -745,7 +790,7 @@ function FancySelect({
         onChange={(e)=>onChange(e.target.value)}
         className={classNames(
           "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none",
-          theme==="neon" ? "bg-transparent text-orange-50" : "bg-transparent"
+          theme==="neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent"
         )}
       >
         {placeholder && <option value="">{placeholder}</option>}
@@ -802,11 +847,17 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
     .filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId) && (t.memo||"").startsWith("Redeem:"))
     .map(t=> ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
-  // 30-day finance series
+  // 30-day finance series (earned minus withdrawals)
   const days = Array.from({length:30}, (_,i)=> { const d=new Date(); d.setDate(d.getDate()-(29-i)); d.setHours(0,0,0,0); return d; });
-  const earnedSeries: number[] = days.map(d=> sumInRange(txns, d, 1, t =>
-    t.kind==="credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo!=="Mint"
-  ));
+  const earnedSeries: number[] = days.map(d=>{
+    const credits = sumInRange(txns, d, 1, t =>
+      t.kind==="credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo!=="Mint"
+    );
+    const withdrawals = sumInRange(txns, d, 1, t =>
+      isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId as string)
+    );
+    return credits - withdrawals;
+  });
   const spentSeries: number[]  = days.map(d=> sumInRange(txns, d, 1, t =>
     t.kind==="debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && !isCorrectionDebit(t)
   ));
@@ -854,14 +905,14 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
           <div className="text-sm opacity-70 mb-2">Leaderboard</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {leaderboard.map((row,i)=>(
-              <div key={row.id} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+              <motion.div key={row.id} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 text-right">{i+1}.</span>
                   <span className="font-medium">{row.name}</span>
                   {row.streak>=2 && <span title={`${row.streak} day streak`} className="inline-flex items-center gap-1 text-orange-400 text-xs"><Flame className="w-4 h-4"/> {row.streak}</span>}
                 </div>
-                <div className="text-sm">{row.earned.toLocaleString()} GCSD</div>
-              </div>
+                <div className="text-sm"><NumberFlash value={row.earned}/></div>
+              </motion.div>
             ))}
             {leaderboard.length===0 && <div className="text-sm opacity-70">No data yet.</div>}
           </div>
@@ -871,7 +922,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {prizes.map(p=>(
-              <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+              <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
@@ -885,7 +936,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
                     Stock: {stock[p.key] ?? 0}
                   </span>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -903,7 +954,7 @@ function TileRow({ label, value }:{ label:string; value:number }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">{value.toLocaleString()} GCSD</div>
+      <div className="text-2xl font-semibold"><NumberFlash value={value}/></div>
     </div>
   );
 }
@@ -985,12 +1036,12 @@ function AgentPortal({
             <div className="text-sm opacity-70 mb-2">Recent activity</div>
             <div className="space-y-2 max-h-56 overflow-auto pr-2">
               {txns.slice(0,40).map(t=>(
-                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div className="text-sm">{t.memo || (t.kind==="credit" ? "Credit" : "Debit")}</div>
                   <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
                     {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
                   </div>
-                </div>
+                </motion.div>
               ))}
               {txns.length===0 && <div className="text-sm opacity-70">No activity yet.</div>}
             </div>
@@ -1008,7 +1059,7 @@ function AgentPortal({
               const left = stock[p.key] ?? 0;
               const can = left>0 && agentBalance>=p.price && prizeCount<MAX_PRIZES_PER_AGENT;
               return (
-                <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                   <div>
                     <div className="font-medium">{p.label}</div>
                     <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
@@ -1020,7 +1071,7 @@ function AgentPortal({
                   >
                     <Gift className="w-4 h-4 inline mr-1"/> Redeem
                   </button>
-                </div>
+                </motion.div>
               );
             })}
           </div>
@@ -1034,6 +1085,7 @@ function AgentPortal({
 function AdminPortal({
   theme, isAdmin, accounts, balances, stock, rules, txns,
   onCredit, onManualTransfer, onUndoSale, onUndoRedemption, onWithdraw, onAddAgent, onSetPin,
+  onResetPin, onResetBalance, pins,
   adminTab, setAdminTab
 }:{
   theme:Theme; isAdmin:boolean; accounts:Account[]; balances:Map<string,number>;
@@ -1042,6 +1094,7 @@ function AdminPortal({
   onManualTransfer:(agentId:string, amount:number, note:string)=>void;
   onUndoSale:(txId:string)=>void; onUndoRedemption:(txId:string)=>void; onWithdraw:(agentId:string, txId:string)=>void;
   onAddAgent:(name:string)=>void; onSetPin:(agentId:string, pin:string)=>void;
+  onResetPin:(agentId:string)=>void; onResetBalance:(agentId:string)=>void; pins:Record<string,string>;
   adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users";
   setAdminTab:(t:any)=>void;
 }) {
@@ -1080,8 +1133,7 @@ function AdminPortal({
           <button key={k}
             onClick={()=> setAdminTab(k as any)}
             className={classNames("px-3 py-1.5 rounded-xl text-sm",
-              adminTab===k ? neonBtn(theme,true) : neonBtn(theme))}
-          >
+              adminTab===k ? neonBtn(theme,true) : neonBtn(theme))}>
             {lab}
           </button>
         ))}
@@ -1094,10 +1146,10 @@ function AdminPortal({
             <div className="text-sm opacity-70 mb-2">Balances</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {accounts.filter(a=>a.role!=="system").map(a=>(
-                <div key={a.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <motion.div key={a.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div className="font-medium">{a.name}</div>
                   <div className="text-sm">{(balances.get(a.id)||0).toLocaleString()} GCSD</div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
@@ -1105,10 +1157,10 @@ function AdminPortal({
             <div className="text-sm opacity-70 mb-2">Prize Stock</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {PRIZE_ITEMS.map(p=>(
-                <div key={p.key} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div>{p.label}</div>
                   <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
@@ -1123,7 +1175,7 @@ function AdminPortal({
         </div>
       )}
 
-      {/* add sale (prettier + visible in neon) */}
+      {/* add sale */}
       {adminTab==="addsale" && (
         <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -1141,7 +1193,7 @@ function AdminPortal({
             </div>
             <div>
               <div className="text-xs opacity-70 mb-1">Qty</div>
-              <input className={inputCls(theme)} value={qty} onChange={(e)=> setQty(Math.max(1,parseInt(e.target.value||"1",10)))} />
+              <input className={inputCls(theme)} value={qty} onChange={(e)=> setQty(Math.max(1,parseInt((e.target.value||"1").replace(/[^\d]/g,""),10)))} />
             </div>
             <div className="sm:col-span-3 flex justify-end">
               <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> onCredit(agentId, ruleKey, qty)}>
@@ -1178,7 +1230,7 @@ function AdminPortal({
         </div>
       )}
 
-      {/* corrections (withdraw by agent & txn) */}
+      {/* corrections */}
       {adminTab==="corrections" && (
         <div className={classNames("rounded-2xl border p-4 grid gap-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-2 gap-3">
@@ -1196,7 +1248,7 @@ function AdminPortal({
               <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
                 {creditsForAgent.length===0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
                 {creditsForAgent.map(t=>(
-                  <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                     <div className="text-sm">
                       <div className="font-medium">{t.memo || "Credit"}</div>
                       <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
@@ -1208,7 +1260,7 @@ function AdminPortal({
                         Withdraw
                       </button>
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </div>
@@ -1218,7 +1270,7 @@ function AdminPortal({
             <div className="text-sm opacity-70 mb-2">Quick reversals</div>
             <div className="space-y-2 max-h-[320px] overflow-auto pr-2">
               {txns.filter(t=>t.memo && t.memo!=="Mint").map(t=>(
-                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div className="text-sm">
                     <div className="font-medium">{t.memo}</div>
                     <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
@@ -1239,7 +1291,7 @@ function AdminPortal({
                       </button>
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
@@ -1252,16 +1304,19 @@ function AdminPortal({
           <div className="text-sm opacity-70 mb-2">All activity</div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
             {txns.map(t=>(
-              <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+              <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                 <div className="text-sm">
                   <div className="font-medium">{t.memo || (t.kind==="credit"?"Credit":"Debit")}</div>
                   <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                 </div>
                 <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
-                  {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
-                </div>
-              </div>
-            ))}
+                  {t.kind==="credit" ? "text-emerald-500" : "text-rose-500"}
+                                        {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1269,6 +1324,7 @@ function AdminPortal({
       {/* users */}
       {adminTab==="users" && (
         <div className={classNames("rounded-2xl border p-4 grid md:grid-cols-2 gap-4", neonBox(theme))}>
+          {/* Add agent */}
           <div className="rounded-xl border p-4">
             <div className="text-sm opacity-70 mb-2">Add agent</div>
             <div className="flex items-center gap-2">
@@ -1278,16 +1334,45 @@ function AdminPortal({
               </button>
             </div>
           </div>
+
+          {/* PIN controls */}
           <div className="rounded-xl border p-4">
-            <div className="text-sm opacity-70 mb-2">Set / reset PIN (5 digits)</div>
-            <div className="grid sm:grid-cols-3 gap-2">
+            <div className="text-sm opacity-70 mb-2">User settings & PINs</div>
+
+            <div className="grid sm:grid-cols-3 gap-2 mb-3">
               <FancySelect value={pinAgent} onChange={setPinAgent} theme={theme} placeholder="Choose agent…">
                 {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
               </FancySelect>
-              <input className={inputCls(theme)} placeholder="12345" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5))}/>
-              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal.length===5 && onSetPin(pinAgent, pinVal)}>
-                <Check className="w-4 h-4 inline mr-1"/> Save PIN
-              </button>
+              <input className={inputCls(theme)} placeholder="Set new PIN (5 digits)" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5))}/>
+              <div className="flex gap-2">
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal.length===5 && onSetPin(pinAgent, pinVal)}>
+                  <Check className="w-4 h-4 inline mr-1"/> Save PIN
+                </button>
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={()=> pinAgent && onResetPin(pinAgent)}>
+                  Reset PIN
+                </button>
+              </div>
+            </div>
+
+            {/* List all agents with PIN state + reset + reset balance */}
+            <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
+              {accounts.filter(a=>a.role!=="system").map(a=>(
+                <motion.div key={a.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="text-sm">
+                    <div className="font-medium">{a.name}</div>
+                    <div className="opacity-70 text-xs">
+                      PIN: {pins[a.id] ? <span className="font-mono">{pins[a.id]}</span> : "— (not set)"}
+                    </div>
+                    <div className="opacity-70 text-xs">
+                      Balance: {(balances.get(a.id)||0).toLocaleString()} GCSD
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={()=> onResetBalance(a.id)}>Reset balance</button>
+                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={()=> onResetPin(a.id)}>Reset PIN</button>
+                  </div>
+                </motion.div>
+              ))}
             </div>
           </div>
         </div>
@@ -1313,6 +1398,26 @@ function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
   );
 }
 
+/* ========== Feed ========== */
+function FeedPage({ theme, notifs }:{ theme:Theme; notifs:Notification[] }) {
+  return (
+    <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
+      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+        <div className="text-sm opacity-70 mb-3 flex items-center gap-2"><BellRing className="w-4 h-4"/> Activity Feed</div>
+        <div className="space-y-2">
+          {notifs.length===0 && <div className="text-sm opacity-70">No notifications yet.</div>}
+          {notifs.map(n=>(
+            <motion.div key={n.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2", neonBox(theme))}>
+              <div className="text-sm">{n.text}</div>
+              <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 /* Styles */
 function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
 const neonBox = (theme:Theme) =>
@@ -1333,3 +1438,4 @@ function confettiBurst() {
   <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
   document.body.appendChild(el); setTimeout(()=> el.remove(), 800);
 }
+
