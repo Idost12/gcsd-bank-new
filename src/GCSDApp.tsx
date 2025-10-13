@@ -55,7 +55,7 @@ const PRODUCT_RULES: ProductRule[] = [
 
 const PRIZE_ITEMS: PrizeItem[] = [
   { key: "airfryer",        label: "Philips Airfryer",        price: 1600 },
-  { key: "soundbar",        label: "LG Soundbar",             price: 2400 },
+  { key: "soundbar",        label: "LG Soundbar",             price: 11000 },
   { key: "burger_lunch",    label: "Burger Lunch",            price: 180  },
   { key: "voucher_50",      label: "Cash Voucher (50 лв)",    price: 600  },
   { key: "poker",           label: "Texas Poker Set",         price: 900  },
