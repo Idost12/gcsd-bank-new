@@ -777,7 +777,6 @@ export default function GCSDApp() {
       </div>
     </div>
   );
-}
 /* =============================
    Shared UI Components
    ============================= */
@@ -1083,24 +1082,37 @@ function PinModalGeneric({
     </motion.div>
   );
 }
-/* =========================
-   Helpers & Components
-   ========================= */
+}
+/* =============================
+   Helpers (styling + tiny utils)
+   ============================= */
 
-function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
-const neonBox = (theme:Theme) =>
-  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
-const neonBtn = (theme:Theme, filled=false) =>
-  theme==="neon"
-    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
-    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
-const inputCls = (theme:Theme) =>
-  theme==="neon"
+function classNames(...x: (string | false | undefined)[]) {
+  return x.filter(Boolean).join(" ");
+}
+const neonBox = (theme: Theme) =>
+  theme === "neon"
+    ? "bg-[#14110B] border border-orange-800 text-orange-50"
+    : "bg-white dark:bg-slate-800";
+const neonBtn = (theme: Theme, solid?: boolean) =>
+  theme === "neon"
+    ? solid
+      ? "bg-orange-700 text-black border border-orange-600"
+      : "bg-[#0B0B0B] border border-orange-800 text-orange-50"
+    : solid
+      ? "bg-black text-white"
+      : "bg-white dark:bg-slate-800";
+const inputCls = (theme: Theme) =>
+  theme === "neon"
     ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60"
     : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
 
 /* ===== Epoch helpers (hide history prior to reset) ===== */
-function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, dateISO:string){
+function afterEpoch(
+  epochs: Record<string, string>,
+  agentId: string | undefined,
+  dateISO: string
+) {
   if (!agentId) return true;
   const e = epochs[agentId];
   if (!e) return true;
@@ -1108,52 +1120,67 @@ function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, date
 }
 
 /* Treat undo-redeem credits as non-earnings */
-function isReversalOfRedemption(t: Transaction){
+function isReversalOfRedemption(t: Transaction) {
   return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
 }
-function isRedeem(t: Transaction){
+function isRedeem(t: Transaction) {
   return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
 }
 
 /* For purchases list, exclude redeems that have a later matching reversal */
 function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
   if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo||"").replace("Redeem: ","");
+  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
   const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(t =>
-    isReversalOfRedemption(t) &&
-    t.toId === redeemTxn.fromId &&
-    (t.memo||"") === `Reversal of redemption: ${label}` &&
-    new Date(t.dateISO).getTime() >= after
+  return !all.some(
+    (t) =>
+      isReversalOfRedemption(t) &&
+      t.toId === redeemTxn.fromId &&
+      (t.memo || "") === `Reversal of redemption: ${label}` &&
+      new Date(t.dateISO).getTime() >= after
   );
 }
 
-/* ===== Simple chart ===== */
-function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
+/* =============================
+   Small chart + tiles
+   ============================= */
+
+function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
   const max = Math.max(1, ...earned, ...spent);
-  const h = 110, w = 420, pad = 10, step = (w - pad*2) / (earned.length - 1 || 1);
-  const toPath = (arr:number[]) =>
-    arr.map((v,i)=> `${i===0 ? "M" : "L"} ${pad + i*step},${h - pad - (v/max)*(h-pad*2)}`).join(" ");
+  const h = 110,
+    w = 420,
+    pad = 10,
+    step = (w - pad * 2) / (earned.length - 1 || 1);
+  const toPath = (arr: number[]) =>
+    arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
       <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
-      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <path d={toPath(spent)} fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
       <g className="text-xs">
-        <text x={pad} y={h-2} className="fill-current opacity-60">Earned</text>
-        <text x={pad+70} y={h-2} className="fill-current opacity-60">Spent</text>
+        <text x={pad} y={h - 2} className="fill-current opacity-60">
+          Earned
+        </text>
+        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
+          Spent
+        </text>
       </g>
     </svg>
   );
 }
-function TileRow({ label, value }:{ label:string; value:number }) {
+
+function TileRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold"><NumberFlash value={value}/></div>
+      <div className="text-2xl font-semibold">
+        <NumberFlash value={value} />
+      </div>
     </div>
   );
 }
-function Highlight({ title, value }:{ title:string; value:string }) {
+
+function Highlight({ title, value }: { title: string; value: string }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{title}</div>
@@ -1161,76 +1188,85 @@ function Highlight({ title, value }:{ title:string; value:string }) {
     </div>
   );
 }
-function sumInRange(txns:Transaction[], day:Date, spanDays:number, pred:(t:Transaction)=>boolean){
-  const start = new Date(day); const end = new Date(day); end.setDate(start.getDate()+spanDays);
-  return txns.filter(t=> pred(t) && new Date(t.dateISO)>=start && new Date(t.dateISO)<end).reduce((a,b)=>a+b.amount,0);
+
+function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: Transaction) => boolean) {
+  const start = new Date(day);
+  const end = new Date(day);
+  end.setDate(start.getDate() + spanDays);
+  return txns
+    .filter((t) => pred(t) && new Date(t.dateISO) >= start && new Date(t.dateISO) < end)
+    .reduce((a, b) => a + b.amount, 0);
 }
 
-/* =========================
-   Pages
-   ========================= */
+/* =============================
+   Home Page
+   ============================= */
 
-/* ---------- Home ---------- */
 function Home({
-  theme, accounts, txns, stock, prizes, leaderboard, starOfDay, leaderOfMonth, epochs
-}:{
-  theme:Theme;
-  accounts:Account[]; txns:Transaction[]; stock:Record<string,number>; prizes:PrizeItem[];
-  leaderboard: {id:string; name:string; earned:number; streak:number}[];
-  starOfDay: {name:string; amount:number} | null; leaderOfMonth: {name:string; amount:number} | null;
-  epochs: Record<string,string>;
+  theme,
+  accounts,
+  txns,
+  stock,
+  prizes,
+  leaderboard,
+  starOfDay,
+  leaderOfMonth
+}: {
+  theme: Theme;
+  accounts: Account[];
+  txns: Transaction[];
+  stock: Record<string, number>;
+  prizes: PrizeItem[];
+  leaderboard: { id: string; name: string; earned: number; streak: number }[];
+  starOfDay: { name: string; amount: number } | null;
+  leaderOfMonth: { name: string; amount: number } | null;
 }) {
-  const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
+  const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
-  // Purchased prizes (exclude reversed; epoch-aware)
+  // Purchased prizes (active only)
   const purchases = txns
-    .filter(t => isRedeem(t) && t.fromId && nonSystemIds.has(t.fromId) && afterEpoch(epochs, t.fromId, t.dateISO))
-    .filter(t => isRedeemStillActive(t, txns))
-    .map(t => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
+    .filter((t) => isRedeem(t) && !!t.fromId && nonSystemIds.has(t.fromId) && isRedeemStillActive(t, txns))
+    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
-  // 30-day finance series (earned minus withdrawals; epoch-aware; exclude reversal-of-redeem credits from earnings)
-  const days = Array.from({length:30}, (_,i)=> { const d=new Date(); d.setDate(d.getDate()-(29-i)); d.setHours(0,0,0,0); return d; });
-  const earnedSeries: number[] = days.map(d=>{
-    const credits = sumInRange(txns, d, 1, t =>
-      t.kind==="credit" &&
-      !!t.toId &&
-      nonSystemIds.has(t.toId as string) &&
-      t.memo!=="Mint" &&
-      !isReversalOfRedemption(t) &&
-      afterEpoch(epochs, t.toId, t.dateISO)
-    );
-    const withdrawals = sumInRange(txns, d, 1, t =>
-      isCorrectionDebit(t) &&
-      !!t.fromId &&
-      nonSystemIds.has(t.fromId as string) &&
-      afterEpoch(epochs, t.fromId, t.dateISO)
-    );
-    return Math.max(0, credits - withdrawals); // no negative daily
+  // 30-day finance (earned minus withdrawals/corrections)
+  const days = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (29 - i));
+    d.setHours(0, 0, 0, 0);
+    return d;
   });
-  const spentSeries: number[]  = days.map(d=> sumInRange(txns, d, 1, t =>
-    t.kind==="debit" &&
-    !!t.fromId &&
-    nonSystemIds.has(t.fromId as string) &&
-    !isCorrectionDebit(t) &&
-    afterEpoch(epochs, t.fromId, t.dateISO)
-  ));
 
-  const totalEarned = earnedSeries.reduce((a, b)=>a+b,0);
-  const totalSpent  = spentSeries.reduce((a, b)=>a+b,0);
+  const earnedSeries: number[] = days.map((d) => {
+    const credits = sumInRange(
+      txns,
+      d,
+      1,
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo !== "Mint" && !isReversalOfRedemption(t)
+    );
+    const withdrawals = sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && (t.memo?.startsWith("Reversal of sale") || t.memo?.startsWith("Correction (withdraw)") || t.memo?.startsWith("Balance reset to 0")));
+    return Math.max(0, credits - withdrawals);
+  });
+
+  const spentSeries: number[] = days.map((d) =>
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && !t.memo?.startsWith("Correction") && !t.memo?.startsWith("Reversal of sale") && !t.memo?.startsWith("Balance reset to 0"))
+  );
+
+  const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
+  const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
 
   return (
-    <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className="grid md:grid-cols-3 gap-4">
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Dashboard</div>
           <div className="grid sm:grid-cols-2 gap-4">
-            <TileRow label="Total GCSD Earned (30d)" value={totalEarned}/>
-            <TileRow label="Total GCSD Spent (30d)"  value={totalSpent}/>
+            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} />
+            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
           </div>
 
           <div className="mt-4">
             <div className="text-sm opacity-70 mb-2">Finance (30 days)</div>
-            <LineChart earned={earnedSeries} spent={spentSeries}/>
+            <LineChart earned={earnedSeries} spent={spentSeries} />
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4 mt-4">
@@ -1239,17 +1275,19 @@ function Home({
           </div>
 
           <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Purchased Prizes (All Agents)</div>
+            <div className="text-sm opacity-70 mb-2">Purchased Prizes (Active)</div>
             <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
-              <div className="text-sm mb-2">Active purchases: <b>{purchases.length}</b></div>
+              <div className="text-sm mb-2">
+                Total active purchases: <b>{purchases.length}</b>
+              </div>
               <div className="space-y-2 max-h-40 overflow-auto pr-1">
-                {purchases.map((p, i)=> (
+                {purchases.map((p, i) => (
                   <div key={i} className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5">
-                    <span>{p.memo.replace("Redeem: ","")}</span>
+                    <span>{p.memo.replace("Redeem: ", "")}</span>
                     <span className="opacity-70">{p.when.toLocaleString()}</span>
                   </div>
                 ))}
-                {purchases.length===0 && <div className="text-sm opacity-70">No purchases yet.</div>}
+                {purchases.length === 0 && <div className="text-sm opacity-70">No purchases yet.</div>}
               </div>
             </div>
           </div>
@@ -1258,32 +1296,40 @@ function Home({
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Leaderboard</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {leaderboard.map((row,i)=>(
-              <motion.div key={row.id} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+            {leaderboard.map((row, i) => (
+              <motion.div key={row.id} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="flex items-center gap-2">
-                  <span className="w-5 text-right">{i+1}.</span>
+                  <span className="w-5 text-right">{i + 1}.</span>
                   <span className="font-medium">{row.name}</span>
-                  {row.streak>=2 && <span title={`${row.streak} day streak`} className="inline-flex items-center gap-1 text-orange-400 text-xs"><Flame className="w-4 h-4"/> {row.streak}</span>}
+                  {row.streak >= 2 && (
+                    <span title={`${row.streak} day streak`} className="inline-flex items-center gap-1 text-orange-400 text-xs">
+                      <Flame className="w-4 h-4" /> {row.streak}
+                    </span>
+                  )}
                 </div>
-                <div className="text-sm"><NumberFlash value={Math.max(0, row.earned)}/></div>
+                <div className="text-sm">
+                  <NumberFlash value={row.earned} />
+                </div>
               </motion.div>
             ))}
-            {leaderboard.length===0 && <div className="text-sm opacity-70">No data yet.</div>}
+            {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
           </div>
         </div>
 
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {prizes.map(p=>(
-              <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+            {prizes.map((p) => (
+              <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
                   <span
-                    className={ theme==="neon"
-                      ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200"
-                      : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700" }
+                    className={
+                      theme === "neon"
+                        ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200"
+                        : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"
+                    }
                   >
                     Stock: {stock[p.key] ?? 0}
                   </span>
@@ -1297,28 +1343,51 @@ function Home({
   );
 }
 
-/* ---------- Agent Portal ---------- */
+/* =============================
+   Agent Portal
+   ============================= */
+
 function AgentPortal({
-  theme, agentName, agentBalance, lifetimeEarn, lifetimeSpend, goal, setGoal,
-  txns, prizes, stock, prizeCount, onRedeem,
-}:{
-  theme:Theme; agentName:string; agentBalance:number; lifetimeEarn:number; lifetimeSpend:number; goal:number; setGoal:(n:number)=>void;
-  txns:Transaction[]; prizes:PrizeItem[]; stock:Record<string,number>; prizeCount:number; onRedeem:(k:string)=>void;
+  theme,
+  agentName,
+  agentBalance,
+  lifetimeEarn,
+  lifetimeSpend,
+  goal,
+  setGoal,
+  txns,
+  prizes,
+  stock,
+  prizeCount,
+  onRedeem
+}: {
+  theme: Theme;
+  agentName: string;
+  agentBalance: number;
+  lifetimeEarn: number;
+  lifetimeSpend: number;
+  goal: number;
+  setGoal: (n: number) => void;
+  txns: Transaction[];
+  prizes: PrizeItem[];
+  stock: Record<string, number>;
+  prizeCount: number;
+  onRedeem: (k: string) => void;
 }) {
-  const [goalInput, setGoalInput] = useState(goal? String(goal):"");
-  const progress = goal>0 ? Math.min(100, Math.round((agentBalance/goal)*100)) : 0;
+  const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
+  const progress = goal > 0 ? Math.min(100, Math.round((agentBalance / goal) * 100)) : 0;
 
   return (
-    <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Summary */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Agent</div>
           <div className="text-xl font-semibold mb-1">{agentName}</div>
           <div className="grid sm:grid-cols-3 gap-3 mt-3">
-            <TileRow label="Balance" value={Math.max(0, agentBalance)}/>
-            <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)}/>
-            <TileRow label="Lifetime Spent" value={Math.max(0, lifetimeSpend)}/>
+            <TileRow label="Balance" value={agentBalance} />
+            <TileRow label="Lifetime Earned" value={lifetimeEarn} />
+            <TileRow label="Lifetime Spent" value={lifetimeSpend} />
           </div>
 
           <div className="mt-4">
@@ -1329,18 +1398,15 @@ function AgentPortal({
                   className={inputCls(theme)}
                   placeholder="Amount"
                   value={goalInput}
-                  onChange={(e)=> setGoalInput(e.target.value.replace(/[^\d]/g,""))}
+                  onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))}
                 />
-                <button
-                  className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme,true))}
-                  onClick={()=> goalInput ? setGoal(parseInt(goalInput,10)) : null}
-                >
-                  <Check className="w-4 h-4 inline mr-1"/> Set goal
+                <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={() => (goalInput ? setGoal(parseInt(goalInput, 10)) : null)}>
+                  <Check className="w-4 h-4 inline mr-1" /> Set goal
                 </button>
               </div>
-              <div className="mt-3 text-sm opacity-70">{goal>0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
+              <div className="mt-3 text-sm opacity-70">{goal > 0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
               <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10">
-                <div className="h-2 rounded-full bg-emerald-500" style={{width: `${progress}%`}}/>
+                <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${progress}%` }} />
               </div>
             </div>
           </div>
@@ -1348,15 +1414,16 @@ function AgentPortal({
           <div className="mt-4">
             <div className="text-sm opacity-70 mb-2">Recent activity</div>
             <div className="space-y-2 max-h-56 overflow-auto pr-2">
-              {txns.slice(0,40).map(t=>(
-                <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                  <div className="text-sm">{t.memo || (t.kind==="credit" ? "Credit" : "Debit")}</div>
-                  <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
-                    {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+              {txns.slice(0, 40).map((t) => (
+                <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
+                  <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                    {t.kind === "credit" ? "+" : "−"}
+                    {t.amount.toLocaleString()}
                   </div>
                 </motion.div>
               ))}
-              {txns.length===0 && <div className="text-sm opacity-70">No activity yet.</div>}
+              {txns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
             </div>
           </div>
         </div>
@@ -1365,24 +1432,20 @@ function AgentPortal({
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
-            <div className="text-xs opacity-70">Balance: {Math.max(0, agentBalance).toLocaleString()} GCSD</div>
+            <div className="text-xs opacity-70">Balance: {agentBalance.toLocaleString()} GCSD</div>
           </div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-            {prizes.map(p=>{
+            {prizes.map((p) => {
               const left = stock[p.key] ?? 0;
-              const can = left>0 && agentBalance>=p.price && prizeCount<MAX_PRIZES_PER_AGENT;
+              const can = left > 0 && agentBalance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
               return (
-                <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                   <div>
                     <div className="font-medium">{p.label}</div>
                     <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
                   </div>
-                  <button
-                    disabled={!can}
-                    className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme,true))}
-                    onClick={()=> onRedeem(p.key)}
-                  >
-                    <Gift className="w-4 h-4 inline mr-1"/> Redeem
+                  <button disabled={!can} className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} onClick={() => onRedeem(p.key)}>
+                    <Gift className="w-4 h-4 inline mr-1" /> Redeem
                   </button>
                 </motion.div>
               );
@@ -1394,23 +1457,56 @@ function AgentPortal({
   );
 }
 
-/* ---------- Admin Portal ---------- */
+/* =============================
+   Admin Portal
+   ============================= */
+
 function AdminPortal({
-  theme, isAdmin, accounts, balances, stock, rules, txns,
-  onCredit, onManualTransfer, onUndoSale, onUndoRedemption, onWithdraw, onAddAgent, onSetPin,
-  onResetPin, onResetBalance, pins, adminTab, setAdminTab, onCompleteReset, epochs
-}:{
-  theme:Theme; isAdmin:boolean; accounts:Account[]; balances:Map<string,number>;
-  stock:Record<string,number>; rules:ProductRule[]; txns:Transaction[];
-  onCredit:(agentId:string, ruleKey:string, qty:number)=>void;
-  onManualTransfer:(agentId:string, amount:number, note:string)=>void;
-  onUndoSale:(txId:string)=>void; onUndoRedemption:(txId:string)=>void; onWithdraw:(agentId:string, txId:string)=>void;
-  onAddAgent:(name:string)=>void; onSetPin:(agentId:string, pin:string)=>void;
-  onResetPin:(agentId:string)=>void; onResetBalance:(agentId:string)=>void; pins:Record<string,string>;
-  adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users";
-  setAdminTab:(t:any)=>void;
-  onCompleteReset: ()=>void;
-  epochs: Record<string,string>;
+  theme,
+  isAdmin,
+  accounts,
+  balances,
+  stock,
+  rules,
+  txns,
+  onCredit,
+  onManualTransfer,
+  onUndoSale,
+  onUndoRedemption,
+  onWithdraw,
+  onAddAgent,
+  onSetPin,
+  onResetPin,
+  onResetBalance,
+  onEraseHistory,
+  onFullReset,
+  pins,
+  epochs,
+  adminTab,
+  setAdminTab
+}: {
+  theme: Theme;
+  isAdmin: boolean;
+  accounts: Account[];
+  balances: Map<string, number>;
+  stock: Record<string, number>;
+  rules: ProductRule[];
+  txns: Transaction[];
+  onCredit: (agentId: string, ruleKey: string, qty: number) => void;
+  onManualTransfer: (agentId: string, amount: number, note: string) => void;
+  onUndoSale: (txId: string) => void;
+  onUndoRedemption: (txId: string) => void;
+  onWithdraw: (agentId: string, txId: string) => void;
+  onAddAgent: (name: string) => void;
+  onSetPin: (agentId: string, pin: string) => void;
+  onResetPin: (agentId: string) => void;
+  onResetBalance: (agentId: string) => void;
+  onEraseHistory: (agentId: string) => void;
+  onFullReset: () => void;
+  pins: Record<string, string>;
+  epochs: Record<string, string>;
+  adminTab: "dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users";
+  setAdminTab: (t: any) => void;
 }) {
   const [agentId, setAgentId] = useState("");
   const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
@@ -1424,63 +1520,57 @@ function AdminPortal({
   if (!isAdmin) {
     return (
       <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
-        <Lock className="w-5 h-5 mx-auto mb-2"/>
+        <Lock className="w-5 h-5 mx-auto mb-2" />
         <div>Enter Admin PIN to access the portal.</div>
       </div>
     );
   }
 
-  const creditsForAgent = txns.filter(t=> t.kind==="credit" && t.toId===agentId && t.memo!=="Mint" && afterEpoch(epochs, agentId, t.dateISO) && !isReversalOfRedemption(t));
+  const creditsForAgent = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
 
   return (
     <div className="grid gap-4">
       {/* tabs */}
-      <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2 items-center justify-between", neonBox(theme))}>
-        <div className="flex flex-wrap gap-2">
-          {[
-            ["dashboard","Dashboard"],
-            ["addsale","Add Sale"],
-            ["transfer","Transfer"],
-            ["corrections","Corrections"],
-            ["history","History"],
-            ["users","Users"]
-          ].map(([k,lab])=>(
-            <button key={k}
-              onClick={()=> setAdminTab(k as any)}
-              className={classNames("px-3 py-1.5 rounded-xl text-sm",
-                adminTab===k ? neonBtn(theme,true) : neonBtn(theme))}>
-              {lab}
-            </button>
-          ))}
-        </div>
-        <button
-          className={classNames("px-3 py-1.5 rounded-xl text-sm", neonBtn(theme,true))}
-          onClick={onCompleteReset}
-          title="Complete reset (requires PIN confirmation)"
-        >
-          <RotateCcw className="w-4 h-4 inline mr-1"/> Complete Reset
-        </button>
+      <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
+        {[
+          ["dashboard", "Dashboard"],
+          ["addsale", "Add Sale"],
+          ["transfer", "Transfer"],
+          ["corrections", "Corrections"],
+          ["history", "History"],
+          ["users", "Users"]
+        ].map(([k, lab]) => (
+          <button
+            key={k}
+            onClick={() => setAdminTab(k as any)}
+            className={classNames("px-3 py-1.5 rounded-xl text-sm", adminTab === k ? neonBtn(theme, true) : neonBtn(theme))}
+          >
+            {lab}
+          </button>
+        ))}
       </div>
 
       {/* dashboard */}
-      {adminTab==="dashboard" && (
+      {adminTab === "dashboard" && (
         <div className="grid md:grid-cols-3 gap-4">
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
             <div className="text-sm opacity-70 mb-2">Balances</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-              {accounts.filter(a=>a.role!=="system").map(a=>(
-                <motion.div key={a.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                  <div className="font-medium">{a.name}</div>
-                  <div className="text-sm">{Math.max(0,(balances.get(a.id)||0)).toLocaleString()} GCSD</div>
-                </motion.div>
-              ))}
+              {accounts
+                .filter((a) => a.role !== "system")
+                .map((a) => (
+                  <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="font-medium">{a.name}</div>
+                    <div className="text-sm">{(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
+                  </motion.div>
+                ))}
             </div>
           </div>
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
             <div className="text-sm opacity-70 mb-2">Prize Stock</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-              {PRIZE_ITEMS.map(p=>(
-                <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+              {PRIZE_ITEMS.map((p) => (
+                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div>{p.label}</div>
                   <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
                 </motion.div>
@@ -1488,39 +1578,54 @@ function AdminPortal({
             </div>
           </div>
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-            <div className="text-sm opacity-70 mb-2">Quick Tips</div>
+            <div className="text-sm opacity-70 mb-2">Quick Actions</div>
             <ul className="text-sm list-disc pl-5 space-y-1 opacity-80">
               <li>“Add Sale” posts credits by product rule.</li>
               <li>“Corrections” lets you reverse or withdraw credits by agent.</li>
-              <li>“Users” lets you reset balances (epoch), view/set/clear PINs.</li>
+              <li>Each agent can redeem up to {MAX_PRIZES_PER_AGENT} prizes.</li>
+              <li className="mt-2">
+                <button className={classNames("px-3 py-1.5 rounded-lg", neonBtn(theme, true))} onClick={onFullReset}>
+                  Full reset (extra PIN)
+                </button>
+              </li>
             </ul>
           </div>
         </div>
       )}
 
       {/* add sale */}
-      {adminTab==="addsale" && (
+      {adminTab === "addsale" && (
         <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-3 gap-3">
             <div>
               <div className="text-xs opacity-70 mb-1">Agent</div>
               <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
-                {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+                {accounts
+                  .filter((a) => a.role !== "system")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
               </FancySelect>
             </div>
             <div>
               <div className="text-xs opacity-70 mb-1">Product</div>
               <FancySelect value={ruleKey} onChange={setRuleKey} theme={theme}>
-                {rules.map(r=>(<option key={r.key} value={r.key}>{r.label} — {r.gcsd}</option>))}
+                {rules.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label} — {r.gcsd}
+                  </option>
+                ))}
               </FancySelect>
             </div>
             <div>
               <div className="text-xs opacity-70 mb-1">Qty</div>
-              <input className={inputCls(theme)} value={qty} onChange={(e)=> setQty(Math.max(1,parseInt((e.target.value||"1").replace(/[^\d]/g,""),10)))} />
+              <input className={inputCls(theme)} value={qty} onChange={(e) => setQty(Math.max(1, parseInt((e.target.value || "1").replace(/[^\d]/g, ""), 10)))} />
             </div>
             <div className="sm:col-span-3 flex justify-end">
-              <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> onCredit(agentId, ruleKey, qty)}>
-                <Plus className="w-4 h-4 inline mr-1"/> Add Sale
+              <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onCredit(agentId, ruleKey, qty)}>
+                <Plus className="w-4 h-4 inline mr-1" /> Add Sale
               </button>
             </div>
           </div>
@@ -1528,58 +1633,71 @@ function AdminPortal({
       )}
 
       {/* manual transfer */}
-      {adminTab==="transfer" && (
+      {adminTab === "transfer" && (
         <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-3 gap-4", neonBox(theme))}>
           <div>
             <div className="text-sm opacity-70 mb-2">Agent</div>
             <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
-              {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+              {accounts
+                .filter((a) => a.role !== "system")
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
             </FancySelect>
           </div>
           <div>
             <div className="text-sm opacity-70 mb-2">Amount</div>
-            <input className={inputCls(theme)} value={xferAmt} onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g,""))}/>
+            <input className={inputCls(theme)} value={xferAmt} onChange={(e) => setXferAmt(e.target.value.replace(/[^\d]/g, ""))} />
           </div>
           <div>
             <div className="text-sm opacity-70 mb-2">Note</div>
-            <input className={inputCls(theme)} value={xferNote} onChange={(e)=> setXferNote(e.target.value)} placeholder="Manual transfer"/>
+            <input className={inputCls(theme)} value={xferNote} onChange={(e) => setXferNote(e.target.value)} placeholder="Manual transfer" />
           </div>
           <div className="sm:col-span-3">
-            <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))}
-              onClick={()=> onManualTransfer(agentId, parseInt(xferAmt||"0",10), xferNote)}>
-              <Wallet className="w-4 h-4 inline mr-1"/> Transfer
+            <button
+              className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))}
+              onClick={() => onManualTransfer(agentId, parseInt(xferAmt || "0", 10), xferNote)}
+            >
+              <Wallet className="w-4 h-4 inline mr-1" /> Transfer
             </button>
           </div>
         </div>
       )}
 
       {/* corrections */}
-      {adminTab==="corrections" && (
+      {adminTab === "corrections" && (
         <div className={classNames("rounded-2xl border p-4 grid gap-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <div className="text-xs opacity-70 mb-1">Choose agent to withdraw from</div>
               <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
-                {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+                {accounts
+                  .filter((a) => a.role !== "system")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
               </FancySelect>
             </div>
           </div>
 
           {agentId && (
             <div className="rounded-xl border p-3">
-              <div className="text-sm opacity-70 mb-2">Credits posted to {accounts.find(a=>a.id===agentId)?.name}</div>
+              <div className="text-sm opacity-70 mb-2">Credits posted to {accounts.find((a) => a.id === agentId)?.name}</div>
               <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
-                {creditsForAgent.length===0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
-                {creditsForAgent.map(t=>(
-                  <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                {creditsForAgent.length === 0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
+                {creditsForAgent.map((t) => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                     <div className="text-sm">
                       <div className="font-medium">{t.memo || "Credit"}</div>
                       <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
-                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                        onClick={()=> onWithdraw(agentId, t.id)}>
+                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onWithdraw(agentId, t.id)}>
                         Withdraw
                       </button>
                     </div>
@@ -1592,116 +1710,109 @@ function AdminPortal({
           <div className="rounded-xl border p-3">
             <div className="text-sm opacity-70 mb-2">Quick reversals</div>
             <div className="space-y-2 max-h-[320px] overflow-auto pr-2">
-              {txns.filter(t=>t.memo && t.memo!=="Mint").map(t=>(
-                <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                  <div className="text-sm">
-                    <div className="font-medium">{t.memo}</div>
-                    <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
-                      {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+              {txns
+                .filter((t) => t.memo && t.memo !== "Mint")
+                .map((t) => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">
+                      <div className="font-medium">{t.memo}</div>
+                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                     </div>
-                    {t.kind==="credit" ? (
-                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                        onClick={()=> onUndoSale(t.id)}>
-                        <RotateCcw className="w-4 h-4 inline mr-1"/> Undo sale
-                      </button>
-                    ) : (
-                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                        onClick={()=> onUndoRedemption(t.id)}>
-                        <RotateCcw className="w-4 h-4 inline mr-1"/> Undo redeem
-                      </button>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
+                    <div className="flex items-center gap-2">
+                      <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                        {t.kind === "credit" ? "+" : "−"}
+                        {t.amount.toLocaleString()}
+                      </div>
+                      {t.kind === "credit" ? (
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoSale(t.id)}>
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo sale
+                        </button>
+                      ) : (
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoRedemption(t.id)}>
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo redeem
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* history (epoch-aware) */}
-      {adminTab==="history" && (
+      {/* history */}
+      {adminTab === "history" && (
         <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">All activity (since each agent's reset)</div>
+          <div className="text-sm opacity-70 mb-2">All activity</div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-            {txns
-              .filter(t => {
-                if (t.toId && t.kind==="credit") return afterEpoch(epochs, t.toId, t.dateISO);
-                if (t.fromId && t.kind==="debit") return afterEpoch(epochs, t.fromId, t.dateISO);
-                return true;
-              })
-              .map(t=>(
-                <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                  <div className="text-sm">
-                    <div className="font-medium">{t.memo || (t.kind==="credit"?"Credit":"Debit")}</div>
-                    <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                  </div>
-                  <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
-                    {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
-                  </div>
-                </motion.div>
+            {txns.map((t) => (
+              <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div className="text-sm">
+                  <div className="font-medium">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
+                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                </div>
+                <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                  {t.kind === "credit" ? "+" : "−"}
+                  {t.amount.toLocaleString()}
+                </div>
+              </motion.div>
             ))}
           </div>
         </div>
       )}
 
-      {/* users (pins + per-agent reset) */}
-      {adminTab==="users" && (
+      {/* users */}
+      {adminTab === "users" && (
         <div className={classNames("rounded-2xl border p-4 grid md:grid-cols-2 gap-4", neonBox(theme))}>
           <div className="rounded-xl border p-4">
             <div className="text-sm opacity-70 mb-2">Add agent</div>
             <div className="flex items-center gap-2">
-              <input className={inputCls(theme)} value={newAgent} onChange={(e)=>setNewAgent(e.target.value)} placeholder="Full name"/>
-              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> newAgent && onAddAgent(newAgent)}>
-                <Plus className="w-4 h-4 inline mr-1"/> Add
+              <input className={inputCls(theme)} value={newAgent} onChange={(e) => setNewAgent(e.target.value)} placeholder="Full name" />
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => newAgent && onAddAgent(newAgent)}>
+                <Plus className="w-4 h-4 inline mr-1" /> Add
               </button>
             </div>
           </div>
 
           <div className="rounded-xl border p-4">
-            <div className="text-sm opacity-70 mb-2">User settings / PINs</div>
-            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-              {accounts.filter(a=>a.role!=="system").map(a=>{
-                const pin = pins[a.id];
-                return (
-                  <motion.div key={a.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl p-3", neonBox(theme))}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{a.name}</div>
-                        <div className="text-xs opacity-70">Balance: {Math.max(0,(balances.get(a.id)||0)).toLocaleString()} GCSD</div>
-                        <div className="text-xs opacity-70">PIN: {pin ? <span className="font-mono tracking-widest">{pin}</span> : "— (not set)"}</div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 justify-end">
-                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                          onClick={()=> onResetBalance(a.id)}>
-                          Reset Balance/History
-                        </button>
-                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                          onClick={()=> onResetPin(a.id)}>
-                          Reset PIN
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
-                      <input
-                        className={inputCls(theme)}
-                        placeholder="Set new 5-digit PIN"
-                        value={pinAgent===a.id ? pinVal : ""}
-                        onChange={(e)=>{ setPinAgent(a.id); setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5)); }}
-                      />
-                      <button
-                        className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))}
-                        onClick={()=> pinAgent===a.id && pinVal.length===5 && onSetPin(a.id, pinVal)}
-                      >
-                        <Check className="w-4 h-4 inline mr-1"/> Save
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
+            <div className="text-sm opacity-70 mb-2">User settings</div>
+            <div className="grid sm:grid-cols-3 gap-2">
+              <FancySelect value={pinAgent} onChange={setPinAgent} theme={theme} placeholder="Choose agent…">
+                {accounts
+                  .filter((a) => a.role !== "system")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </FancySelect>
+              <input className={inputCls(theme)} placeholder="New PIN (5 digits)" value={pinVal} onChange={(e) => setPinVal(e.target.value.replace(/[^\d]/g, "").slice(0, 5))} />
+              <div className="flex gap-2">
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => pinAgent && pinVal.length === 5 && onSetPin(pinAgent, pinVal)}>
+                  <Check className="w-4 h-4 inline mr-1" /> Save PIN
+                </button>
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={() => pinAgent && onResetPin(pinAgent)}>
+                  Reset PIN
+                </button>
+              </div>
             </div>
+
+            {pinAgent && (
+              <div className="mt-4 text-sm">
+                <div className="opacity-70 mb-1">Current PIN:</div>
+                <div className="font-mono">{pins[pinAgent] ? pins[pinAgent] : "— (not set)"}</div>
+                <div className="opacity-70 mt-3 mb-1">Epoch (history visible since):</div>
+                <div className="font-mono">{epochs[pinAgent] ? new Date(epochs[pinAgent]).toLocaleString() : "— (no reset)"}</div>
+                <div className="flex gap-2 mt-3">
+                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme))} onClick={() => onResetBalance(pinAgent)}>
+                    Reset Balance to 0
+                  </button>
+                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme))} onClick={() => onEraseHistory(pinAgent)}>
+                    Hide Past History
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1709,32 +1820,18 @@ function AdminPortal({
   );
 }
 
-/* ---------- Sandbox ---------- */
-function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
-  return (
-    <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
-      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
-        <div className="text-xl font-semibold mb-2">Sandbox</div>
-        <div className="opacity-80 text-sm">
-          Use this area to experiment. Data here is temporary and resets when you exit.
-        </div>
-        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={onExit}>
-          Exit Sandbox
-        </button>
-      </div>
-    </motion.div>
-  );
-}
+/* =============================
+   Feed & Sandbox
+   ============================= */
 
-/* ---------- Feed ---------- */
-function FeedPage({ theme, notifs }:{ theme:Theme; notifs: Notification[] }) {
+function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
   return (
-    <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
-      <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-        <div className="text-sm opacity-70 mb-2">Notifications Feed</div>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+        <div className="text-sm opacity-70 mb-3">Activity Feed</div>
         <div className="space-y-2 max-h-[70vh] overflow-auto pr-2">
-          {notifs.length===0 && <div className="text-sm opacity-70">No notifications yet.</div>}
-          {notifs.map(n=>(
+          {notifs.length === 0 && <div className="text-sm opacity-70">No notifications yet.</div>}
+          {notifs.map((n) => (
             <div key={n.id} className={classNames("text-sm border rounded-xl px-3 py-2", neonBox(theme))}>
               <div>{n.text}</div>
               <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
@@ -1746,7 +1843,16 @@ function FeedPage({ theme, notifs }:{ theme:Theme; notifs: Notification[] }) {
   );
 }
 
-/* =========================
-   END GCSDApp.tsx
-   ========================= */
-
+function SandboxPage({ onExit, theme }: { onExit: () => void; theme: Theme }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
+        <div className="text-xl font-semibold mb-2">Sandbox</div>
+        <div className="opacity-80 text-sm">Use this area to experiment. Data here is temporary and resets when you exit.</div>
+        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={onExit}>
+          Exit Sandbox
+        </button>
+      </div>
+    </motion.div>
+  );
+}
