@@ -36,15 +36,6 @@ type Notification = { id: string; when: string; text: string };
 
 const MAX_PRIZES_PER_AGENT = 2;
 
-const STORAGE = {
-  CORE:   "gcs-v4-core",      // {accounts, txns}
-  STOCK:  "gcs-v4-stock",     // Record<prizeKey, number>
-  PINS:   "gcs-v4-pins",      // Record<agentId, 5digits>
-  GOALS:  "gcs-v4-goals",     // Record<agentId, amount>
-  THEME:  "gcs-v4-theme",     // "light" | "dark" | "neon"
-  NOTIFS: "gcs-v4-notifs",    // Notification[]
-};
-
 const AGENT_NAMES = [
   "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
   "Caitlyn Stone","Rebecca Brooks","Logan Noir","Christopher O'Connor","Viktor Parks",
@@ -107,25 +98,6 @@ const kvSaveDebounced = debounce(kvSet, 350);
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-function loadJSON<T>(k: string, fallback: T): T { try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } }
-function saveJSON(k: string, v: any) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
-
-function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
-function confettiBurst() {
-  const el = document.createElement("div");
-  el.style.position="fixed"; el.style.inset="0"; el.style.pointerEvents="none"; el.style.zIndex="60";
-  el.innerHTML=`<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:42px;animation:pop .8s ease-out">🎉</div>
-  <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
-  document.body.appendChild(el); setTimeout(()=> el.remove(), 800);
-}
-
-/* Neon helpers */
-const neonBox = (theme:Theme) =>
-  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
-const neonBtn = (theme:Theme, filled=false) =>
-  theme==="neon"
-    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
-    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
 
 /* ---------- seed ---------- */
 const seedAccounts: Account[] = [
@@ -141,38 +113,15 @@ const seedTxns: Transaction[] = [
    App
    ================================= */
 export default function GCSDApp() {
-  // base load
-  const persisted = loadJSON<{accounts:Account[]; txns:Transaction[] } | null>(STORAGE.CORE, null);
-
-  /* ---- MIGRATION: revive old keys if v4 missing ---- */
-  if (!persisted) {
-    const legacyKeys = [
-      "gcs-v3-core","gcs-core","gcsd-bank-core","gcs-bank-core","gcs-core-2025"
-    ];
-    for (const k of legacyKeys) {
-      try {
-        const raw = localStorage.getItem(k);
-        if (!raw) continue;
-        const old = JSON.parse(raw);
-        if (old?.accounts && old?.txns) {
-          localStorage.setItem(STORAGE.CORE, JSON.stringify(old));
-          const sraw = localStorage.getItem(k.replace("core","stock"));
-          if (sraw) localStorage.setItem(STORAGE.STOCK, sraw);
-          break;
-        }
-      } catch {}
-    }
-  }
-
-  const persisted2 = loadJSON<{accounts:Account[]; txns:Transaction[] } | null>(STORAGE.CORE, null);
-
+  // State defaults
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [stock, setStock] = useState<Record<string, number>>({});
   const [pins, setPins] = useState<Record<string, string>>({});
   const [goals, setGoals] = useState<Record<string, number>>({});
   const [notifs, setNotifs] = useState<Notification[]>([]);
-  const [theme, setTheme] = useState<Theme>((localStorage.getItem(STORAGE.THEME) as Theme) || "light");
+  const [hydrated, setHydrated] = useState(false);
+  const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
 
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -191,96 +140,47 @@ export default function GCSDApp() {
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
 
-  const [hydrated, setHydrated] = useState(false);
-
   /* persist */
   useEffect(()=> saveJSON(STORAGE.CORE, {accounts, txns}), [accounts, txns]);
   useEffect(()=> saveJSON(STORAGE.STOCK, stock), [stock]);
   useEffect(()=> saveJSON(STORAGE.PINS, pins), [pins]);
   useEffect(()=> saveJSON(STORAGE.GOALS, goals), [goals]);
   useEffect(()=> saveJSON(STORAGE.NOTIFS, notifs), [notifs]);
-  useEffect(()=> { localStorage.setItem(STORAGE.THEME, theme); }, [theme]);
+  // Theme persistence only
+  useEffect(() => { localStorage.setItem("gcs-v4-theme", theme); }, [theme]);
 
-  /* hydrate from Supabase on mount, falling back to seeds if KV is empty */
+  // Hydrate from Supabase KV once on mount
   useEffect(() => {
     (async () => {
       try {
-        // 1) core (accounts + txns)
-        const core = await kvGet<{accounts: Account[]; txns: Transaction[]}>("gcs-v4-core");
-        if (core && core.accounts && core.txns) {
+        const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>('gcs-v4-core');
+        if (core?.accounts && core?.txns) {
           setAccounts(core.accounts);
           setTxns(core.txns);
         } else {
           setAccounts(seedAccounts);
           setTxns(seedTxns);
         }
-
-        // 2) stock / pins / goals / notifs
-        const s = await kvGet<Record<string, number>>("gcs-v4-stock");
-        if (s) setStock(s); else setStock(INITIAL_STOCK);
-
-        const p = await kvGet<Record<string, string>>("gcs-v4-pins");
-        if (p) setPins(p);
-
-        const g = await kvGet<Record<string, number>>("gcs-v4-goals");
-        if (g) setGoals(g);
-
-        const n = await kvGet<Notification[]>("gcs-v4-notifs");
-        if (n) setNotifs(n);
+        const s = await kvGet<Record<string, number>>('gcs-v4-stock');
+        setStock(s ?? INITIAL_STOCK);
+        const p = await kvGet<Record<string, string>>('gcs-v4-pins');
+        setPins(p ?? {});
+        const g = await kvGet<Record<string, number>>('gcs-v4-goals');
+        setGoals(g ?? {});
+        const n = await kvGet<Notification[]>('gcs-v4-notifs');
+        setNotifs(n ?? []);
       } finally {
         setHydrated(true);
       }
     })();
   }, []);
 
-// --- CORE: {accounts, txns} ---
-useEffect(() => {
-  (async () => {
-    const core = await remoteLoad<{accounts:any[]; txns:any[]}>('core', { accounts, txns })
-    setAccounts(core.accounts)
-    setTxns(core.txns)
-  })()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [])
-useEffect(() => {
-  kvSaveDebounced('core', { accounts, txns })
-}, [accounts, txns])
-
-// --- STOCK ---
-useEffect(() => {
-  (async () => setStock(await remoteLoad('stock', stock)))()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [])
-useEffect(() => {
-  kvSaveDebounced('stock', stock)
-}, [stock])
-
-// --- PINS ---
-useEffect(() => {
-  (async () => setPins(await remoteLoad('pins', pins)))()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [])
-useEffect(() => {
-  kvSaveDebounced('pins', pins)
-}, [pins])
-
-// --- GOALS ---
-useEffect(() => {
-  (async () => setGoals(await remoteLoad('goals', goals)))()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [])
-useEffect(() => {
-  kvSaveDebounced('goals', goals)
-}, [goals])
-
-// --- NOTIFS ---
-useEffect(() => {
-  (async () => setNotifs(await remoteLoad('notifs', notifs)))()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [])
-useEffect(() => {
-  kvSaveDebounced('notifs', notifs)
-}, [notifs])
+  // Persist changes to Supabase KV
+  useEffect(() => { if (hydrated) kvSet('gcs-v4-core',  { accounts, txns }); }, [hydrated, accounts, txns]);
+  useEffect(() => { if (hydrated) kvSet('gcs-v4-stock', stock);             }, [hydrated, stock]);
+  useEffect(() => { if (hydrated) kvSet('gcs-v4-pins',  pins);              }, [hydrated, pins]);
+  useEffect(() => { if (hydrated) kvSet('gcs-v4-goals', goals);             }, [hydrated, goals]);
+  useEffect(() => { if (hydrated) kvSet('gcs-v4-notifs', notifs);           }, [hydrated, notifs]);
 
   /* clock + intro every load */
   useEffect(()=> {
@@ -1324,3 +1224,18 @@ function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
     </motion.div>
   );
 }
+
+function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
+function confettiBurst() {
+  const el = document.createElement("div");
+  el.style.position="fixed"; el.style.inset="0"; el.style.pointerEvents="none"; el.style.zIndex="60";
+  el.innerHTML=`<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:42px;animation:pop .8s ease-out">🎉</div>
+  <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
+  document.body.appendChild(el); setTimeout(()=> el.remove(), 800);
+}
+const neonBox = (theme:Theme) =>
+  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
+const neonBtn = (theme:Theme, filled=false) =>
+  theme==="neon"
+    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
+    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
