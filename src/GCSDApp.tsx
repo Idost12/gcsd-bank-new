@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
-  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown, BellRing
+  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 
@@ -83,11 +83,10 @@ const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
-// merge transactions by id (prevents realtime from overwriting local adds)
 function mergeTxns(local: Transaction[], remote: Transaction[]) {
   const map = new Map<string, Transaction>();
   for (const t of remote) map.set(t.id, t);
-  for (const t of local) map.set(t.id, t); // local wins on conflict
+  for (const t of local) map.set(t.id, t); // local wins
   const all = Array.from(map.values());
   all.sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
   return all;
@@ -99,7 +98,11 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   return Array.from(map.values());
 }
 const isCorrectionDebit = (t: Transaction) =>
-  t.kind === "debit" && !!t.memo && (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)") || t.memo.startsWith("Balance reset to 0"));
+  t.kind === "debit" && !!t.memo && (
+    t.memo.startsWith("Reversal of sale") ||
+    t.memo.startsWith("Correction (withdraw)") ||
+    t.memo.startsWith("Balance reset to 0")
+  );
 
 /* ---------- seed ---------- */
 const seedAccounts: Account[] = [
@@ -168,7 +171,7 @@ export default function GCSDApp() {
   useEffect(() => {
     localStorage.setItem("gcs-v4-theme", theme);
     const root = document.documentElement;
-    if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
+    if (theme === "dark" || theme === "neon") root.classList.add("dark"); else root.classList.remove("dark");
   }, [theme]);
 
   /* hydrate from KV once on mount */
@@ -253,7 +256,7 @@ export default function GCSDApp() {
   const leaderboard = Array.from(nonSystemIds).map(id => {
     const credited = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
     const withdrawn = txns.filter(t=> isCorrectionDebit(t) && t.fromId===id).reduce((a,b)=>a+b.amount,0);
-    const earned = credited - withdrawn;
+    const earned = Math.max(0, credited - withdrawn); // never negative on board
     return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
   }).sort((a,b)=> b.earned - a.earned);
 
@@ -272,7 +275,7 @@ export default function GCSDApp() {
   const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedToday[starId] } : null;
   const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
-  /* helpers */
+  /* helpers bound to state */
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
     setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev ]);
   const notify = (text:string) => {
@@ -282,6 +285,45 @@ export default function GCSDApp() {
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
+  /* ---- safety + admin helpers ------------------------------------------- */
+
+  // never let an agent go negative; return false if blocked
+  const safeDebit = (agentId: string, amount: number, memo: string) => {
+    const bal = balances.get(agentId) || 0;
+    if (amount > bal) {
+      toast.error("Insufficient balance — cannot go negative");
+      return false;
+    }
+    postTxn({ kind: "debit", amount, fromId: agentId, memo });
+    return true;
+  };
+
+  // completely wipe ONE agent's history and settings
+  const wipeAgent = (agentId: string) => {
+    setTxns(prev => prev.filter(t => t.fromId !== agentId && t.toId !== agentId));
+    setGoals(prev => { const n = { ...prev }; delete n[agentId]; return n; });
+    setPins(prev  => { const n = { ...prev }; delete n[agentId]; return n; });
+    notify(`🧹 Wiped history and settings for ${getName(agentId)} (balance reset)`);
+    toast.success("Agent history wiped & balance reset");
+  };
+
+  // wipe EVERYTHING (will be guarded by extra PIN in UI)
+  const doFactoryReset = async () => {
+    setAccounts(seedAccounts);
+    setTxns(seedTxns);
+    setStock(INITIAL_STOCK);
+    setPins({});
+    setGoals({});
+    setNotifs([]);
+    await kvSet("gcs-v4-core", { accounts: seedAccounts, txns: seedTxns });
+    await kvSet("gcs-v4-stock", INITIAL_STOCK);
+    await kvSet("gcs-v4-pins", {});
+    await kvSet("gcs-v4-goals", {});
+    await kvSet("gcs-v4-notifs", []);
+    toast.success("Factory reset complete");
+    notify("🧨 System factory reset executed");
+  };
+
   /* actions */
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     if (!isAdmin) return toast.error("Admin only");
@@ -290,21 +332,17 @@ export default function GCSDApp() {
     const amount = rule.gcsd * Math.max(1, qty||1);
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
-    const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount
-      - txns.filter(t=> isCorrectionDebit(t) && t.fromId===agentId).reduce((a,b)=>a+b.amount,0);
-    if (newLifetime % 1000 === 0) confettiBurst();
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
   }
+
   function manualTransfer(agentId:string, amount:number, note:string){
     if (!isAdmin) return toast.error("Admin only");
     if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
     postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
-    const newLifetime = txns.filter(t=>t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0) + amount
-      - txns.filter(t=> isCorrectionDebit(t) && t.fromId===agentId).reduce((a,b)=>a+b.amount,0);
-    if (newLifetime % 1000 === 0) confettiBurst();
     toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
   }
+
   function redeemPrize(agentId:string, prizeKey:string){
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
@@ -316,7 +354,7 @@ export default function GCSDApp() {
 
     openAgentPin(agentId, (ok)=>{
       if (!ok) return toast.error("Wrong PIN");
-      postTxn({ kind:"debit", amount: prize.price, fromId: agentId, memo:`Redeem: ${prize.label}` });
+      if (!safeDebit(agentId, prize.price, `Redeem: ${prize.label}`)) return;
       setStock(s=> ({...s, [prizeKey]: left-1}));
       notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
       confettiBurst();
@@ -325,6 +363,7 @@ export default function GCSDApp() {
       toast.success(`Redeemed ${prize.label}`);
     });
   }
+
   function undoSale(txId:string){
     if (!isAdmin) return toast.error("Admin only");
     const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
@@ -332,6 +371,7 @@ export default function GCSDApp() {
     notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
     toast.success("Sale reversed");
   }
+
   function undoRedemption(txId:string){
     if (!isAdmin) return toast.error("Admin only");
     const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="debit" || !t.fromId) return;
@@ -342,14 +382,16 @@ export default function GCSDApp() {
     notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
     toast.success("Redemption reversed & stock restored");
   }
+
   function withdrawAgentCredit(agentId:string, txId:string){
     if (!isAdmin) return toast.error("Admin only");
     const t = txns.find(x=>x.id===txId);
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
-    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
+    if (!safeDebit(agentId, t.amount, `Correction (withdraw): ${t.memo || "Credit"}`)) return;
     notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
     toast.success("Credits withdrawn");
   }
+
   function addAgent(name:string){
     if (!isAdmin) return toast.error("Admin only");
     const trimmed = name.trim();
@@ -362,6 +404,7 @@ export default function GCSDApp() {
     notify(`👤 New agent added: ${trimmed}`);
     toast.success(`Added agent ${trimmed}`);
   }
+
   function setAgentPin(agentId:string, pin:string){
     if (!isAdmin) return toast.error("Admin only");
     if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
@@ -369,12 +412,14 @@ export default function GCSDApp() {
     notify(`🔐 PIN set/reset for ${getName(agentId)}`);
     toast.success("PIN updated");
   }
+
   function resetPin(agentId:string){
     if (!isAdmin) return toast.error("Admin only");
     setPins(prev=> { const next = {...prev}; delete next[agentId]; return next; });
     notify(`🔐 PIN cleared for ${getName(agentId)}`);
     toast.success("PIN reset (cleared)");
   }
+
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
     openAgentPin(agentId, (ok)=>{
@@ -384,21 +429,21 @@ export default function GCSDApp() {
       toast.success("Goal updated");
     });
   }
+
   function resetAgentBalance(agentId:string){
     if (!isAdmin) return toast.error("Admin only");
     const bal = balances.get(agentId)||0;
     if (bal === 0) return toast.info("Balance already zero");
     if (bal > 0) {
-      postTxn({ kind:"debit", amount: bal, fromId: agentId, memo:`Balance reset to 0` });
-      notify(`🧮 Reset balance of ${getName(agentId)} by −${bal} GCSD`);
+      if (!safeDebit(agentId, bal, `Balance reset to 0`)) return;
     } else {
       postTxn({ kind:"credit", amount: -bal, toId: agentId, memo:`Balance reset to 0` });
-      notify(`🧮 Reset balance of ${getName(agentId)} by +${-bal} GCSD`);
     }
+    notify(`🧮 Reset balance of ${getName(agentId)}`);
     toast.success("Balance reset");
   }
 
-  /* Sandbox (require PIN first, then stay until exit) */
+  /* Sandbox */
   function enterSandbox() {
     const pin = prompt("Admin PIN to enter Sandbox:");
     if (!pin || !/^\d{5,8}$/.test(pin)) return toast.error("Enter a valid PIN");
@@ -413,7 +458,6 @@ export default function GCSDApp() {
     toast.success("Sandbox cleared");
   }
 
-  /* render */
   return (
     <div
       className={
@@ -422,6 +466,13 @@ export default function GCSDApp() {
           : "min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200"
       }
     >
+      {/* force readable system dropdowns in neon/dark */}
+      <style>{`
+        select, option { color-scheme: dark; }
+        .neon-select select { color: #ffd7a1; background: transparent; }
+        .neon-select option { color: #f8fafc; background: #0B0B0B; }
+      `}</style>
+
       <Toaster position="top-center" richColors />
 
       {/* Intro */}
@@ -459,7 +510,7 @@ export default function GCSDApp() {
             <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={()=> setPortal("home")}
+              onClick={()=> setPortal(sandboxActive ? "sandbox" : "home")}  // do NOT exit sandbox on Home
               title="Go Home"
             >
               <HomeIcon className="w-4 h-4"/> Home
@@ -602,6 +653,12 @@ export default function GCSDApp() {
             onResetBalance={(id)=>resetAgentBalance(id)}
             pins={pins}
             adminTab={adminTab} setAdminTab={setAdminTab}
+            wipeAgent={wipeAgent}
+            doFactoryReset={async () => {
+              const confirmPin = prompt("Admin PIN (again) to confirm full reset:");
+              if (!confirmPin || confirmPin !== adminPin) { toast.error("PIN incorrect"); return; }
+              await doFactoryReset();
+            }}
           />
         )}
 
@@ -649,7 +706,7 @@ function computeStreaks(by: Record<string, Set<string>>){
   return res;
 }
 
-/* ========== Shared UI ========== */
+/* ===== Shared UI (TypeLabel/ThemeToggle/Bell/Picker/Select/Pin modals) ===== */
 
 function TypeLabel({ text }:{ text:string }) {
   return (
@@ -774,7 +831,6 @@ function HoverCard({ children, onClick, delay=0.03, theme }:{
   );
 }
 
-/* Reusable pretty select (neon fix) */
 function FancySelect({
   value, onChange, children, theme, placeholder
 }:{
@@ -783,14 +839,14 @@ function FancySelect({
   return (
     <div className={classNames(
       "relative rounded-xl",
-      theme==="neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800"
+      theme==="neon" ? "neon-select border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800"
     )}>
       <select
         value={value}
         onChange={(e)=>onChange(e.target.value)}
         className={classNames(
           "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none",
-          theme==="neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent"
+          theme==="neon" ? "bg-transparent [color-scheme:dark]" : "bg-transparent"
         )}
       >
         {placeholder && <option value="">{placeholder}</option>}
@@ -804,7 +860,6 @@ function FancySelect({
   );
 }
 
-/* PIN modals */
 function PinModal({ open, onClose, onCheck }:{ open:boolean; onClose:()=>void; onCheck:(pin:string)=>void }) {
   return (
     <AnimatePresence>
@@ -847,7 +902,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
     .filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId) && (t.memo||"").startsWith("Redeem:"))
     .map(t=> ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
-  // 30-day finance series (earned minus withdrawals)
+  // 30-day finance series (earned minus withdrawals) — clamp >= 0
   const days = Array.from({length:30}, (_,i)=> { const d=new Date(); d.setDate(d.getDate()-(29-i)); d.setHours(0,0,0,0); return d; });
   const earnedSeries: number[] = days.map(d=>{
     const credits = sumInRange(txns, d, 1, t =>
@@ -856,7 +911,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
     const withdrawals = sumInRange(txns, d, 1, t =>
       isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId as string)
     );
-    return credits - withdrawals;
+    return Math.max(0, credits - withdrawals);
   });
   const spentSeries: number[]  = days.map(d=> sumInRange(txns, d, 1, t =>
     t.kind==="debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && !isCorrectionDebit(t)
@@ -921,7 +976,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {prizes.map(p=>(
+            {PRIZE_ITEMS.map(p=>(
               <motion.div key={p.key} layout whileHover={{y:-2}} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
@@ -949,7 +1004,6 @@ function sumInRange(txns:Transaction[], day:Date, spanDays:number, pred:(t:Trans
   return txns.filter(t=> pred(t) && new Date(t.dateISO)>=start && new Date(t.dateISO)<end).reduce((a,b)=>a+b.amount,0);
 }
 
-/* small tiles + chart */
 function TileRow({ label, value }:{ label:string; value:number }) {
   return (
     <div className="rounded-xl border p-3">
@@ -984,6 +1038,8 @@ function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
   );
 }
 
+/* === END OF PART 1/3 — ask me for PART 2 when ready (AgentPortal + AdminPortal + pages + utilities) === */
+
 /* ========== Agent Portal ========== */
 function AgentPortal({
   theme, agentName, agentBalance, lifetimeEarn, lifetimeSpend, goal, setGoal,
@@ -995,6 +1051,8 @@ function AgentPortal({
   const [goalInput, setGoalInput] = useState(goal? String(goal):"");
   const progress = goal>0 ? Math.min(100, Math.round((agentBalance/goal)*100)) : 0;
 
+  useEffect(()=> setGoalInput(goal? String(goal):""), [goal]);
+
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
       <div className="grid lg:grid-cols-2 gap-4">
@@ -1004,7 +1062,7 @@ function AgentPortal({
           <div className="text-xl font-semibold mb-1">{agentName}</div>
           <div className="grid sm:grid-cols-3 gap-3 mt-3">
             <TileRow label="Balance" value={agentBalance}/>
-            <TileRow label="Lifetime Earned" value={lifetimeEarn}/>
+            <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)}/>
             <TileRow label="Lifetime Spent" value={lifetimeSpend}/>
           </div>
 
@@ -1025,7 +1083,7 @@ function AgentPortal({
                   <Check className="w-4 h-4 inline mr-1"/> Set goal
                 </button>
               </div>
-              <div className="mt-3 text-sm opacity-70">{goal>0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
+              <div className="mt-3 text-sm opacity-70">{goal>0 ? `${progress}% towards ${Number(goal).toLocaleString()} GCSD` : "No goal set"}</div>
               <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10">
                 <div className="h-2 rounded-full bg-emerald-500" style={{width: `${progress}%`}}/>
               </div>
@@ -1086,7 +1144,8 @@ function AdminPortal({
   theme, isAdmin, accounts, balances, stock, rules, txns,
   onCredit, onManualTransfer, onUndoSale, onUndoRedemption, onWithdraw, onAddAgent, onSetPin,
   onResetPin, onResetBalance, pins,
-  adminTab, setAdminTab
+  adminTab, setAdminTab,
+  wipeAgent, doFactoryReset
 }:{
   theme:Theme; isAdmin:boolean; accounts:Account[]; balances:Map<string,number>;
   stock:Record<string,number>; rules:ProductRule[]; txns:Transaction[];
@@ -1095,8 +1154,8 @@ function AdminPortal({
   onUndoSale:(txId:string)=>void; onUndoRedemption:(txId:string)=>void; onWithdraw:(agentId:string, txId:string)=>void;
   onAddAgent:(name:string)=>void; onSetPin:(agentId:string, pin:string)=>void;
   onResetPin:(agentId:string)=>void; onResetBalance:(agentId:string)=>void; pins:Record<string,string>;
-  adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users";
-  setAdminTab:(t:any)=>void;
+  adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users"; setAdminTab:(t:any)=>void;
+  wipeAgent:(id:string)=>void; doFactoryReset:()=>Promise<void>;
 }) {
   const [agentId, setAgentId] = useState("");
   const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
@@ -1165,12 +1224,20 @@ function AdminPortal({
             </div>
           </div>
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-            <div className="text-sm opacity-70 mb-2">Quick Tips</div>
+            <div className="text-sm opacity-70 mb-2">System</div>
             <ul className="text-sm list-disc pl-5 space-y-1 opacity-80">
               <li>“Add Sale” posts credits by product rule.</li>
-              <li>“Corrections” lets you reverse or withdraw credits by agent.</li>
-              <li>Each agent can redeem up to {MAX_PRIZES_PER_AGENT} prizes.</li>
+              <li>“Corrections” can withdraw previously posted credits.</li>
+              <li>Withdrawals appear in History as “Correction (withdraw)”.</li>
             </ul>
+            <div className="mt-4">
+              <button
+                className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))}
+                onClick={doFactoryReset}
+              >
+                🧨 Complete Reset (PIN required)
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1204,7 +1271,7 @@ function AdminPortal({
         </div>
       )}
 
-      {/* manual transfer */}
+      {/* transfer */}
       {adminTab==="transfer" && (
         <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-3 gap-4", neonBox(theme))}>
           <div>
@@ -1284,12 +1351,12 @@ function AdminPortal({
                         onClick={()=> onUndoSale(t.id)}>
                         <RotateCcw className="w-4 h-4 inline mr-1"/> Undo sale
                       </button>
-                    ) : (
+                    ) : (t.memo||"").startsWith("Redeem:") ? (
                       <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
                         onClick={()=> onUndoRedemption(t.id)}>
                         <RotateCcw className="w-4 h-4 inline mr-1"/> Undo redeem
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </motion.div>
               ))}
@@ -1300,99 +1367,90 @@ function AdminPortal({
 
       {/* history */}
       {adminTab==="history" && (
-  <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-    <div className="text-sm opacity-70 mb-2">All activity</div>
-    <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-      {txns.map((t) => (
-        <motion.div
-          key={t.id}
-          layout
-          whileHover={{ y: -2 }}
-          className={classNames(
-            "border rounded-xl px-3 py-2 flex items-center justify-between",
-            neonBox(theme)
-          )}
-        >
-          <div className="text-sm">
-            <div className="font-medium">
-              {t.memo || (t.kind === "credit" ? "Credit" : "Debit")}
-            </div>
-            <div className="opacity-70 text-xs">
-              {new Date(t.dateISO).toLocaleString()}
-            </div>
+        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">All activity</div>
+          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+            {txns.map(t=>(
+              <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div className="text-sm">
+                  <div className="font-medium">
+                    {t.memo || (t.kind==="credit"?"Credit":"Debit")}
+                    {(t.memo||"").startsWith("Correction (withdraw)") && <span className="ml-2 text-xs opacity-70">(withdraw)</span>}
+                  </div>
+                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                </div>
+                <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
+                  {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                </div>
+              </motion.div>
+            ))}
+            {txns.length===0 && <div className="text-sm opacity-70">No activity recorded.</div>}
           </div>
-          <div
-            className={classNames(
-              "text-sm",
-              t.kind === "credit" ? "text-emerald-500" : "text-rose-500"
-            )}
-          >
-            {t.kind === "credit" ? "+" : "−"}
-            {t.amount.toLocaleString()}
-          </div>
-        </motion.div>
-      ))}
-
-      {txns.length === 0 && (
-        <div className="text-sm opacity-70">No activity yet.</div>
+        </div>
       )}
-    </div>
-  </div>
-)}
-
 
       {/* users */}
       {adminTab==="users" && (
-        <div className={classNames("rounded-2xl border p-4 grid md:grid-cols-2 gap-4", neonBox(theme))}>
-          {/* Add agent */}
-          <div className="rounded-xl border p-4">
-            <div className="text-sm opacity-70 mb-2">Add agent</div>
-            <div className="flex items-center gap-2">
-              <input className={inputCls(theme)} value={newAgent} onChange={(e)=>setNewAgent(e.target.value)} placeholder="Full name"/>
-              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> newAgent && onAddAgent(newAgent)}>
-                <Plus className="w-4 h-4 inline mr-1"/> Add
-              </button>
-            </div>
-          </div>
-
-          {/* PIN controls */}
-          <div className="rounded-xl border p-4">
-            <div className="text-sm opacity-70 mb-2">User settings & PINs</div>
-
-            <div className="grid sm:grid-cols-3 gap-2 mb-3">
-              <FancySelect value={pinAgent} onChange={setPinAgent} theme={theme} placeholder="Choose agent…">
-                {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
-              </FancySelect>
-              <input className={inputCls(theme)} placeholder="Set new PIN (5 digits)" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5))}/>
+        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Add user */}
+            <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
+              <div className="text-sm opacity-70 mb-2">Add Agent</div>
               <div className="flex gap-2">
-                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal.length===5 && onSetPin(pinAgent, pinVal)}>
-                  <Check className="w-4 h-4 inline mr-1"/> Save PIN
-                </button>
-                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={()=> pinAgent && onResetPin(pinAgent)}>
-                  Reset PIN
+                <input className={inputCls(theme)} value={newAgent} onChange={(e)=>setNewAgent(e.target.value)} placeholder="Full name"/>
+                <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme,true))} onClick={()=> { onAddAgent(newAgent); setNewAgent(""); }}>
+                  <Plus className="w-4 h-4 inline mr-1"/> Add
                 </button>
               </div>
             </div>
 
-            {/* List all agents with PIN state + reset + reset balance */}
-            <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
-              {accounts.filter(a=>a.role!=="system").map(a=>(
-                <motion.div key={a.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                  <div className="text-sm">
-                    <div className="font-medium">{a.name}</div>
-                    <div className="opacity-70 text-xs">
-                      PIN: {pins[a.id] ? <span className="font-mono">{pins[a.id]}</span> : "— (not set)"}
+            {/* PIN controls */}
+            <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
+              <div className="text-sm opacity-70 mb-2">PIN Settings</div>
+              <div className="grid sm:grid-cols-3 gap-2">
+                <FancySelect value={pinAgent} onChange={setPinAgent} theme={theme} placeholder="Choose agent…">
+                  {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+                </FancySelect>
+                <input className={inputCls(theme)} maxLength={5} placeholder="5-digit PIN" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/\D/g,"").slice(0,5))}/>
+                <div className="flex gap-2">
+                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal && onSetPin(pinAgent, pinVal)}>Set</button>
+                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme))} onClick={()=> pinAgent && onResetPin(pinAgent)}>Reset</button>
+                </div>
+              </div>
+              {pinAgent && <div className="mt-2 text-xs opacity-70">Current PIN: {pins[pinAgent] ? pins[pinAgent] : "— (not set)"}</div>}
+            </div>
+          </div>
+
+          {/* list of agents with actions */}
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Agents</div>
+            <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
+              {accounts.filter(a=>a.role!=="system").map(a=>{
+                const bal = balances.get(a.id) || 0;
+                return (
+                  <motion.div key={a.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2", neonBox(theme))}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium">{a.name}</div>
+                        <div className="text-xs opacity-70">PIN: {pins[a.id] ?? "—"}</div>
+                      </div>
+                      <div className="text-sm">Balance: {bal.toLocaleString()} GCSD</div>
+                      <div className="flex gap-2">
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                          onClick={()=> onResetBalance(a.id)}>
+                          Reset Balance
+                        </button>
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme,true))}
+                          onClick={()=> {
+                            if (confirm(`Wipe ALL history and settings for ${a.name}?`)) wipeAgent(a.id);
+                          }}>
+                          Wipe Agent (erase history)
+                        </button>
+                      </div>
                     </div>
-                    <div className="opacity-70 text-xs">
-                      Balance: {(balances.get(a.id)||0).toLocaleString()} GCSD
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={()=> onResetBalance(a.id)}>Reset balance</button>
-                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={()=> onResetPin(a.id)}>Reset PIN</button>
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1400,62 +1458,158 @@ function AdminPortal({
     </div>
   );
 }
-
-/* ========== Sandbox ========== */
-function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
+/* ========== Feed (Notifications) ========== */
+function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
   return (
-    <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
-      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
-        <div className="text-xl font-semibold mb-2">Sandbox</div>
-        <div className="opacity-80 text-sm">
-          Use this area to experiment. Data here is temporary and resets when you exit.
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 160, damping: 18 }}
+    >
+      <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm opacity-70">Notifications</div>
+          <div className="text-xs opacity-70">
+            {notifs.length.toLocaleString()} total
+          </div>
         </div>
-        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={onExit}>
-          Exit Sandbox
-        </button>
-      </div>
-    </motion.div>
-  );
-}
-
-/* ========== Feed ========== */
-function FeedPage({ theme, notifs }:{ theme:Theme; notifs:Notification[] }) {
-  return (
-    <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
-      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-        <div className="text-sm opacity-70 mb-3 flex items-center gap-2"><BellRing className="w-4 h-4"/> Activity Feed</div>
-        <div className="space-y-2">
-          {notifs.length===0 && <div className="text-sm opacity-70">No notifications yet.</div>}
-          {notifs.map(n=>(
-            <motion.div key={n.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2", neonBox(theme))}>
+        <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+          {notifs.map((n) => (
+            <motion.div
+              key={n.id}
+              layout
+              whileHover={{ y: -2 }}
+              className={classNames(
+                "border rounded-xl px-3 py-2 flex items-center justify-between",
+                neonBox(theme)
+              )}
+            >
               <div className="text-sm">{n.text}</div>
-              <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
+              <div className="text-xs opacity-70">
+                {new Date(n.when).toLocaleString()}
+              </div>
             </motion.div>
           ))}
+          {notifs.length === 0 && (
+            <div className="text-sm opacity-70">No notifications yet.</div>
+          )}
         </div>
       </div>
     </motion.div>
   );
 }
 
-/* Styles */
-function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
-const neonBox = (theme:Theme) =>
-  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
-const neonBtn = (theme:Theme, filled=false) =>
-  theme==="neon"
-    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
-    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
-const inputCls = (theme:Theme) =>
-  theme==="neon"
-    ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60"
-    : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
-
-function confettiBurst() {
-  const el = document.createElement("div");
-  el.style.position="fixed"; el.style.inset="0"; el.style.pointerEvents="none"; el.style.zIndex="60";
-  el.innerHTML=`<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:42px;animation:pop .8s ease-out">🎉</div>
-  <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
-  document.body.appendChild(el); setTimeout(()=> el.remove(), 800);
+/* ========== Sandbox Page ========== */
+function SandboxPage({ theme, onExit }: { theme: Theme; onExit: () => void }) {
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 160, damping: 18 }}
+    >
+      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
+        <div className="flex items-center gap-2 mb-2">
+          <Shield className="w-4 h-4" />
+          <div className="text-lg font-semibold">Sandbox Mode</div>
+        </div>
+        <div className="text-sm opacity-80">
+          Changes here won’t affect production. You will only exit Sandbox by
+          clicking the button below — navigating to Home won’t exit.
+        </div>
+        <div className="mt-4">
+          <button
+            className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))}
+            onClick={onExit}
+          >
+            <Shield className="w-4 h-4 inline mr-1" /> Exit Sandbox
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
 }
 
+/* ========== helpers / styles ========== */
+
+function classNames(...xs: Array<string | false | null | undefined>) {
+  return xs.filter(Boolean).join(" ");
+}
+
+function neonBox(theme: Theme) {
+  return theme === "neon"
+    ? "bg-[#0B0B0B]/60 border-orange-700 text-orange-50"
+    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800";
+}
+
+function neonBtn(theme: Theme, solid = false) {
+  if (theme === "neon") {
+    return solid
+      ? "bg-orange-600 hover:bg-orange-500 text-black border border-orange-700"
+      : "bg-[#0B0B0B]/60 hover:bg-[#0B0B0B]/80 text-orange-200 border border-orange-700";
+  }
+  return solid
+    ? "bg-black text-white hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-white/90 border"
+    : "bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border";
+}
+
+function inputCls(theme: Theme) {
+  return classNames(
+    "px-3 py-2 rounded-xl w-full border focus:outline-none",
+    theme === "neon"
+      ? "border-orange-700 bg-[#0B0B0B]/60 text-orange-50 placeholder-orange-300/50 [color-scheme:dark]"
+      : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+  );
+}
+
+/* tiny confetti for milestones */
+function confettiBurst() {
+  // minimal, dependency-free sparkle
+  const n = 20;
+  const root = document.createElement("div");
+  root.style.position = "fixed";
+  root.style.left = "0";
+  root.style.top = "0";
+  root.style.width = "100vw";
+  root.style.height = "100vh";
+  root.style.pointerEvents = "none";
+  root.style.zIndex = "9999";
+  document.body.appendChild(root);
+
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("div");
+    const size = 6 + Math.random() * 6;
+    p.style.position = "absolute";
+    p.style.left = window.innerWidth / 2 + "px";
+    p.style.top = window.innerHeight / 3 + "px";
+    p.style.width = size + "px";
+    p.style.height = size + "px";
+    p.style.borderRadius = "2px";
+    p.style.background =
+      ["#22c55e", "#f97316", "#06b6d4", "#e11d48"][i % 4]; // green, orange, cyan, rose
+    p.style.transform =
+      "translate(-50%,-50%) rotate(" + Math.floor(Math.random() * 360) + "deg)";
+    root.appendChild(p);
+
+    const dx = (Math.random() - 0.5) * 2;
+    const dy = Math.random() * 1.5 + 0.5;
+    const rot = (Math.random() - 0.5) * 10;
+
+    let t = 0;
+    const anim = () => {
+      t += 0.016;
+      const x = (window.innerWidth / 2) + dx * 600 * t;
+      const y = (window.innerHeight / 3) + dy * 600 * t + 200 * t * t; // gravity
+      p.style.transform = `translate(${x}px,${y}px) rotate(${rot * t * 180}deg)`;
+      p.style.opacity = String(Math.max(0, 1 - t));
+      if (t < 1.1) requestAnimationFrame(anim);
+      else p.remove();
+    };
+    requestAnimationFrame(anim);
+  }
+
+  setTimeout(() => root.remove(), 1600);
+}
+
+/* ========== END GCSD APP (Part 3/3) ========== */
