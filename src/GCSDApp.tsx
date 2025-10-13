@@ -68,6 +68,11 @@ function G_TileRow({ label, value }: { label: string; value: number }) {
   );
 }
 
+/* ===== Aliases for non-prefixed components ===== */
+const LineChart = G_LineChart as any;
+const TileRow = G_TileRow as any;
+
+
 function G_NumberFlash({ value }: { value: number }) {
   const prev = React.useRef<number>(value);
   const [pulse, setPulse] = React.useState<"up" | "down" | "none">("none");
@@ -203,27 +208,8 @@ const seedTxns: Transaction[] = [
 ];
 
 /* ---------- Animated number ---------- */
-/* DUPLICATE REMOVED: function G_NumberFlash */
-function G_NumberFlash({ value }:{ value:number }) {
-  const prev = useRef(value);
-  const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
-  useEffect(()=>{
-    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 500); }
-    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 500); }
-    prev.current = value;
-  }, [value]);
-  return (
-    <motion.span
-      key={value}
-      initial={{ y: 4, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: .15 }}
-      className={pulse==="up" ? "text-emerald-500" : pulse==="down" ? "text-rose-500" : undefined}
-    >
-      {value.toLocaleString()} GCSD
-    </motion.span>
-  );
-}
+/* Removed duplicate of function G_NumberFlash */
+
 
 /* =================================
    App
@@ -766,21 +752,78 @@ const neonBox = (theme: Theme) =>
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
-    ? solid
-      ? "bg-orange-700 text-black border border-orange-600"
-      : "bg-[#0B0B0B] border border-orange-800 text-orange-50"
-    : solid
-      ? "bg-black text-white"
-      : "bg-white dark:bg-slate-800";
+    ? (solid ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
+    : (solid ? "bg-black text-white" : "bg-white dark:bg-slate-800");
 
 const inputCls = (theme: Theme) =>
   theme === "neon"
     ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60 [color-scheme:dark]"
     : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
 
+/* ===== Balances helper (sum credits - debits) ===== */
+function computeBalances(accounts: Account[], txns: Transaction[]) {
+  const m = new Map<string, number>();
+  for (const a of accounts) m.set(a.id, 0);
+  for (const t of txns) {
+    if (t.kind === "credit" && t.toId) {
+      m.set(t.toId, (m.get(t.toId) || 0) + t.amount);
+    } else if (t.kind === "debit" && t.fromId) {
+      m.set(t.fromId, (m.get(t.fromId) || 0) - t.amount);
+    }
+  }
+  return m;
+}
+
+
+/* ===== Day buckets & streaks (credits-only; excludes reversal-of-redemption) ===== */
+function bucketByDay(
+  txns: Transaction[],
+  nonSystemIds: Set<string>,
+  afterEpochFn: (agentId: string | undefined, dateISO: string) => boolean
+) {
+  // Build last 60 days keys
+  const days: string[] = [];
+  const today = new Date();
+  for (let i = 59; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    d.setHours(0,0,0,0);
+    days.push(d.toISOString().slice(0,10));
+  }
+  const map: Record<string, boolean[]> = {};
+  for (const id of Array.from(nonSystemIds)) map[id] = new Array(days.length).fill(false);
+
+  for (const t of txns) {
+    if (t.kind !== "credit" || !t.toId || !nonSystemIds.has(t.toId)) continue;
+    if (t.memo === "Mint" || G_isReversalOfRedemption(t)) continue;
+    if (!afterEpochFn(t.toId, t.dateISO)) continue;
+    const key = new Date(t.dateISO).toISOString().slice(0,10);
+    const idx = days.indexOf(key);
+    if (idx >= 0) map[t.toId][idx] = true;
+  }
+  return { days, map };
+}
+
+function computeStreaks(buckets: { days: string[]; map: Record<string, boolean[]> }) {
+  const out: Record<string, number> = {};
+  for (const id of Object.keys(buckets.map)) {
+    const arr = buckets.map[id];
+    let streak = 0;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (arr[i]) streak++;
+      else break;
+    }
+    out[id] = streak;
+  }
+  return out;
+}
+
+
+
 /* ===== Epoch helpers (hide history prior to reset) ===== */
-function afterEpoch(epochs: Record<string, string>, agentId: string | undefined, dateISO: string) {
-  if (!agentId) return true;
+
+/* Removed duplicate afterEpoch */
+
   const e = epochs[agentId];
   if (!e) return true;
   return new Date(dateISO).getTime() >= new Date(e).getTime();
@@ -796,87 +839,24 @@ function G_isCorrectionDebit(t: Transaction) {
       t.memo.startsWith("Balance reset to 0"))
   );
 }
-/* DUPLICATE REMOVED: function G_isReversalOfRedemption */
+/* Removed duplicate of function G_isReversalOfRedemption */
 
-/* DUPLICATE REMOVED: function G_isRedeemTxn */
+/* Removed duplicate of function G_isRedeemTxn */
 
 
 /** For purchases list, exclude redeems that later got reversed */
-/* DUPLICATE REMOVED: function G_isRedeemStillActive */
+/* Removed duplicate of function G_isRedeemStillActive */
 
 
 /* ===== Mini chart/tiles ===== */
-/* DUPLICATE REMOVED: function G_LineChart */
-: { earned: number[]; spent: number[] }) {
-  const max = Math.max(1, ...earned, ...spent);
-  const h = 110,
-    w = 420,
-    pad = 10,
-    step = (w - pad * 2) / (earned.length - 1 || 1);
-  const toPath = (arr: number[]) =>
-    arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
-  return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
-      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
-      <path d={toPath(spent)} fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
-      <g className="text-xs">
-        <text x={pad} y={h - 2} className="fill-current opacity-60">
-          Earned
-        </text>
-        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
-          Spent
-        </text>
-      </g>
-    </svg>
-  );
-}
-/* DUPLICATE REMOVED: function G_TileRow */
-: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">
-        <G_NumberFlash value={value} />
-      </div>
-    </div>
-  );
-}
+/* Removed duplicate of function G_LineChart */
+
+/* Removed duplicate of function G_TileRow */
+
 
 /* ===== Animated number flash (up/down) ===== */
-/* DUPLICATE REMOVED: function G_NumberFlash */
-function G_NumberFlash({ value }:{ value:number }) {
-  const prev = React.useRef(value);
-  const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
+/* Removed duplicate of function G_NumberFlash */
 
-  useEffect(() => {
-    if (value > prev.current) {
-      setPulse("up");
-      const t = setTimeout(() => setPulse("none"), 500);
-      return () => clearTimeout(t);
-    } else if (value < prev.current) {
-      setPulse("down");
-      const t = setTimeout(() => setPulse("none"), 500);
-      return () => clearTimeout(t);
-    }
-    prev.current = value;
-  }, [value]);
-
-  useEffect(() => {
-    prev.current = value;
-  }, [value]);
-
-  return (
-    <motion.span
-      key={value}
-      initial={{ y: 4, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.15 }}
-      className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}
-    >
-      {value.toLocaleString()} GCSD
-    </motion.span>
-  );
-}
 
 /* ===== Misc helpers ===== */
 function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: Transaction) => boolean, epochs?: Record<string, string>) {
