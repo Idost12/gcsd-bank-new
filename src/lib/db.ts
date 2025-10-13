@@ -1,30 +1,28 @@
 // src/lib/db.ts
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL!
-const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY!
+const url  = import.meta.env.VITE_SUPABASE_URL as string;
+const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-export const supabase = createClient(supabaseUrl, supabaseAnon)
+// In the client we should only use the public anon key and read-only/kv writes.
+export const supabase = createClient(url, anon);
 
-// Key–Value helpers (all live in public.kv)
-export async function kvGet<T = any>(key: string): Promise<T | null> {
+// Helpers for the public.kv table
+export async function getKV<T = any>(key: string) {
   const { data, error } = await supabase
     .from('kv')
     .select('val')
     .eq('key', key)
-    .single()
-
-  if (error?.code === 'PGRST116') return null // not found
-  if (error) throw error
-  return (data?.val ?? null) as T | null
+    .single();
+  if (error) throw error;
+  return (data?.val as T) ?? null;
 }
 
-export async function kvSet<T = any>(key: string, val: T): Promise<void> {
+export async function setKV<T = any>(key: string, val: T) {
   const { error } = await supabase
     .from('kv')
-    .upsert({ key, val }) // updated_at is auto by trigger
+    .upsert({ key, val })
     .select()
-    .single()
-
-  if (error) throw error
+    .single();
+  if (error) throw error;
 }
