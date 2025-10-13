@@ -160,7 +160,7 @@ export default function GCSDApp() {
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminPin, setAdminPin] = useState<string>("");  // ← ADD THIS LINE
+  const [adminPin, setAdminPin] = useState<string>("");
 
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
 
@@ -320,16 +320,17 @@ export default function GCSDApp() {
 
   /* Sandbox (PIN-gated enter, sticky until Exit) */
   function enterSandbox() {
+toast.success("Sandbox started");
     const pin = prompt("Admin PIN to enter Sandbox:");
     // Only format-check on the client — no constant comparison
-if (!/^\d{5,8}$/.test(pin)) {
-  toast.error("Enter a valid PIN");
-  return;
-}
-setAdminPin(pin);          // keep it in memory for server-side validation
-setSandboxActive(true);
-setPortal("sandbox");
-toast.success("Sandbox started");
+    if (!pin || !/^\d{5,8}$/.test(pin)) {
+      toast.error("Enter a valid PIN");
+      return;
+    }
+    setAdminPin(pin);          // keep it in memory for server-side validation
+    setSandboxActive(true);
+    setPortal("sandbox");
+    toast.success("Sandbox started");
 
   }
   function exitSandbox() {
@@ -433,13 +434,14 @@ toast.success("Sandbox started");
         {portal==="admin" && !isAdmin && (
           <PinModalGeneric
             title="Admin PIN"
+            maxLen={8}
             onClose={() => { setPortal("home"); }}
-onOk={(pin) => {
-  // no client-side comparison; just store it
-  if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
-  setAdminPin(pin);      // <- uses the state we added
-  setIsAdmin(true);
-  toast.success("Admin unlocked");
+            onOk={(pin) => {
+              if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
+              setAdminPin(pin);
+          setIsAdmin(true);
+          setAdminUnlockOpen(false);
+          toast.success("Admin unlocked");
 }}
 
           />
