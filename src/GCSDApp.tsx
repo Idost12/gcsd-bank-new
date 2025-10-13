@@ -189,17 +189,7 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   for (const a of local) map.set(a.id, a);
   return Array.from(map.values());
 }
-/* DEDUP_REMOVED_START isCorrectionDebit */
 
-const isCorrectionDebit = (t: Transaction) =>
-  t.kind === "debit" && !!t.memo && (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)") || t.memo.startsWith("Balance reset to 0"));
-
-/* ---------- seed ---------- */
-const seedAccounts: Account[] = [
-  { id: uid(), name: "Bank Vault", role: "system" },
-  ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
-];
-/* DEDUP_REMOVED_END isCorrectionDebit */
 
 const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
@@ -207,10 +197,7 @@ const seedTxns: Transaction[] = [
 ];
 
 /* ---------- Animated number ---------- */
-/* DEDUP_REMOVED_START G_NumberFlash */
 
-function G_NumberFlash({ value }:{ value:number }) {
-/* DEDUP_REMOVED_END G_NumberFlash */
 
   const prev = useRef(value);
   const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
@@ -803,27 +790,15 @@ function G_isCorrectionDebit(t: Transaction) {
       t.memo.startsWith("Balance reset to 0"))
   );
 }
-/* DEDUP_REMOVED_START G_isReversalOfRedemption */
-
-function G_isReversalOfRedemption(t: Transaction) {
-  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
-}
-/* DEDUP_REMOVED_END G_isReversalOfRedemption */
-/* DEDUP_REMOVED_START G_isRedeemTxn */
 
 
-/* DEDUP_REMOVED_END G_isRedeemTxn */
 
-function G_isRedeemTxn(t: Transaction) {
-  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
-}
+
+/* duplicate G_isRedeemTxn removed */
+
 
 /** For purchases list, exclude redeems that later got reversed */
-/* DEDUP_REMOVED_START G_isRedeemStillActive */
 
-function G_isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
-  if (!G_isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
-/* DEDUP_REMOVED_END G_isRedeemStillActive */
 
   const label = (redeemTxn.memo || "").replace("Redeem: ", "");
   const after = new Date(redeemTxn.dateISO).getTime();
@@ -837,10 +812,7 @@ function G_isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
 }
 
 /* ===== Mini chart/tiles ===== */
-/* DEDUP_REMOVED_START G_LineChart */
 
-function G_LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
-/* DEDUP_REMOVED_END G_LineChart */
 
   const max = Math.max(1, ...earned, ...spent);
   const h = 110,
@@ -864,25 +836,12 @@ function G_LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
     </svg>
   );
 }
-/* DEDUP_REMOVED_START G_TileRow */
-
-function G_TileRow({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">
-        <G_NumberFlash value={value} />
-      </div>
-    </div>
-  );
-}
-
-/* ===== Animated number flash (up/down) ===== */
-/* DEDUP_REMOVED_START G_NumberFlash */
-/* DEDUP_REMOVED_END G_TileRow */
 
 
-function G_NumberFlash({ value }: { value: number }) {
+
+
+/* duplicate G_NumberFlash removed */
+: { value: number }) {
 /* DEDUP_REMOVED_END G_NumberFlash */
 
   const prev = React.useRef(value);
