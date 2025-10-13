@@ -5,7 +5,7 @@ import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Edit3, Shield, Zap
 } from "lucide-react";
-import { kvGet, kvSet } from './lib/db';
+import { kvGet, kvSet } from "./lib/db";
 
 /* ===========================
    G C S  B A N K  —  Single-file app
@@ -130,7 +130,7 @@ const neonBtn = (theme:Theme, filled=false) =>
 /* ---------- seed ---------- */
 const seedAccounts: Account[] = [
   { id: uid(), name: "Bank Vault", role: "system" },
-  ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" })),
+  ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as "agent" })),
 ];
 const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
@@ -166,12 +166,12 @@ export default function GCSDApp() {
 
   const persisted2 = loadJSON<{accounts:Account[]; txns:Transaction[] } | null>(STORAGE.CORE, null);
 
-  const [accounts, setAccounts] = useState<Account[]>(persisted2?.accounts || seedAccounts);
-  const [txns, setTxns] = useState<Transaction[]>(persisted2?.txns || seedTxns);
-  const [stock, setStock] = useState<Record<string, number>>(loadJSON(STORAGE.STOCK, INITIAL_STOCK));
-  const [pins, setPins] = useState<Record<string, string>>(loadJSON(STORAGE.PINS, {}));          // agent pins (5 digits)
-  const [goals, setGoals] = useState<Record<string, number>>(loadJSON(STORAGE.GOALS, {}));       // savings goals
-  const [notifs, setNotifs] = useState<Notification[]>(loadJSON(STORAGE.NOTIFS, []));
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [txns, setTxns] = useState<Transaction[]>([]);
+  const [stock, setStock] = useState<Record<string, number>>({});
+  const [pins, setPins] = useState<Record<string, string>>({});
+  const [goals, setGoals] = useState<Record<string, number>>({});
+  const [notifs, setNotifs] = useState<Notification[]>([]);
   const [theme, setTheme] = useState<Theme>((localStorage.getItem(STORAGE.THEME) as Theme) || "light");
 
   const [portal, setPortal] = useState<Portal>("home");
@@ -191,6 +191,8 @@ export default function GCSDApp() {
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
 
+  const [hydrated, setHydrated] = useState(false);
+
   /* persist */
   useEffect(()=> saveJSON(STORAGE.CORE, {accounts, txns}), [accounts, txns]);
   useEffect(()=> saveJSON(STORAGE.STOCK, stock), [stock]);
@@ -198,6 +200,39 @@ export default function GCSDApp() {
   useEffect(()=> saveJSON(STORAGE.GOALS, goals), [goals]);
   useEffect(()=> saveJSON(STORAGE.NOTIFS, notifs), [notifs]);
   useEffect(()=> { localStorage.setItem(STORAGE.THEME, theme); }, [theme]);
+
+  /* hydrate from Supabase on mount, falling back to seeds if KV is empty */
+  useEffect(() => {
+    (async () => {
+      try {
+        // 1) core (accounts + txns)
+        const core = await kvGet<{accounts: Account[]; txns: Transaction[]}>("gcs-v4-core");
+        if (core && core.accounts && core.txns) {
+          setAccounts(core.accounts);
+          setTxns(core.txns);
+        } else {
+          setAccounts(seedAccounts);
+          setTxns(seedTxns);
+        }
+
+        // 2) stock / pins / goals / notifs
+        const s = await kvGet<Record<string, number>>("gcs-v4-stock");
+        if (s) setStock(s); else setStock(INITIAL_STOCK);
+
+        const p = await kvGet<Record<string, string>>("gcs-v4-pins");
+        if (p) setPins(p);
+
+        const g = await kvGet<Record<string, number>>("gcs-v4-goals");
+        if (g) setGoals(g);
+
+        const n = await kvGet<Notification[]>("gcs-v4-notifs");
+        if (n) setNotifs(n);
+      } finally {
+        setHydrated(true);
+      }
+    })();
+  }, []);
+
 // --- CORE: {accounts, txns} ---
 useEffect(() => {
   (async () => {
@@ -820,10 +855,10 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
 
   // 30-day finance series
   const days = Array.from({length:30}, (_,i)=> { const d=new Date(); d.setDate(d.getDate()-(29-i)); d.setHours(0,0,0,0); return d; });
-  const earnedSeries = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="credit" && t.toId && nonSystemIds.has(t.toId) && t.memo!=="Mint"));
-  const spentSeries  = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId)));
-  const totalEarned = earnedSeries.reduce((a,b)=>a+b,0);
-  const totalSpent  = spentSeries.reduce((a,b)=>a+b,0);
+  const earnedSeries: number[] = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo!=="Mint"));
+  const spentSeries: number[]  = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="debit" && !!t.fromId && nonSystemIds.has(t.fromId as string)));
+  const totalEarned = earnedSeries.reduce((a: number, b: number)=>a+b,0);
+  const totalSpent  = spentSeries.reduce((a: number, b: number)=>a+b,0);
 
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
@@ -1237,6 +1272,7 @@ function AdminPortal({
                 </div>
               </div>
             ))}
+
           </div>
         </div>
       )}
