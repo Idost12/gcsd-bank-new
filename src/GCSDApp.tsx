@@ -5,7 +5,7 @@ import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Edit3, Shield, Zap
 } from "lucide-react";
-import { kvGet, kvSet } from './lib/db'
+import { kvGet, kvSet } from './lib/db';
 
 /* ===========================
    G C S  B A N K  —  Single-file app
