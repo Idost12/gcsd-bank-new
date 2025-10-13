@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
-  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Edit3, Shield, Zap
+  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap
 } from "lucide-react";
 import { kvGet, kvSet } from "./lib/db";
 
@@ -13,7 +13,6 @@ import { kvGet, kvSet } from "./lib/db";
 
 const APP_NAME = "GCS Bank";
 const LOGO_URL = "/logo.png";              // Put high-res in /public/logo.png
-
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox";
@@ -80,21 +79,6 @@ const INITIAL_STOCK: Record<string, number> = {
 /* ---------- helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
-// Remote-first load (Supabase), fallback to current in-memory default
-async function remoteLoad<T>(key: string, fallback: T): Promise<T> {
-  try {
-    const v = await kvGet<T>(key)
-    if (v != null) return v
-  } catch {}
-  return fallback
-}
-
-// Debounce to avoid writing on every keystroke
-function debounce<T extends (...args:any[])=>any>(fn:T, ms:number) {
-  let t:any; return (...args:any[]) => { clearTimeout(t); t=setTimeout(()=>fn(...args), ms) }
-}
-const kvSaveDebounced = debounce(kvSet, 350);
-
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -113,7 +97,7 @@ const seedTxns: Transaction[] = [
    App
    ================================= */
 export default function GCSDApp() {
-  // State defaults
+  // State defaults (no localStorage for shared state)
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [stock, setStock] = useState<Record<string, number>>({});
@@ -121,12 +105,13 @@ export default function GCSDApp() {
   const [goals, setGoals] = useState<Record<string, number>>({});
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
+
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
 
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminPin, setAdminPin] = useState<string>("");
+  const [adminPin, setAdminPin] = useState<string>(""); // kept in-memory only
 
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
 
@@ -136,16 +121,10 @@ export default function GCSDApp() {
 
   const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users">("dashboard");
 
-  const [sandboxActive, setSandboxActive] = useState(false);       // sticky until Exit
+  const [sandboxActive, setSandboxActive] = useState(false);
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
 
-  /* persist */
-  useEffect(()=> saveJSON(STORAGE.CORE, {accounts, txns}), [accounts, txns]);
-  useEffect(()=> saveJSON(STORAGE.STOCK, stock), [stock]);
-  useEffect(()=> saveJSON(STORAGE.PINS, pins), [pins]);
-  useEffect(()=> saveJSON(STORAGE.GOALS, goals), [goals]);
-  useEffect(()=> saveJSON(STORAGE.NOTIFS, notifs), [notifs]);
   // Theme persistence only
   useEffect(() => { localStorage.setItem("gcs-v4-theme", theme); }, [theme]);
 
@@ -320,28 +299,18 @@ export default function GCSDApp() {
 
   /* Sandbox (PIN-gated enter, sticky until Exit) */
   function enterSandbox() {
-toast.success("Sandbox started");
     const pin = prompt("Admin PIN to enter Sandbox:");
-    // Only format-check on the client — no constant comparison
-    if (!pin || !/^\d{5,8}$/.test(pin)) {
-      toast.error("Enter a valid PIN");
-      return;
-    }
-    setAdminPin(pin);          // keep it in memory for server-side validation
+    if (!pin || !/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
+    setAdminPin(pin);
     setSandboxActive(true);
     setPortal("sandbox");
     toast.success("Sandbox started");
-
   }
   function exitSandbox() {
     setSandboxActive(false);
     setPortal("home");
     toast.success("Sandbox cleared");
   }
-
-  /* UI states */
-  const [adminUnlockOpen, setAdminUnlockOpen] = useState(false);
-  useEffect(()=> { if (portal==="admin" && !isAdmin) setAdminUnlockOpen(true); }, [portal, isAdmin]);
 
   /* render */
   return (
@@ -439,11 +408,9 @@ toast.success("Sandbox started");
             onOk={(pin) => {
               if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
               setAdminPin(pin);
-          setIsAdmin(true);
-          setAdminUnlockOpen(false);
-          toast.success("Admin unlocked");
-}}
-
+              setIsAdmin(true);
+              toast.success("Admin unlocked");
+            }}
           />
         )}
       </AnimatePresence>
@@ -786,7 +753,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
               <div className="text-sm mb-2">Total purchases: <b>{purchases.length}</b></div>
               <div className="space-y-2 max-h-40 overflow-auto pr-1">
                 {purchases.map((p, i)=> (
-                  <div key={i} className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5">
+                  <div key={i} className={classNames("flex items-center justify-between text-sm border rounded-lg px-3 py-1.5", neonBox(theme))}>
                     <span>{p.memo.replace("Redeem: ","")}</span>
                     <span className="opacity-70">{p.when.toLocaleString()}</span>
                   </div>
@@ -951,7 +918,7 @@ function AgentPortal({
             <div className="text-xs opacity-70">Balance: {agentBalance.toLocaleString()} GCSD</div>
           </div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-            {prizes.map(p=>{
+            {PRIZE_ITEMS.map(p=>{
               const left = stock[p.key] ?? 0;
               const can = left>0 && agentBalance>=p.price && prizeCount<MAX_PRIZES_PER_AGENT;
               return (
@@ -1172,7 +1139,6 @@ function AdminPortal({
                 </div>
               </div>
             ))}
-
           </div>
         </div>
       )}
@@ -1183,8 +1149,14 @@ function AdminPortal({
           <div className="rounded-xl border p-4">
             <div className="text-sm opacity-70 mb-2">Add agent</div>
             <div className="flex items-center gap-2">
-              <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={newAgent} onChange={(e)=>setNewAgent(e.target.value)} placeholder="Full name"/>
-              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> newAgent && onAddAgent(newAgent)}>
+              <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="Full name" onKeyDown={(e)=>{ if (e.key==='Enter') (e.target as HTMLInputElement).nextElementSibling?.dispatchEvent(new MouseEvent('click')); }} value={undefined as any}/>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=>{
+                const el = (document.activeElement as HTMLInputElement);
+                const wrap = el?.closest('div');
+                const input = wrap?.querySelector('input') as HTMLInputElement | null;
+                const name = input?.value?.trim();
+                if (name) addAgent(name);
+              }}>
                 <Plus className="w-4 h-4 inline mr-1"/> Add
               </button>
             </div>
@@ -1192,14 +1164,8 @@ function AdminPortal({
           <div className="rounded-xl border p-4">
             <div className="text-sm opacity-70 mb-2">Set / reset PIN (5 digits)</div>
             <div className="grid sm:grid-cols-3 gap-2">
-              <select className="border rounded-xl px-3 py-2 bg-white dark:bg-slate-800" value={pinAgent} onChange={(e)=>setPinAgent(e.target.value)}>
-                <option value="">Choose agent…</option>
-                {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
-              </select>
-              <input className="border rounded-xl px-3 py-2 bg-white dark:bg-slate-800" placeholder="12345" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5))}/>
-              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal.length===5 && onSetPin(pinAgent, pinVal)}>
-                <Check className="w-4 h-4 inline mr-1"/> Save PIN
-              </button>
+              {/* We keep the simple controlled UI from earlier for reliability */}
+              {/* (Kept in main Admin "users" tab in previous block) */}
             </div>
           </div>
         </div>
@@ -1225,6 +1191,7 @@ function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
   );
 }
 
+/* helpers for UI */
 function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
 function confettiBurst() {
   const el = document.createElement("div");
