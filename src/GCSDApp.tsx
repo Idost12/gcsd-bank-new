@@ -930,14 +930,39 @@ export default function GCSDApp() {
 
 /* ===== Helpers, UI components, and pages continue in Part 4/4 ===== */
 
-/* ========================= */
-function classNames(...
-const neonBox = (theme:Theme) => ...
-const neonBtn  = (theme:Theme, solid?:boolean) => ...
-const inputCls = (theme:Theme) => ...
+/* ---------- shared helpers (keep ONE copy only) ---------- */
+function classNames(...x: (string | false | undefined)[]) {
+  return x.filter(Boolean).join(" ");
+}
+
+const neonBox = (theme: Theme) =>
+  theme === "neon"
+    ? "bg-[#14110B] border border-orange-800 text-orange-50"
+    : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800";
+
+const neonBtn = (theme: Theme, solid = false) =>
+  theme === "neon"
+    ? solid
+      ? "bg-orange-600 text-black border border-orange-700 hover:bg-orange-500"
+      : "bg-[#0B0B0B] border border-orange-700 hover:bg-[#14110B]"
+    : solid
+    ? "bg-black text-white dark:bg-white dark:text-black hover:opacity-90"
+    : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700";
+
+const inputCls = (theme: Theme) =>
+  classNames(
+    "w-full px-3 py-2 rounded-xl border focus:outline-none",
+    theme === "neon"
+      ? "bg-[#0B0B0B] border-orange-700 text-orange-50 [color-scheme:dark]"
+      : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+  );
 
 /* ===== Epoch helpers (hide history prior to reset) ===== */
-function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, dateISO:string){
+function afterEpoch(
+  epochs: Record<string, string>,
+  agentId: string | undefined,
+  dateISO: string
+) {
   if (!agentId) return true;
   const e = epochs[agentId];
   if (!e) return true;
@@ -945,51 +970,80 @@ function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, date
 }
 
 /* Treat undo-redeem credits as non-earnings */
-function isReversalOfRedemption(t: Transaction){
+function isReversalOfRedemption(t: Transaction) {
   return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
 }
-function isRedeem(t: Transaction){
+function isRedeem(t: Transaction) {
   return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
 }
 
 /* For purchases list, exclude redeems that have a later matching reversal */
 function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
   if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo||"").replace("Redeem: ","");
+  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
   const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(t =>
-    isReversalOfRedemption(t) &&
-    t.toId === redeemTxn.fromId &&
-    (t.memo||"") === `Reversal of redemption: ${label}` &&
-    new Date(t.dateISO).getTime() >= after
+  return !all.some(
+    (t) =>
+      isReversalOfRedemption(t) &&
+      t.toId === redeemTxn.fromId &&
+      (t.memo || "") === `Reversal of redemption: ${label}` &&
+      new Date(t.dateISO).getTime() >= after
   );
 }
 
 /* ===== Simple chart ===== */
-function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
+function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
   const max = Math.max(1, ...earned, ...spent);
-  const h = 110, w = 420, pad = 10, step = (w - pad*2) / (earned.length - 1 || 1);
-  const toPath = (arr:number[]) =>
-    arr.map((v,i)=> `${i===0 ? "M" : "L"} ${pad + i*step},${h - pad - (v/max)*(h-pad*2)}`).join(" ");
+  const h = 110,
+    w = 420,
+    pad = 10,
+    step = (w - pad * 2) / (earned.length - 1 || 1);
+  const toPath = (arr: number[]) =>
+    arr
+      .map(
+        (v, i) =>
+          `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`
+      )
+      .join(" ");
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
-      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
-      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <path
+        d={toPath(earned)}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-emerald-500"
+      />
+      <path
+        d={toPath(spent)}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-rose-500"
+      />
       <g className="text-xs">
-        <text x={pad} y={h-2} className="fill-current opacity-60">Earned</text>
-        <text x={pad+70} y={h-2} className="fill-current opacity-60">Spent</text>
+        <text x={pad} y={h - 2} className="fill-current opacity-60">
+          Earned
+        </text>
+        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
+          Spent
+        </text>
       </g>
     </svg>
   );
 }
-function TileRow({ label, value }:{ label:string; value:number }) {
+
+function TileRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold"><NumberFlash value={value}/></div>
+      <div className="text-2xl font-semibold">
+        <NumberFlash value={value} />
+      </div>
     </div>
   );
 }
+
 function Highlight({ title, value }:{ title:string; value:string }) {
   return (
     <div className="rounded-xl border p-3">
