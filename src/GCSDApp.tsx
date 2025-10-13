@@ -5,6 +5,7 @@ import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Edit3, Shield, Zap
 } from "lucide-react";
+import { kvGet, kvSet } from './lib/db'
 
 /* ===========================
    G C S  B A N K  —  Single-file app
@@ -88,11 +89,27 @@ const INITIAL_STOCK: Record<string, number> = {
 /* ---------- helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
+// Remote-first load (Supabase), fallback to current in-memory default
+async function remoteLoad<T>(key: string, fallback: T): Promise<T> {
+  try {
+    const v = await kvGet<T>(key)
+    if (v != null) return v
+  } catch {}
+  return fallback
+}
+
+// Debounce to avoid writing on every keystroke
+function debounce<T extends (...args:any[])=>any>(fn:T, ms:number) {
+  let t:any; return (...args:any[]) => { clearTimeout(t); t=setTimeout(()=>fn(...args), ms) }
+}
+const kvSaveDebounced = debounce(kvSet, 350);
+
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 function loadJSON<T>(k: string, fallback: T): T { try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } }
 function saveJSON(k: string, v: any) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+
 function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
 function confettiBurst() {
   const el = document.createElement("div");
@@ -181,6 +198,54 @@ export default function GCSDApp() {
   useEffect(()=> saveJSON(STORAGE.GOALS, goals), [goals]);
   useEffect(()=> saveJSON(STORAGE.NOTIFS, notifs), [notifs]);
   useEffect(()=> { localStorage.setItem(STORAGE.THEME, theme); }, [theme]);
+// --- CORE: {accounts, txns} ---
+useEffect(() => {
+  (async () => {
+    const core = await remoteLoad<{accounts:any[]; txns:any[]}>('core', { accounts, txns })
+    setAccounts(core.accounts)
+    setTxns(core.txns)
+  })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [])
+useEffect(() => {
+  kvSaveDebounced('core', { accounts, txns })
+}, [accounts, txns])
+
+// --- STOCK ---
+useEffect(() => {
+  (async () => setStock(await remoteLoad('stock', stock)))()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [])
+useEffect(() => {
+  kvSaveDebounced('stock', stock)
+}, [stock])
+
+// --- PINS ---
+useEffect(() => {
+  (async () => setPins(await remoteLoad('pins', pins)))()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [])
+useEffect(() => {
+  kvSaveDebounced('pins', pins)
+}, [pins])
+
+// --- GOALS ---
+useEffect(() => {
+  (async () => setGoals(await remoteLoad('goals', goals)))()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [])
+useEffect(() => {
+  kvSaveDebounced('goals', goals)
+}, [goals])
+
+// --- NOTIFS ---
+useEffect(() => {
+  (async () => setNotifs(await remoteLoad('notifs', notifs)))()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [])
+useEffect(() => {
+  kvSaveDebounced('notifs', notifs)
+}, [notifs])
 
   /* clock + intro every load */
   useEffect(()=> {
