@@ -122,26 +122,43 @@ function isReversalOfRedemption(t: Transaction) {
   return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
 }
 
-/* “Epochs” to hide transactions prior to resets */
-function afterEpoch(epochs: Record<string, string>, agentId: string | undefined, dateISO: string) {
+/* ===== Epoch helpers (hide history prior to reset) ===== */
+function afterEpoch(
+  epochs: Record<string, string>,
+  agentId: string | undefined,
+  dateISO: string
+) {
   if (!agentId) return true;
   const e = epochs[agentId];
   if (!e) return true;
   return new Date(dateISO).getTime() >= new Date(e).getTime();
 }
 
-/* For purchases list, ignore redeems that later got reversed */
+/* Treat undo-redeem credits as non-earnings */
+function isReversalOfRedemption(t: Transaction) {
+  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
+}
+
+function isRedeem(t: Transaction) {
+  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
+}
+
+/* For purchases list, exclude redeems that have a later matching reversal */
 function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
   if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
   const label = (redeemTxn.memo || "").replace("Redeem: ", "");
   const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(t =>
-    isReversalOfRedemption(t) &&
-    t.toId === redeemTxn.fromId &&
-    (t.memo || "") === `Reversal of redemption: ${label}` &&
-    new Date(t.dateISO).getTime() >= after
+
+  // If we find a later reversal for the same agent & label, this redeem is not active
+  return !all.some(
+    (t) =>
+      isReversalOfRedemption(t) &&
+      t.toId === redeemTxn.fromId &&
+      (t.memo || "") === `Reversal of redemption: ${label}` &&
+      new Date(t.dateISO).getTime() >= after
   );
 }
+
 
 /* ========== Seed data ========== */
 
@@ -1089,39 +1106,6 @@ function PinModalGeneric({
 
 // (duplicate helper block removed)
 
-/* ===== Epoch helpers (hide history prior to reset) ===== */
-function afterEpoch(
-  epochs: Record<string, string>,
-  agentId: string | undefined,
-  dateISO: string
-) {
-  if (!agentId) return true;
-  const e = epochs[agentId];
-  if (!e) return true;
-  return new Date(dateISO).getTime() >= new Date(e).getTime();
-}
-
-/* Treat undo-redeem credits as non-earnings */
-function isReversalOfRedemption(t: Transaction) {
-  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
-}
-function isRedeem(t: Transaction) {
-  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
-}
-
-/* For purchases list, exclude redeems that have a later matching reversal */
-function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
-  if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
-  const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(
-    (t) =>
-      isReversalOfRedemption(t) &&
-      t.toId === redeemTxn.fromId &&
-      (t.memo || "") === `Reversal of redemption: ${label}` &&
-      new Date(t.dateISO).getTime() >= after
-  );
-}
 
 /* =============================
    Small chart + tiles
