@@ -1,8 +1,3 @@
-/* ===========================
-   G C S  B A N K — GCSDApp.tsx
-   (Part 1 / 4)
-   =========================== */
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
@@ -12,10 +7,12 @@ import {
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 
-/* ========== App constants ========== */
+/* ===========================
+   G C S  B A N K
+   =========================== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png"; // put a high-res image in /public/logo.png
+const LOGO_URL = "/logo.png"; // put high-res in /public/logo.png
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
@@ -31,14 +28,12 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system" | "agent" };
+type Account = { id: string; name: string; role?: "system"|"agent" };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
 
 const MAX_PRIZES_PER_AGENT = 2;
-
-/* ========== Lists ========== */
 
 const AGENT_NAMES = [
   "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
@@ -46,7 +41,7 @@ const AGENT_NAMES = [
   "Hope Marshall","Justin Frey","Kevin Nolan","Sofie Roy"
 ];
 
-// Product (sales) rules
+// Updated product rules (these are “earn” credits)
 const PRODUCT_RULES: ProductRule[] = [
   { key: "small_collection",         label: "Small Collection",          gcsd: 190 },
   { key: "big_whv",                  label: "Big WHV",                   gcsd: 320 },
@@ -59,45 +54,44 @@ const PRODUCT_RULES: ProductRule[] = [
   { key: "small_whv",                label: "Small WHV",                 gcsd: 200 },
 ];
 
-// Prizes (updated list / prices you gave)
+// Prizes (DEBITS). Updated prices per your list.
 const PRIZE_ITEMS: PrizeItem[] = [
-  { key: "airfryer",       label: "Phillips Airfryer",        price: 6000 },
-  { key: "soundbar",       label: "LG Soundbar",              price: 11000 },
-  { key: "burger_lunch",   label: "Burger Lunch",             price: 650 },
-  { key: "voucher_50",     label: "Cash Voucher 50лев",       price: 3000 },
-  { key: "poker",          label: "Texas Poker Set",          price: 1200 },
-  { key: "soda_maker",     label: "Phillips Soda Maker",      price: 5200 },
-  { key: "magsafe",        label: "MagSafe Charger",          price: 600 },
-  { key: "galaxy_fit3",    label: "Samsung Galaxy Fit 3",     price: 5000 },
-  { key: "cinema_tickets", label: "Cinema Tickets",           price: 800 },
-  { key: "neo_massager",   label: "Neo Massager",             price: 1400 },
-  { key: "logi_g102",      label: "Logitech G102 Mouse",      price: 1900 },
-  { key: "flight_madrid",  label: "Madrid Flights",           price: 11350 },
-  { key: "flight_london",  label: "London Flights",           price: 11350 },
-  { key: "flight_milan",   label: "Milan Flights",            price: 11350 },
+  { key: "airfryer",       label: "Philips Airfryer",       price: 6000  },
+  { key: "soundbar",       label: "LG Soundbar",            price: 11000 },
+  { key: "burger_lunch",   label: "Burger Lunch",           price: 650   },
+  { key: "voucher_50",     label: "Cash Voucher (50 лв)",   price: 3000  },
+  { key: "poker",          label: "Texas Poker Set",        price: 1200  },
+  { key: "soda_maker",     label: "Philips Soda Maker",     price: 5200  },
+  { key: "magsafe",        label: "MagSafe Charger",        price: 600   },
+  { key: "galaxy_fit3",    label: "Samsung Galaxy Fit 3",   price: 5000  },
+  { key: "cinema_tickets", label: "Cinema Tickets",         price: 800   },
+  { key: "neo_massager",   label: "Neo Massager",           price: 1400  },
+  { key: "logi_g102",      label: "Logitech G102 Mouse",    price: 1900  },
+  { key: "flight_madrid",  label: "Madrid Flights",         price: 11350 },
+  { key: "flight_london",  label: "London Flights",         price: 11350 },
+  { key: "flight_milan",   label: "Milan Flights",          price: 11350 },
 ];
 
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
-  soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2,
-  neo_massager: 1, logi_g102: 1, flight_madrid: 1, flight_london: 1, flight_milan: 1,
+  soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
+  flight_madrid: 1, flight_london: 1, flight_milan: 1,
 };
 
-/* ========== Small helpers ========== */
-
+/* ---------- helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
-const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
-const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
-const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
+const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
-/* Merge helpers (prevent realtime “overwrite”) */
+// merge transactions by id (prevents realtime from overwriting local adds)
 function mergeTxns(local: Transaction[], remote: Transaction[]) {
   const map = new Map<string, Transaction>();
   for (const t of remote) map.set(t.id, t);
-  for (const t of local) map.set(t.id, t); // local wins
+  for (const t of local) map.set(t.id, t); // local wins on conflict
   const all = Array.from(map.values());
-  all.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
+  all.sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
   return all;
 }
 function mergeAccounts(local: Account[], remote: Account[]) {
@@ -106,16 +100,8 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   for (const a of local) map.set(a.id, a);
   return Array.from(map.values());
 }
-
-// Debounce to avoid writing on every keystroke
-function debounce<T extends (...args:any[])=>any>(fn:T, ms:number) {
-  let t:any; return (...args:any[]) => { clearTimeout(t); t=setTimeout(()=>fn(...args), ms) }
-}
-const kvSaveDebounced = debounce(kvSet, 350);
-
-const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
-const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
-const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+const isCorrectionDebit = (t: Transaction) =>
+  t.kind === "debit" && !!t.memo && (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)") || t.memo.startsWith("Balance reset to 0"));
 
 /* ---------- seed ---------- */
 const seedAccounts: Account[] = [
@@ -123,127 +109,44 @@ const seedAccounts: Account[] = [
   ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
 ];
 const VAULT_ID = seedAccounts[0].id;
-
 const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-/* ========== Tiny animated number for gains/losses ========== */
-function NumberFlash({ value }: { value: number }) {
+/* ---------- Animated number ---------- */
+function NumberFlash({ value }:{ value:number }) {
   const prev = useRef(value);
-  const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
-
-  useEffect(() => {
-    if (value > prev.current) { setPulse("up"); setTimeout(() => setPulse("none"), 500); }
-    else if (value < prev.current) { setPulse("down"); setTimeout(() => setPulse("none"), 500); }
+  const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
+  useEffect(()=>{
+    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 500); }
+    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 500); }
     prev.current = value;
   }, [value]);
-
   return (
     <motion.span
       key={value}
       initial={{ y: 4, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: .15 }}
-      className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}
+      className={pulse==="up" ? "text-emerald-500" : pulse==="down" ? "text-rose-500" : undefined}
     >
       {value.toLocaleString()} GCSD
     </motion.span>
   );
 }
 
-/* ========== Derived utilities ========== */
-
-function computeBalances(accounts: Account[], txns: Transaction[], epochs: Record<string, string>) {
-  const map = new Map<string, number>(accounts.map(a => [a.id, 0]));
-  for (const t of txns) {
-    if (!afterEpoch(epochs, t.fromId, t.dateISO) || !afterEpoch(epochs, t.toId, t.dateISO)) continue;
-    if (t.kind === "credit" && t.toId) map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
-    if (t.kind === "debit" && t.fromId) map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
-  }
-  return map;
-}
-function bucketByDay(txns: Transaction[], nonSystem: Set<string>, epochs: Record<string, string>) {
-  const by: Record<string, Set<string>> = {};
-  for (const t of txns) {
-    if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
-  if (t.kind === "credit" && t.toId && nonSystem.has(t.toId) && t.memo !== "Mint" && !isRevRedeem(t)) {
-      const d = new Date(t.dateISO); d.setHours(0, 0, 0, 0);
-      const day = d.toISOString();
-      by[t.toId] = by[t.toId] || new Set<string>();
-      by[t.toId].add(day);
-    }
-  }
-  return by;
-}
-function computeStreaks(by: Record<string, Set<string>>) {
-  const res: Record<string, number> = {};
-  for (const id of Object.keys(by)) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    let streak = 0;
-    for (let i = 0; ; i++) {
-      const d = new Date(today); d.setDate(today.getDate() - i);
-      const iso = d.toISOString();
-      if (by[id].has(iso)) streak++; else break;
-    }
-    res[id] = streak;
-  }
-  return res;
-}
-
-/* ========== Shared helpers (only one copy!) ========== */
-function classNames(...x: (string | false | undefined)[]) {
-  return x.filter(Boolean).join(" ");
-}
-/* ---- canonical helpers: names are unique to avoid re-declare ---- */
-function isRevRedeem(t: Transaction) {
-  // credit posted to undo a previous redemption
-  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
-}
-function isRedeemTxn(t: Transaction) {
-  // a redemption purchase
-  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
-}
-/* For purchases list, exclude redeems that have a later matching reversal */
-function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
-  if (!isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
-  const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(t =>
-    isRevRedeem(t) &&
-    t.toId === redeemTxn.fromId &&
-    (t.memo || "") === `Reversal of redemption: ${label}` &&
-    new Date(t.dateISO).getTime() >= after
-  );
-}
-const neonBox = (theme: Theme) =>
-  theme === "neon" ? "bg-[#14110B] border border-orange-800 text-orange-50"
-                   : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800";
-const neonBtn = (theme: Theme, solid?: boolean) =>
-  theme === "neon"
-    ? solid ? "bg-orange-600 hover:bg-orange-500 text-black border border-orange-700"
-            : "bg-[#0B0B0B] hover:bg-[#0b0b0bd9] text-orange-200 border border-orange-700"
-    : solid ? "bg-black text-white dark:bg-white dark:text-black"
-            : "bg-white dark:bg-slate-800 border";
-const inputCls = (theme: Theme) =>
-  theme === "neon"
-    ? "px-3 py-2 rounded-xl border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 [color-scheme:dark] w-full"
-    : "px-3 py-2 rounded-xl border bg-white dark:bg-slate-800 w-full";
-
-/* ========== Main component start ========== */
-
+/* =================================
+   App
+   ================================= */
 export default function GCSDApp() {
-  // core state
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [stock, setStock] = useState<Record<string, number>>({});
   const [pins, setPins] = useState<Record<string, string>>({});
   const [goals, setGoals] = useState<Record<string, number>>({});
-  const [epochs, setEpochs] = useState<Record<string, string>>({}); // << for “hide history”
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  // ui state
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -255,20 +158,21 @@ export default function GCSDApp() {
   const [clock, setClock] = useState(fmtTime(new Date()));
   const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
-  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
+  const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users">("dashboard");
   const [sandboxActive, setSandboxActive] = useState(false);
-  const [receipt, setReceipt] = useState<{ id: string; when: string; buyer: string; item: string; amount: number } | null>(null);
-  const [pinModal, setPinModal] = useState<{ open: boolean; agentId?: string; onOK?: (good: boolean) => void }>({ open: false });
+  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
+  const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
+  const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
 
-  /* Theme effect */
+  // theme side effect
   useEffect(() => {
     localStorage.setItem("gcs-v4-theme", theme);
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
   }, [theme]);
 
-  /* Hydrate */
+  /* hydrate from KV once on mount */
   useEffect(() => {
     (async () => {
       try {
@@ -284,20 +188,20 @@ export default function GCSDApp() {
         setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
-        setEpochs((await kvGet<Record<string, string>>("gcs-v4-epochs")) ?? {}); // hydrate epochs
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
+        setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
       } finally {
         setHydrated(true);
       }
     })();
   }, []);
 
-  /* Realtime */
+  /* realtime sync: merge (do not overwrite local) */
   useEffect(() => {
     const off = onKVChange(async ({ key, val }) => {
       if (!key) return;
       if (key === "gcs-v4-core") {
-        const remote = (val ?? (await kvGet("gcs-v4-core"))) as { accounts: Account[]; txns: Transaction[] } | null;
+        const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
         if (!remote) return;
         setAccounts(prev => mergeAccounts(prev, remote.accounts || []));
         setTxns(prev => mergeTxns(prev, remote.txns || []));
@@ -306,83 +210,248 @@ export default function GCSDApp() {
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
       if (key === "gcs-v4-pins")   setPins(val ?? (await kvGet("gcs-v4-pins")) ?? {});
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
-      if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
+      if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
     });
     return off;
   }, []);
 
-  /* Persist */
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-core",   { accounts, txns }); }, [hydrated, accounts, txns]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-stock",  stock);              }, [hydrated, stock]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",   pins);               }, [hydrated, pins]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-goals",  goals);              }, [hydrated, goals]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);             }, [hydrated, epochs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);             }, [hydrated, notifs]);
+  /* persist on changes */
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-core",  { accounts, txns }); }, [hydrated, accounts, txns]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
 
-  /* Clock + intro */
-  useEffect(() => {
-    const t = setInterval(() => { const d = new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
-    return () => clearInterval(t);
+  /* clock + intro */
+  useEffect(()=> {
+    const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
+    return ()=> clearInterval(t);
   }, []);
-  useEffect(() => {
+  useEffect(()=> {
     if (!showIntro) return;
-    const timer = setTimeout(() => setShowIntro(false), 2000);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Enter") setShowIntro(false); };
+    const timer = setTimeout(()=> setShowIntro(false), 2000);
+    const onKey = (e: KeyboardEvent)=> { if (e.key === "Enter") setShowIntro(false); };
     window.addEventListener("keydown", onKey);
-    return () => { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
+    return ()=> { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
   }, [showIntro]);
 
-  /* Derived */
-  const balances = useMemo(() => computeBalances(accounts, txns, epochs), [accounts, txns, epochs]);
-  const nonSystemIds = new Set(accounts.filter(a => a.role !== "system").map(a => a.id));
+  /* derived */
+  const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
+  const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
+
+  // Epoch filter to hide history before reset/erase point
+  const afterEpoch = (agentId:string|undefined, dateISO:string) => {
+    if (!agentId) return true;
+    const e = epochs[agentId];
+    if (!e) return true;
+    return new Date(dateISO).getTime() >= new Date(e).getTime();
+  };
 
   const agent = accounts.find(a=>a.id===currentAgentId);
-  const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
+  const agentTxns = txns
+    .filter(t => (t.fromId===currentAgentId || t.toId===currentAgentId) && afterEpoch(currentAgentId, t.dateISO))
+    .sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
   const agentBalance = balances.get(currentAgentId)||0;
-  const lifetimeEarn = agentTxns.filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
-  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
-  const prizeCount = agentTxns.filter(t=> t.kind==="debit" && (t.memo||"").startsWith("Redeem:")).length;
 
-  /* Leaderboard */
-  const dayBuckets = bucketByDay(txns, nonSystemIds, epochs);
+  // lifetime earned: all sale credits (not Mint) MINUS correction/withdraw debits
+  const lifetimeEarn = agentTxns
+    .filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint" && !isRevRedeem(t))
+    .reduce((a,b)=>a+b.amount,0)
+    - agentTxns.filter(t=> isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId && !isCorrectionDebit(t)).reduce((a,b)=>a+b.amount,0);
+  const prizeCount = agentTxns.filter(t=> isRedeemTxn(t)).length;
+
+  // leaderboard + streaks (exclude reversal-of-redemption from earned)
+  const dayBuckets = bucketByDay(txns, nonSystemIds, afterEpoch);
   const streaks = computeStreaks(dayBuckets);
   const leaderboard = Array.from(nonSystemIds).map(id => {
-    const earned = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint").reduce((a,b)=>a+b.amount,0);
+    const credited = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint" && !isRevRedeem(t) && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
+    const withdrawn = txns.filter(t=> isCorrectionDebit(t) && t.fromId===id && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
+    const earned = credited - withdrawn;
     return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
   }).sort((a,b)=> b.earned - a.earned);
 
-  /* Star of the day / leader of month */
+  // star of the day / leader of month (exclude reversal-of-redemption)
   const todayKey = new Date().toLocaleDateString();
-  const curMonth = monthKey(new Date());
-  const earnedToday: Record<string, number> = {};
-  const earnedMonth: Record<string, number> = {};
-
+  const curMonth  = monthKey(new Date());
+  const earnedToday: Record<string, number> = {}, earnedMonth: Record<string, number> = {};
   for (const t of txns) {
-    if (t.kind!=="credit" || !t.toId || t.memo==="Mint" || !nonSystemIds.has(t.toId)) continue;
+    if (t.kind!=="credit" || !t.toId || t.memo==="Mint" || isRevRedeem(t) || !nonSystemIds.has(t.toId)) continue;
+    if (!afterEpoch(t.toId, t.dateISO)) continue;
     const d = new Date(t.dateISO);
-    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
-    if (monthKey(d) === curMonth)         earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId]||0) + t.amount;
+    if (monthKey(d) === curMonth)           earnedMonth[t.toId] = (earnedMonth[t.toId]||0) + t.amount;
   }
+  const starId   = Object.entries(earnedToday).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const leaderId = Object.entries(earnedMonth).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedToday[starId] } : null;
+  const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
-  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const starOfDay = starId ? { name: accounts.find(a => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
-  const leaderOfMonth = leaderId ? { name: accounts.find(a => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
-
-  /* Helpers */
-  const postTxn = (partial: Partial<Transaction> & Pick<Transaction, "kind" | "amount">) =>
-    setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev]);
-
-  const notify = (text: string) => {
-    setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0, 200));
+  /* helpers bound to state */
+  const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
+    setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev ]);
+  const notify = (text:string) => {
+    setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
     setUnread(c => c + 1);
   };
+  const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
+  const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
-  const getName = (id: string) => accounts.find(a => a.id === id)?.name || "—";
-  const openAgentPin = (agentId: string, cb: (ok: boolean) => void) => setPinModal({ open: true, agentId, onOK: cb });
+  /* actions (credit, redeem, reverse, withdraw, reset, sandbox) come next… */
 
-  /* Sandbox controls — do NOT auto-exit when clicking Home */
+  /* actions */
+  function adminCredit(agentId:string, ruleKey:string, qty:number){
+    if (!isAdmin) return toast.error("Admin only");
+    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
+    if (!agentId) return toast.error("Choose agent");
+    const amount = rule.gcsd * Math.max(1, qty||1);
+
+    // Prevent negative agents by allowing credits always
+    postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
+    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
+    toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
+  }
+
+  function manualTransfer(agentId:string, amount:number, note:string){
+    if (!isAdmin) return toast.error("Admin only");
+    if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
+    postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
+    notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
+    toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
+  }
+
+  function redeemPrize(agentId:string, prizeKey:string){
+    const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
+    const left = stock[prizeKey] ?? 0;
+    const bal  = balances.get(agentId)||0;
+    const count= txns.filter(t=> t.fromId===agentId && isRedeemTxn(t) && afterEpoch(agentId, t.dateISO)).length;
+
+    if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
+    if (left <= 0) return toast.error("Out of stock");
+    if (bal  < prize.price) return toast.error("Insufficient balance");
+
+    openAgentPin(agentId, (ok)=>{
+      if (!ok) return toast.error("Wrong PIN");
+      // debit – redemption (NOT a withdraw and NOT counted as redeem reversal)
+      postTxn({ kind:"debit", amount: prize.price, fromId: agentId, memo:`Redeem: ${prize.label}` });
+      setStock(s=> ({...s, [prizeKey]: left-1}));
+      notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
+      setReceipt({
+        id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
+        when: new Date().toLocaleString(), buyer: getName(agentId), item: prize.label, amount: prize.price
+      });
+      toast.success(`Redeemed ${prize.label}`);
+    });
+  }
+
+  function undoSale(txId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
+    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo ?? "Sale"}` });
+    notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
+    toast.success("Sale reversed");
+  }
+
+  function undoRedemption(txId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="debit" || !t.fromId) return;
+    const label = (t.memo||"").replace("Redeem: ","");
+    const prize = PRIZE_ITEMS.find(p=>p.label===label);
+    // CREDIT back – but mark as reversal of redemption so it doesn't count as “earned”
+    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}` });
+    if (prize) setStock(s=> ({...s, [prize.key]: (s[prize.key]??0)+1}));
+    notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
+    toast.success("Redemption reversed & stock restored");
+  }
+
+  function withdrawAgentCredit(agentId:string, txId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x=>x.id===txId);
+    if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
+    // This is a correction (withdraw) and must NOT be treated as a redeem
+    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
+    notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
+    toast.success("Credits withdrawn");
+  }
+
+  function addAgent(name:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const trimmed = name.trim();
+    if (!trimmed) return toast.error("Enter a name");
+    if (accounts.some(a => a.role==="agent" && a.name.toLowerCase()===trimmed.toLowerCase())) {
+      return toast.error("Agent already exists");
+    }
+    const a: Account = { id: uid(), name: trimmed, role: "agent" };
+    setAccounts(prev=> [...prev, a]);
+    notify(`👤 New agent added: ${trimmed}`);
+    toast.success(`Added agent ${trimmed}`);
+  }
+
+  function setAgentPin(agentId:string, pin:string){
+    if (!isAdmin) return toast.error("Admin only");
+    if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
+    setPins(prev=> ({...prev, [agentId]: pin}));
+    notify(`🔐 PIN set/reset for ${getName(agentId)}`);
+    toast.success("PIN updated");
+  }
+
+  function resetPin(agentId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    setPins(prev=> { const next = {...prev}; delete next[agentId]; return next; });
+    notify(`🔐 PIN cleared for ${getName(agentId)}`);
+    toast.success("PIN reset (cleared)");
+  }
+
+  function setSavingsGoal(agentId:string, amount:number){
+    if (amount <= 0) return toast.error("Enter a positive goal");
+    openAgentPin(agentId, (ok)=>{
+      if (!ok) return toast.error("Wrong PIN");
+      setGoals(prev=> ({...prev, [agentId]: amount}));
+      notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
+      toast.success("Goal updated");
+    });
+  }
+
+  // Reset balance to 0 by posting a correcting transaction (and mark an epoch to hide prior history)
+  function resetAgentBalance(agentId:string){
+    if (!isAdmin) return toast.error("Admin only");
+    const bal = balances.get(agentId)||0;
+    if (bal === 0) {
+      // still mark epoch so previous history is hidden if desired
+      setEpochs(prev=> ({...prev, [agentId]: nowISO()}));
+      return toast.info("Balance already zero; history hidden from now");
+    }
+    if (bal > 0) {
+      postTxn({ kind:"debit", amount: bal, fromId: agentId, memo:`Balance reset to 0` });
+      notify(`🧮 Reset balance of ${getName(agentId)} by −${bal} GCSD`);
+    } else {
+      postTxn({ kind:"credit", amount: -bal, toId: agentId, memo:`Balance reset to 0` });
+      notify(`🧮 Reset balance of ${getName(agentId)} by +${-bal} GCSD`);
+    }
+    // Mark epoch so old activity is hidden in views
+    setEpochs(prev=> ({...prev, [agentId]: nowISO()}));
+    toast.success("Balance reset");
+  }
+
+  // Completely wipe app (asks for extra PIN)
+  function completeReset(){
+    if (!isAdmin) return toast.error("Admin only");
+    const extra = prompt("Enter additional reset PIN to confirm:");
+    if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
+    const acc = [seedAccounts[0], ...accounts.filter(a=>a.role==="agent")]; // keep agents
+    setAccounts(acc);
+    setTxns([]);
+    setStock(INITIAL_STOCK);
+    setGoals({});
+    setPins({});
+    setEpochs({});
+    notify("🧨 App was reset by admin");
+    toast.success("Everything reset");
+  }
+
+  /* Sandbox (require PIN first, then stay until exit only) */
   function enterSandbox() {
     const pin = prompt("Admin PIN to enter Sandbox:");
     if (!pin || !/^\d{5,8}$/.test(pin)) return toast.error("Enter a valid PIN");
@@ -393,163 +462,11 @@ export default function GCSDApp() {
   }
   function exitSandbox() {
     setSandboxActive(false);
+    setPortal("home");
     toast.success("Sandbox cleared");
-    // stay on current portal unless user navigates
   }
 
-  /* ==== Part 1 ends here. Header, pages, actions and Admin portal continue in Part 2… ==== */
-  /* ========= Actions ========= */
-
-  function adminCredit(agentId: string, ruleKey: string, qty: number) {
-    if (!isAdmin) return toast.error("Admin only");
-    const rule = PRODUCT_RULES.find(r => r.key === ruleKey); if (!rule) return;
-    if (!agentId) return toast.error("Choose agent");
-    const amount = rule.gcsd * Math.max(1, qty || 1);
-    postTxn({ kind: "credit", amount, toId: agentId, memo: `${rule.label}${qty > 1 ? ` x${qty}` : ""}`, meta: { product: rule.key, qty } });
-    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty > 1 ? ` ×${qty}` : ""}`);
-    toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
-  }
-
-  function manualTransfer(agentId: string, amount: number, note: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    if (!agentId || !amount || amount <= 0) return toast.error("Enter agent and amount");
-    postTxn({ kind: "credit", amount, toId: agentId, memo: note || "Manual transfer" });
-    notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
-    toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
-  }
-
-  function redeemPrize(agentId: string, prizeKey: string) {
-    const prize = PRIZE_ITEMS.find(p => p.key === prizeKey); if (!prize) return;
-    const left = stock[prizeKey] ?? 0;
-    const bal = balances.get(agentId) || 0;
-  const count = txns.filter(t => isRedeemTxn(t) && t.fromId === agentId).length;
-    if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
-    if (left <= 0) return toast.error("Out of stock");
-    if (bal < prize.price) return toast.error("Insufficient balance");
-
-    openAgentPin(agentId, (ok) => {
-      if (!ok) return toast.error("Wrong PIN");
-      postTxn({ kind: "debit", amount: prize.price, fromId: agentId, memo: `Redeem: ${prize.label}` });
-      setStock(s => ({ ...s, [prizeKey]: left - 1 }));
-      notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
-      setReceipt({
-        id: "ORD-" + Math.random().toString(36).slice(2, 7).toUpperCase(),
-        when: new Date().toLocaleString(),
-        buyer: getName(agentId),
-        item: prize.label,
-        amount: prize.price
-      });
-      toast.success(`Redeemed ${prize.label}`);
-    });
-  }
-
-  function undoSale(txId: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    const t = txns.find(x => x.id === txId); if (!t || t.kind !== "credit" || !t.toId) return;
-    postTxn({ kind: "debit", amount: t.amount, fromId: t.toId, memo: `Reversal of sale: ${t.memo}` });
-    notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
-    toast.success("Sale reversed");
-  }
-
-  function undoRedemption(txId: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    const t = txns.find(x => x.id === txId); if (!t || t.kind !== "debit" || !t.fromId) return;
-    const label = (t.memo || "").replace("Redeem: ", "");
-    const prize = PRIZE_ITEMS.find(p => p.label === label);
-    postTxn({ kind: "credit", amount: t.amount, toId: t.fromId, memo: `Reversal of redemption: ${label}` });
-    if (prize) setStock(s => ({ ...s, [prize.key]: (s[prize.key] ?? 0) + 1 }));
-    notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
-    toast.success("Redemption reversed & stock restored");
-  }
-
-  function withdrawAgentCredit(agentId: string, txId: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    const t = txns.find(x => x.id === txId);
-    if (!t || t.kind !== "credit" || t.toId !== agentId) return toast.error("Choose a credit to withdraw");
-    postTxn({ kind: "debit", amount: t.amount, fromId: agentId, memo: `Correction (withdraw): ${t.memo || "Credit"}` });
-    notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
-    toast.success("Credits withdrawn");
-  }
-
-  function addAgent(name: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    const trimmed = name.trim();
-    if (!trimmed) return toast.error("Enter a name");
-    if (accounts.some(a => a.role === "agent" && a.name.toLowerCase() === trimmed.toLowerCase())) {
-      return toast.error("Agent already exists");
-    }
-    const a: Account = { id: uid(), name: trimmed, role: "agent" };
-    setAccounts(prev => [...prev, a]);
-    notify(`👤 New agent added: ${trimmed}`);
-    toast.success(`Added agent ${trimmed}`);
-  }
-
-  function setAgentPin(agentId: string, pin: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
-    setPins(prev => ({ ...prev, [agentId]: pin }));
-    notify(`🔐 PIN set/reset for ${getName(agentId)}`);
-    toast.success("PIN updated");
-  }
-
-  function resetPin(agentId: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    setPins(prev => { const next = { ...prev }; delete next[agentId]; return next; });
-    notify(`🔐 PIN cleared for ${getName(agentId)}`);
-    toast.success("PIN reset (cleared)");
-  }
-
-  function setSavingsGoal(agentId: string, amount: number) {
-    if (amount <= 0) return toast.error("Enter a positive goal");
-    openAgentPin(agentId, (ok) => {
-      if (!ok) return toast.error("Wrong PIN");
-      setGoals(prev => ({ ...prev, [agentId]: amount }));
-      notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
-      toast.success("Goal updated");
-    });
-  }
-
-  function resetAgentBalance(agentId: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    const bal = balances.get(agentId) || 0;
-    if (bal === 0) return toast.info("Balance already zero");
-    if (bal > 0) {
-      postTxn({ kind: "debit", amount: bal, fromId: agentId, memo: `Balance reset to 0` });
-      notify(`🧮 Reset balance of ${getName(agentId)} by −${bal} GCSD`);
-    } else {
-      postTxn({ kind: "credit", amount: -bal, toId: agentId, memo: `Balance reset to 0` });
-      notify(`🧮 Reset balance of ${getName(agentId)} by +${-bal} GCSD`);
-    }
-    // mark epoch so history prior to now is hidden
-    setEpochs(prev => ({ ...prev, [agentId]: nowISO() }));
-    toast.success("Balance reset & history hidden prior to reset");
-  }
-
-  function eraseAgentHistory(agentId: string) {
-    if (!isAdmin) return toast.error("Admin only");
-    setEpochs(prev => ({ ...prev, [agentId]: nowISO() }));
-    notify(`🧹 History hidden prior to reset for ${getName(agentId)}`);
-    toast.success("Agent history (prior to now) hidden");
-  }
-
-  function fullResetWithPin() {
-    if (!isAdmin) return toast.error("Admin only");
-    const extra = prompt("Enter extra reset PIN (6–8 digits):");
-    if (!extra || !/^\d{6,8}$/.test(extra)) return toast.error("Invalid extra PIN");
-    // Clear all non-system data but keep seed vault + products
-    const newEpoch = nowISO();
-    setEpochs({});
-    setPins({});
-    setGoals({});
-    setStock(INITIAL_STOCK);
-    setTxns(seedTxns);
-    setAccounts(seedAccounts);
-    notify("🧯 Full reset executed");
-    toast.success("Application reset");
-  }
-
-  /* ========= Render ========= */
-
+  /* ============================ render ============================ */
   return (
     <div
       className={
@@ -563,17 +480,17 @@ export default function GCSDApp() {
       {/* Intro */}
       <AnimatePresence>
         {showIntro && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className={`fixed inset-0 z-50 grid place-items-center ${theme === "neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
-            <motion.div initial={{ scale: 0.96 }} animate={{ scale: 1 }} className="text-center p-8">
-              <div className="mx-auto mb-6 w-52 h-52 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
-                <img src={LOGO_URL} alt="GCS Bank logo" className="w-44 h-44 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]" />
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
+            <motion.div initial={{scale:0.96}} animate={{scale:1}} className="text-center p-8">
+              <div className="mx-auto mb-6 w-48 h-48 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
+                <img src={LOGO_URL} alt="GCS Bank logo" className="w-40 h-40 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]"/>
               </div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <div className="text-white/70 mt-2 mb-6">Press Enter to continue</div>
-              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}
+              <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.97}}
                 className="px-4 py-2 rounded-xl bg-white text-black"
-                onClick={() => setShowIntro(false)}>
+                onClick={()=> setShowIntro(false)}>
                 Skip
               </motion.button>
             </motion.div>
@@ -595,49 +512,49 @@ export default function GCSDApp() {
             <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={() => setPortal("home")}
+              onClick={()=> setPortal("home")} // note: does NOT exit sandbox; that is explicit
               title="Go Home"
             >
-              <HomeIcon className="w-4 h-4" /> Home
+              <HomeIcon className="w-4 h-4"/> Home
             </button>
             <button
               className={classNames("ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={() => (portal === "sandbox" ? exitSandbox() : enterSandbox())}
-              title={portal === "sandbox" ? "Exit Sandbox" : "Enter Sandbox"}
+              onClick={()=> portal==="sandbox" ? exitSandbox() : enterSandbox()}
+              title={portal==="sandbox" ? "Exit Sandbox" : "Enter Sandbox"}
             >
-              <Shield className="w-4 h-4" /> {portal === "sandbox" ? "Exit Sandbox" : "Sandbox"}
+              <Shield className="w-4 h-4"/> {portal==="sandbox" ? "Exit Sandbox" : "Sandbox"}
             </button>
           </div>
           <div className="flex items-center gap-3">
             <NotificationsBell notifs={notifs} theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
-            <span className={classNames("text-xs font-mono", theme === "neon" ? "text-orange-200" : "text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
-            <ThemeToggle theme={theme} setTheme={setTheme} />
-            <motion.button whileHover={{ y: -1, boxShadow: "0 6px 16px rgba(0,0,0,.08)" }} whileTap={{ scale: 0.98 }}
+            <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+            <ThemeToggle theme={theme} setTheme={setTheme}/>
+            <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
               className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
-              onClick={() => setPickerOpen(true)}>
-              <Users className="w-4 h-4" /> Switch User
+              onClick={()=> setPickerOpen(true)}>
+              <Users className="w-4 h-4"/> Switch User
             </motion.button>
           </div>
         </div>
       </div>
 
-      {/* Switch user modal */}
+      {/* Switch User */}
       <AnimatePresence>
         {pickerOpen && (
           <Picker
             theme={theme}
             accounts={accounts}
             balances={balances}
-            onClose={() => setPickerOpen(false)}
-            onChooseAdmin={() => { setPortal("admin"); setIsAdmin(false); setPickerOpen(false); }}
-            onChooseAgent={(id) => { setCurrentAgentId(id); setPortal("agent"); setIsAdmin(false); setPickerOpen(false); }}
+            onClose={()=> setPickerOpen(false)}
+            onChooseAdmin={()=>{ setPortal("admin"); setIsAdmin(false); setPickerOpen(false); }}
+            onChooseAgent={(id)=>{ setCurrentAgentId(id); setPortal("agent"); setIsAdmin(false); setPickerOpen(false); }}
           />
         )}
       </AnimatePresence>
 
-      {/* Admin PIN gate */}
+      {/* Admin PIN modal */}
       <AnimatePresence>
-        {portal === "admin" && !isAdmin && (
+        {portal==="admin" && !isAdmin && (
           <PinModalGeneric
             title="Admin PIN"
             maxLen={8}
@@ -655,23 +572,22 @@ export default function GCSDApp() {
       {/* Agent PIN modal */}
       <PinModal
         open={pinModal.open}
-        onClose={() => setPinModal({ open: false })}
-        onCheck={(pin) => {
+        onClose={()=> setPinModal({open:false})}
+        onCheck={(pin)=>{
           const aId = pinModal.agentId!;
           const ok = pins[aId] && pin === pins[aId];
           pinModal.onOK?.(!!ok);
-          setPinModal({ open: false });
+          setPinModal({open:false});
         }}
       />
-
       {/* Receipt */}
       <AnimatePresence>
         {receipt && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
               <div className="flex items-center justify-between mb-3">
-                <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4" /> Receipt</div>
-                <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={() => setReceipt(null)}><X className="w-4 h-4" /></button>
+                <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4"/> Receipt</div>
+                <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={()=>setReceipt(null)}><X className="w-4 h-4"/></button>
               </div>
               <div className="text-sm space-y-2">
                 <div><b>Order ID:</b> {receipt.id}</div>
@@ -688,45 +604,41 @@ export default function GCSDApp() {
 
       {/* Pages */}
       <div className="max-w-6xl mx-auto px-4 py-6">
-        {portal === "home" && (
+        {portal==="home" && (
           <Home
             theme={theme}
             accounts={accounts}
             txns={txns}
             stock={stock}
             prizes={PRIZE_ITEMS}
-            leaderboard={leaderboard}
-            starOfDay={starOfDay}
-            leaderOfMonth={leaderOfMonth}
+            // leaderboard/awards are computed inside Home from txns & epochs-aware helpers
           />
         )}
 
-        {portal === "agent" && currentAgentId && (
+        {portal==="agent" && currentAgentId && (
           <AgentPortal
             theme={theme}
-            agentName={agent?.name || ""}
-            agentBalance={agentBalance}
-            lifetimeEarn={lifetimeEarn}
-            lifetimeSpend={lifetimeSpend}
-            goal={goals[currentAgentId] || 0}
-            setGoal={(amt) => setSavingsGoal(currentAgentId, amt)}
-            txns={agentTxns}
-            prizes={PRIZE_ITEMS}
+            agentId={currentAgentId}
+            accounts={accounts}
+            txns={txns}
             stock={stock}
-            prizeCount={prizeCount}
-            onRedeem={(k) => redeemPrize(currentAgentId, k)}
+            prizes={PRIZE_ITEMS}
+            goals={goals}
+            onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
+            onRedeem={(k)=>redeemPrize(currentAgentId, k)}
           />
         )}
 
-        {portal === "admin" && (
+        {portal==="admin" && (
           <AdminPortal
             theme={theme}
             isAdmin={isAdmin}
             accounts={accounts}
-            balances={balances}
+            txns={txns}
             stock={stock}
             rules={PRODUCT_RULES}
-            txns={txns}
+            pins={pins}
+            epochs={epochs}
             onCredit={adminCredit}
             onManualTransfer={manualTransfer}
             onUndoSale={undoSale}
@@ -734,36 +646,176 @@ export default function GCSDApp() {
             onWithdraw={withdrawAgentCredit}
             onAddAgent={addAgent}
             onSetPin={setAgentPin}
-            onResetPin={(id) => resetPin(id)}
-            onResetBalance={(id) => resetAgentBalance(id)}
-            onEraseHistory={(id) => eraseAgentHistory(id)}
-            onFullReset={fullResetWithPin}
-            pins={pins}
-            epochs={epochs}
-            adminTab={adminTab} setAdminTab={setAdminTab}
+            onResetPin={(id)=>resetPin(id)}
+            onResetBalance={(id)=>resetAgentBalance(id)}
+            onCompleteReset={completeReset}
           />
         )}
 
-        {portal === "sandbox" && <SandboxPage onExit={() => { setPortal("sandbox"); /* explicit stay */ }} theme={theme} />}
+        {portal==="sandbox" && <SandboxPage onExit={exitSandbox} theme={theme}/>}
 
-        {portal === "feed" && <FeedPage theme={theme} notifs={notifs} />}
+        {portal==="feed" && <FeedPage theme={theme} notifs={notifs} />}
       </div>
     </div>
   );
-/* =============================
-   Shared UI Components
-   ============================= */
+} // end GCSDApp component
+/* ===========================
+   Shared helpers & UI
+   =========================== */
+
+/** Safe join */
+function classNames(...x: (string | false | undefined | null)[]) {
+  return x.filter(Boolean).join(" ");
+}
+
+/** Neon-aware containers/buttons/inputs */
+const neonBox = (theme: Theme) =>
+  theme === "neon"
+    ? "bg-[#14110B] border border-orange-800 text-orange-50"
+    : "bg-white dark:bg-slate-800";
+
+const neonBtn = (theme: Theme, solid?: boolean) =>
+  theme === "neon"
+    ? solid
+      ? "bg-orange-700 text-black border border-orange-600"
+      : "bg-[#0B0B0B] border border-orange-800 text-orange-50"
+    : solid
+      ? "bg-black text-white"
+      : "bg-white dark:bg-slate-800";
+
+const inputCls = (theme: Theme) =>
+  theme === "neon"
+    ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60 [color-scheme:dark]"
+    : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
+
+/* ===== Epoch helpers (hide history prior to reset) ===== */
+function afterEpoch(epochs: Record<string, string>, agentId: string | undefined, dateISO: string) {
+  if (!agentId) return true;
+  const e = epochs[agentId];
+  if (!e) return true;
+  return new Date(dateISO).getTime() >= new Date(e).getTime();
+}
+
+/* ===== Transaction classifiers ===== */
+function isCorrectionDebit(t: Transaction) {
+  return (
+    t.kind === "debit" &&
+    !!t.memo &&
+    (t.memo.startsWith("Reversal of sale") ||
+      t.memo.startsWith("Correction (withdraw)") ||
+      t.memo.startsWith("Balance reset to 0"))
+  );
+}
+function isReversalOfRedemption(t: Transaction) {
+  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
+}
+function isRedeemTxn(t: Transaction) {
+  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
+}
+
+/** For purchases list, exclude redeems that later got reversed */
+function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
+  if (!isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
+  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
+  const after = new Date(redeemTxn.dateISO).getTime();
+  return !all.some(
+    (t) =>
+      isReversalOfRedemption(t) &&
+      t.toId === redeemTxn.fromId &&
+      (t.memo || "") === `Reversal of redemption: ${label}` &&
+      new Date(t.dateISO).getTime() >= after
+  );
+}
+
+/* ===== Mini chart/tiles ===== */
+function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
+  const max = Math.max(1, ...earned, ...spent);
+  const h = 110,
+    w = 420,
+    pad = 10,
+    step = (w - pad * 2) / (earned.length - 1 || 1);
+  const toPath = (arr: number[]) =>
+    arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
+      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
+      <path d={toPath(spent)} fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <g className="text-xs">
+        <text x={pad} y={h - 2} className="fill-current opacity-60">
+          Earned
+        </text>
+        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
+          Spent
+        </text>
+      </g>
+    </svg>
+  );
+}
+function TileRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{label}</div>
+      <div className="text-2xl font-semibold">
+        <NumberFlash value={value} />
+      </div>
+    </div>
+  );
+}
+
+/* ===== Animated number flash (up/down) ===== */
+function NumberFlash({ value }: { value: number }) {
+  const prev = React.useRef(value);
+  const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
+
+  useEffect(() => {
+    if (value > prev.current) {
+      setPulse("up");
+      const t = setTimeout(() => setPulse("none"), 500);
+      return () => clearTimeout(t);
+    } else if (value < prev.current) {
+      setPulse("down");
+      const t = setTimeout(() => setPulse("none"), 500);
+      return () => clearTimeout(t);
+    }
+    prev.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    prev.current = value;
+  }, [value]);
+
+  return (
+    <motion.span
+      key={value}
+      initial={{ y: 4, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.15 }}
+      className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}
+    >
+      {value.toLocaleString()} GCSD
+    </motion.span>
+  );
+}
+
+/* ===== Misc helpers ===== */
+function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: Transaction) => boolean, epochs?: Record<string, string>) {
+  const start = new Date(day);
+  const end = new Date(day);
+  end.setDate(start.getDate() + spanDays);
+  return txns
+    .filter((t) => pred(t) && new Date(t.dateISO) >= start && new Date(t.dateISO) < end && (!epochs || afterEpoch(epochs, t.toId || t.fromId, t.dateISO)))
+    .reduce((a, b) => a + b.amount, 0);
+}
+
+/* ===========================
+   Shared UI pieces
+   =========================== */
 
 function TypeLabel({ text }: { text: string }) {
   return (
     <div aria-label={text} className="text-2xl font-semibold">
       {text.split("").map((ch, i) => (
-        <motion.span
-          key={i}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.08, delay: i * 0.015 }}
-        >
+        <motion.span key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.08, delay: i * 0.015 }}>
           {ch}
         </motion.span>
       ))}
@@ -778,46 +830,25 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
     <div className="flex items-center gap-2">
       <button
         onClick={() => setTheme(isDark ? "light" : "dark")}
-        className={
-          theme === "neon"
-            ? "h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60"
-            : "h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
-        }
+        className={theme === "neon" ? "h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60" : "h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"}
         aria-label={isDark ? "Switch to light" : "Switch to dark"}
         title={isDark ? "Light" : "Dark"}
       >
         <AnimatePresence initial={false} mode="wait">
           {isDark ? (
-            <motion.span
-              key="moon"
-              initial={{ rotate: -20, scale: 0.7, opacity: 0 }}
-              animate={{ rotate: 0, scale: 1, opacity: 1 }}
-              exit={{ rotate: 20, scale: 0.7, opacity: 0 }}
-              transition={{ duration: 0.12 }}
-            >
+            <motion.span key="moon" initial={{ rotate: -20, scale: 0.7, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 20, scale: 0.7, opacity: 0 }} transition={{ duration: 0.12 }}>
               <Moon className="w-4 h-4" />
             </motion.span>
           ) : (
-            <motion.span
-              key="sun"
-              initial={{ rotate: 20, scale: 0.7, opacity: 0 }}
-              animate={{ rotate: 0, scale: 1, opacity: 1 }}
-              exit={{ rotate: -20, scale: 0.7, opacity: 0 }}
-              transition={{ duration: 0.12 }}
-            >
+            <motion.span key="sun" initial={{ rotate: 20, scale: 0.7, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: -20, scale: 0.7, opacity: 0 }} transition={{ duration: 0.12 }}>
               <Sun className="w-4 h-4" />
             </motion.span>
           )}
         </AnimatePresence>
       </button>
-
       <button
         onClick={() => setTheme(isNeon ? "light" : "neon")}
-        className={
-          isNeon
-            ? "h-8 px-2 rounded-full border border-orange-700 bg-orange-700 text-black inline-flex items-center gap-1"
-            : "h-8 px-2 rounded-full border inline-flex items-center gap-1 bg-white dark:bg-slate-800"
-        }
+        className={isNeon ? "h-8 px-2 rounded-full border border-orange-700 bg-orange-700 text-black inline-flex items-center gap-1" : "h-8 px-2 rounded-full border inline-flex items-center gap-1 bg-white dark:bg-slate-800"}
         title="Neon mode"
       >
         <Zap className="w-4 h-4" /> Neon
@@ -826,17 +857,7 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
   );
 }
 
-function NotificationsBell({
-  notifs,
-  theme,
-  unread,
-  onOpenFeed
-}: {
-  notifs: Notification[];
-  theme: Theme;
-  unread: number;
-  onOpenFeed: () => void;
-}) {
+function NotificationsBell({ notifs, theme, unread, onOpenFeed }: { notifs: Notification[]; theme: Theme; unread: number; onOpenFeed: () => void }) {
   return (
     <button
       className={
@@ -863,7 +884,7 @@ function Picker({
   balances,
   onClose,
   onChooseAdmin,
-  onChooseAgent
+  onChooseAgent,
 }: {
   theme: Theme;
   accounts: Account[];
@@ -873,18 +894,8 @@ function Picker({
   onChooseAgent: (id: string) => void;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center"
-    >
-      <motion.div
-        initial={{ y: 18, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ type: "spring", stiffness: 160, damping: 18 }}
-        className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}
-      >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
+      <motion.div initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 18 }} className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" />
@@ -904,13 +915,11 @@ function Picker({
           </HoverCard>
 
           {accounts
-            .filter(a => a.role !== "system")
+            .filter((a) => a.role !== "system")
             .map((a, i) => (
               <HoverCard key={a.id} theme={theme} delay={0.03 + i * 0.02} onClick={() => onChooseAgent(a.id)}>
                 <div className="font-medium">{a.name}</div>
-                <div className="text-xs opacity-70">
-                  Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD
-                </div>
+                <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
               </HoverCard>
             ))}
         </div>
@@ -918,136 +927,54 @@ function Picker({
     </motion.div>
   );
 }
-
-function HoverCard({
-  children,
-  onClick,
-  delay = 0.03,
-  theme
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  delay?: number;
-  theme: Theme;
-}) {
+function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   return (
-    <motion.button
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay }}
-      whileHover={{ y: -3, boxShadow: "0 10px 22px rgba(0,0,0,.10)" }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onClick}
-      className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}
-    >
+    <motion.button initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} whileHover={{ y: -3, boxShadow: "0 10px 22px rgba(0,0,0,.10)" }} whileTap={{ scale: 0.98 }} onClick={onClick} className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}>
       {children}
     </motion.button>
   );
 }
 
-/* Reusable pretty select (with Neon contrast fix) */
-function FancySelect({
-  value,
-  onChange,
-  children,
-  theme,
-  placeholder
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  children: React.ReactNode;
-  theme: Theme;
-  placeholder?: string;
-}) {
+/** Neon-friendly select */
+function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div
-      className={classNames(
-        "relative rounded-xl",
-        theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800"
-      )}
-    >
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames(
-          "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none",
-          theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent"
-        )}
+        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none", theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent")}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
       </select>
-      <ChevronDown
-        className={classNames(
-          "pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4",
-          theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300"
-        )}
-      />
+      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300")} />
     </div>
   );
 }
 
-/* PIN Modals */
-function PinModal({
-  open,
-  onClose,
-  onCheck
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCheck: (pin: string) => void;
-}) {
+/* PIN modals */
+function PinModal({ open, onClose, onCheck }: { open: boolean; onClose: () => void; onCheck: (pin: string) => void }) {
   return (
-    <AnimatePresence>
-      {open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} />}
-    </AnimatePresence>
+    <AnimatePresence>{open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} />}</AnimatePresence>
   );
 }
-
-function PinModalGeneric({
-  title,
-  onClose,
-  onOk,
-  maxLen
-}: {
-  title: string;
-  onClose: () => void;
-  onOk: (pin: string) => void;
-  maxLen: number;
-}) {
+function PinModalGeneric({ title, onClose, onOk, maxLen }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number }) {
   const [pin, setPin] = useState("");
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-black/40 grid place-items-center"
-    >
-      <motion.div
-        initial={{ scale: 0.95 }}
-        animate={{ scale: 1 }}
-        exit={{ scale: 0.95 }}
-        className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(440px,92vw)]"
-      >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(440px,92vw)]">
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold flex items-center gap-2">
             <Lock className="w-4 h-4" /> {title}
           </div>
+          <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </button>
         </div>
         <div className="space-y-3">
           <div className="text-sm opacity-70">Enter {maxLen}-digit PIN.</div>
-          <input
-            className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800"
-            placeholder="PIN"
-            type="password"
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-            maxLength={maxLen}
-          />
-          <button
-            className="px-3 py-1.5 rounded-xl border bg-black text-white"
-            onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}
-          >
+          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={maxLen} />
+          <button className="px-3 py-1.5 rounded-xl border bg-black text-white" onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}>
             <Check className="w-4 h-4 inline mr-1" /> OK
           </button>
         </div>
@@ -1055,102 +982,34 @@ function PinModalGeneric({
     </motion.div>
   );
 }
-}
-/* =============================
-   Helpers (styling + tiny utils)
-   ============================= */
 
-// (duplicate helper block removed)
+/* ===========================
+   Pages
+   =========================== */
 
-
-/* =============================
-   Small chart + tiles
-   ============================= */
-
-function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
-  const max = Math.max(1, ...earned, ...spent);
-  const h = 110,
-    w = 420,
-    pad = 10,
-    step = (w - pad * 2) / (earned.length - 1 || 1);
-  const toPath = (arr: number[]) =>
-    arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
-  return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
-      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
-      <path d={toPath(spent)} fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
-      <g className="text-xs">
-        <text x={pad} y={h - 2} className="fill-current opacity-60">
-          Earned
-        </text>
-        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
-          Spent
-        </text>
-      </g>
-    </svg>
-  );
-}
-
-function TileRow({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">
-        <NumberFlash value={value} />
-      </div>
-    </div>
-  );
-}
-
-function Highlight({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{title}</div>
-      <div>{value}</div>
-    </div>
-  );
-}
-
-function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: Transaction) => boolean) {
-  const start = new Date(day);
-  const end = new Date(day);
-  end.setDate(start.getDate() + spanDays);
-  return txns
-    .filter((t) => pred(t) && new Date(t.dateISO) >= start && new Date(t.dateISO) < end)
-    .reduce((a, b) => a + b.amount, 0);
-}
-
-/* =============================
-   Home Page
-   ============================= */
-
+/** HOME: computes leaderboard/30d stats AFTER epoch cutoffs and excludes reversal credits from "earned" */
 function Home({
   theme,
   accounts,
   txns,
   stock,
   prizes,
-  leaderboard,
-  starOfDay,
-  leaderOfMonth
 }: {
   theme: Theme;
   accounts: Account[];
   txns: Transaction[];
   stock: Record<string, number>;
   prizes: PrizeItem[];
-  leaderboard: { id: string; name: string; earned: number; streak: number }[];
-  starOfDay: { name: string; amount: number } | null;
-  leaderOfMonth: { name: string; amount: number } | null;
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
-  // Purchased prizes (active only)
+  // Purchases list – only active redeems (not reversed)
   const purchases = txns
-    .filter(t=> t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId) && (t.memo||"").startsWith("Redeem:"))
-    .map(t=> ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
+    .filter((t) => isRedeemTxn(t) && t.fromId && nonSystemIds.has(t.fromId))
+    .filter((t) => isRedeemStillActive(t, txns))
+    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
-  // 30-day finance (earned minus withdrawals/corrections)
+  // 30-day series
   const days = Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (29 - i));
@@ -1163,22 +1022,52 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo !== "Mint" && !isRevRedeem(t)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !isReversalOfRedemption(t)
     );
-  const withdrawals = sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && ((t.memo?.startsWith("Reversal of sale") ?? false) || (t.memo?.startsWith("Correction (withdraw)") ?? false) || (t.memo?.startsWith("Balance reset to 0") ?? false)));
-    return Math.max(0, credits - withdrawals);
+    const withdraws = sumInRange(txns, d, 1, (t) => isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId));
+    // never negative on daily
+    return Math.max(0, credits - withdraws);
   });
 
   const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId as string) && !t.memo?.startsWith("Correction") && !t.memo?.startsWith("Reversal of sale") && !t.memo?.startsWith("Balance reset to 0"))
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !isCorrectionDebit(t))
   );
 
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
   const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
 
+  // Leaderboard: earned = credits (non-reversal) - corrections; ignore Mint
+  const leaderboard = Array.from(nonSystemIds)
+    .map((id) => {
+      const credits = txns
+        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !isReversalOfRedemption(t))
+        .reduce((a, b) => a + b.amount, 0);
+      const withdraws = txns.filter((t) => isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
+      return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
+    })
+    .sort((a, b) => b.earned - a.earned);
+
+  // Simple "star of day" & "leader of month" computed from raw credits (NOT counting reversals), typical for sales
+  const todayKey = new Date().toLocaleDateString();
+  const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const earnedToday: Record<string, number> = {};
+  const earnedMonth: Record<string, number> = {};
+  for (const t of txns) {
+    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+    const d = new Date(t.dateISO);
+    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+    const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+  }
+  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
+  const leaderOfMonth = leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
+
   return (
     <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className="grid md:grid-cols-3 gap-4">
+        {/* Dashboard */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Dashboard</div>
           <div className="grid sm:grid-cols-2 gap-4">
@@ -1200,7 +1089,7 @@ function Home({
             <div className="text-sm opacity-70 mb-2">Purchased Prizes (Active)</div>
             <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
               <div className="text-sm mb-2">
-                Total active purchases: <b>{purchases.length}</b>
+                Total purchases: <b>{purchases.length}</b>
               </div>
               <div className="space-y-2 max-h-40 overflow-auto pr-1">
                 {purchases.map((p, i) => (
@@ -1215,6 +1104,7 @@ function Home({
           </div>
         </div>
 
+        {/* Leaderboard */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Leaderboard</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
@@ -1223,11 +1113,6 @@ function Home({
                 <div className="flex items-center gap-2">
                   <span className="w-5 text-right">{i + 1}.</span>
                   <span className="font-medium">{row.name}</span>
-                  {row.streak >= 2 && (
-                    <span title={`${row.streak} day streak`} className="inline-flex items-center gap-1 text-orange-400 text-xs">
-                      <Flame className="w-4 h-4" /> {row.streak}
-                    </span>
-                  )}
                 </div>
                 <div className="text-sm">
                   <NumberFlash value={row.earned} />
@@ -1238,6 +1123,7 @@ function Home({
           </div>
         </div>
 
+        {/* Prizes */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
@@ -1246,13 +1132,7 @@ function Home({
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
-                  <span
-                    className={
-                      theme === "neon"
-                        ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200"
-                        : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"
-                    }
-                  >
+                  <span className={theme === "neon" ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200" : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"}>
                     Stock: {stock[p.key] ?? 0}
                   </span>
                 </div>
@@ -1265,39 +1145,55 @@ function Home({
   );
 }
 
-/* =============================
-   Agent Portal
-   ============================= */
+function Highlight({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{title}</div>
+      <div>{value}</div>
+    </div>
+  );
+}
 
+/** AGENT PORTAL */
 function AgentPortal({
   theme,
-  agentName,
-  agentBalance,
-  lifetimeEarn,
-  lifetimeSpend,
-  goal,
-  setGoal,
+  agentId,
+  accounts,
   txns,
-  prizes,
   stock,
-  prizeCount,
-  onRedeem
+  prizes,
+  goals,
+  onSetGoal,
+  onRedeem,
 }: {
   theme: Theme;
-  agentName: string;
-  agentBalance: number;
-  lifetimeEarn: number;
-  lifetimeSpend: number;
-  goal: number;
-  setGoal: (n: number) => void;
+  agentId: string;
+  accounts: Account[];
   txns: Transaction[];
-  prizes: PrizeItem[];
   stock: Record<string, number>;
-  prizeCount: number;
+  prizes: PrizeItem[];
+  goals: Record<string, number>;
+  onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
 }) {
+  const name = accounts.find((a) => a.id === agentId)?.name || "—";
+  // balance
+  const balance = txns.reduce((s, t) => {
+    if (t.toId === agentId && t.kind === "credit") s += t.amount;
+    if (t.fromId === agentId && t.kind === "debit") s -= t.amount;
+    return s;
+  }, 0);
+
+  const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
+  const lifetimeEarn =
+    agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
+    agentTxns.filter((t) => isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
+  const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
+  const prizeCount = agentTxns.filter((t) => isRedeemTxn(t)).length;
+
+  const goal = goals[agentId] || 0;
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
-  const progress = goal > 0 ? Math.min(100, Math.round((agentBalance / goal) * 100)) : 0;
+  const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
 
   return (
     <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
@@ -1305,10 +1201,10 @@ function AgentPortal({
         {/* Summary */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Agent</div>
-          <div className="text-xl font-semibold mb-1">{agentName}</div>
+          <div className="text-xl font-semibold mb-1">{name}</div>
           <div className="grid sm:grid-cols-3 gap-3 mt-3">
-            <TileRow label="Balance" value={agentBalance} />
-            <TileRow label="Lifetime Earned" value={lifetimeEarn} />
+            <TileRow label="Balance" value={balance} />
+            <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
             <TileRow label="Lifetime Spent" value={lifetimeSpend} />
           </div>
 
@@ -1316,13 +1212,8 @@ function AgentPortal({
             <div className="text-sm opacity-70 mb-2">Savings goal</div>
             <div className="rounded-xl border p-3">
               <div className="flex items-center gap-3">
-                <input
-                  className={inputCls(theme)}
-                  placeholder="Amount"
-                  value={goalInput}
-                  onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))}
-                />
-                <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={() => (goalInput ? setGoal(parseInt(goalInput, 10)) : null)}>
+                <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
+                <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={() => (goalInput ? onSetGoal(parseInt(goalInput, 10)) : null)}>
                   <Check className="w-4 h-4 inline mr-1" /> Set goal
                 </button>
               </div>
@@ -1336,16 +1227,13 @@ function AgentPortal({
           <div className="mt-4">
             <div className="text-sm opacity-70 mb-2">Recent activity</div>
             <div className="space-y-2 max-h-56 overflow-auto pr-2">
-              {txns.slice(0, 40).map((t) => (
+              {agentTxns.slice(0, 60).map((t) => (
                 <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
-                  <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
-                    {t.kind === "credit" ? "+" : "−"}
-                    {t.amount.toLocaleString()}
-                  </div>
+                  <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
                 </motion.div>
               ))}
-              {txns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
+              {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
             </div>
           </div>
         </div>
@@ -1354,12 +1242,12 @@ function AgentPortal({
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
-            <div className="text-xs opacity-70">Balance: {agentBalance.toLocaleString()} GCSD</div>
+            <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
           </div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
             {prizes.map((p) => {
               const left = stock[p.key] ?? 0;
-              const can = left > 0 && agentBalance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
+              const can = left > 0 && balance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
               return (
                 <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                   <div>
@@ -1379,18 +1267,16 @@ function AgentPortal({
   );
 }
 
-/* =============================
-   Admin Portal
-   ============================= */
-
+/** ADMIN PORTAL */
 function AdminPortal({
   theme,
   isAdmin,
   accounts,
-  balances,
+  txns,
   stock,
   rules,
-  txns,
+  pins,
+  epochs,
   onCredit,
   onManualTransfer,
   onUndoSale,
@@ -1400,20 +1286,16 @@ function AdminPortal({
   onSetPin,
   onResetPin,
   onResetBalance,
-  onEraseHistory,
-  onFullReset,
-  pins,
-  epochs,
-  adminTab,
-  setAdminTab
+  onCompleteReset,
 }: {
   theme: Theme;
   isAdmin: boolean;
   accounts: Account[];
-  balances: Map<string, number>;
+  txns: Transaction[];
   stock: Record<string, number>;
   rules: ProductRule[];
-  txns: Transaction[];
+  pins: Record<string, string>;
+  epochs: Record<string, string>;
   onCredit: (agentId: string, ruleKey: string, qty: number) => void;
   onManualTransfer: (agentId: string, amount: number, note: string) => void;
   onUndoSale: (txId: string) => void;
@@ -1423,13 +1305,9 @@ function AdminPortal({
   onSetPin: (agentId: string, pin: string) => void;
   onResetPin: (agentId: string) => void;
   onResetBalance: (agentId: string) => void;
-  onEraseHistory: (agentId: string) => void;
-  onFullReset: () => void;
-  pins: Record<string, string>;
-  epochs: Record<string, string>;
-  adminTab: "dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users";
-  setAdminTab: (t: any) => void;
+  onCompleteReset: () => void;
 }) {
+  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
   const [agentId, setAgentId] = useState("");
   const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
   const [qty, setQty] = useState(1);
@@ -1448,11 +1326,11 @@ function AdminPortal({
     );
   }
 
-  const creditsForAgent = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
+  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
 
   return (
     <div className="grid gap-4">
-      {/* tabs */}
+      {/* Tabs */}
       <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
         {[
           ["dashboard", "Dashboard"],
@@ -1460,19 +1338,15 @@ function AdminPortal({
           ["transfer", "Transfer"],
           ["corrections", "Corrections"],
           ["history", "History"],
-          ["users", "Users"]
+          ["users", "Users"],
         ].map(([k, lab]) => (
-          <button
-            key={k}
-            onClick={() => setAdminTab(k as any)}
-            className={classNames("px-3 py-1.5 rounded-xl text-sm", adminTab === k ? neonBtn(theme, true) : neonBtn(theme))}
-          >
+          <button key={k} onClick={() => setAdminTab(k as any)} className={classNames("px-3 py-1.5 rounded-xl text-sm", adminTab === k ? neonBtn(theme, true) : neonBtn(theme))}>
             {lab}
           </button>
         ))}
       </div>
 
-      {/* dashboard */}
+      {/* Dashboard */}
       {adminTab === "dashboard" && (
         <div className="grid md:grid-cols-3 gap-4">
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
@@ -1480,12 +1354,19 @@ function AdminPortal({
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {accounts
                 .filter((a) => a.role !== "system")
-                .map((a) => (
-                  <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                    <div className="font-medium">{a.name}</div>
-                    <div className="text-sm">{(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
-                  </motion.div>
-                ))}
+                .map((a) => {
+                  const bal = txns.reduce((s, t) => {
+                    if (t.toId === a.id && t.kind === "credit") s += t.amount;
+                    if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
+                    return s;
+                  }, 0);
+                  return (
+                    <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                      <div className="font-medium">{a.name}</div>
+                      <div className="text-sm">{bal.toLocaleString()} GCSD</div>
+                    </motion.div>
+                  );
+                })}
             </div>
           </div>
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
@@ -1500,22 +1381,18 @@ function AdminPortal({
             </div>
           </div>
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-            <div className="text-sm opacity-70 mb-2">Quick Actions</div>
+            <div className="text-sm opacity-70 mb-2">Quick Tips</div>
             <ul className="text-sm list-disc pl-5 space-y-1 opacity-80">
               <li>“Add Sale” posts credits by product rule.</li>
               <li>“Corrections” lets you reverse or withdraw credits by agent.</li>
-              <li>Each agent can redeem up to {MAX_PRIZES_PER_AGENT} prizes.</li>
-              <li className="mt-2">
-                <button className={classNames("px-3 py-1.5 rounded-lg", neonBtn(theme, true))} onClick={onFullReset}>
-                  Full reset (extra PIN)
-                </button>
-              </li>
+              <li>Withdrawals are not redeems and do not affect prize count.</li>
+              <li>Use “Reset Balance” to zero an agent and hide previous history.</li>
             </ul>
           </div>
         </div>
       )}
 
-      {/* add sale */}
+      {/* Add sale */}
       {adminTab === "addsale" && (
         <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -1554,7 +1431,7 @@ function AdminPortal({
         </div>
       )}
 
-      {/* manual transfer */}
+      {/* Transfer */}
       {adminTab === "transfer" && (
         <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-3 gap-4", neonBox(theme))}>
           <div>
@@ -1578,17 +1455,14 @@ function AdminPortal({
             <input className={inputCls(theme)} value={xferNote} onChange={(e) => setXferNote(e.target.value)} placeholder="Manual transfer" />
           </div>
           <div className="sm:col-span-3">
-            <button
-              className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))}
-              onClick={() => onManualTransfer(agentId, parseInt(xferAmt || "0", 10), xferNote)}
-            >
+            <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onManualTransfer(agentId, parseInt(xferAmt || "0", 10), xferNote)}>
               <Wallet className="w-4 h-4 inline mr-1" /> Transfer
             </button>
           </div>
         </div>
       )}
 
-      {/* corrections */}
+      {/* Corrections */}
       {adminTab === "corrections" && (
         <div className={classNames("rounded-2xl border p-4 grid gap-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-2 gap-3">
@@ -1610,8 +1484,8 @@ function AdminPortal({
             <div className="rounded-xl border p-3">
               <div className="text-sm opacity-70 mb-2">Credits posted to {accounts.find((a) => a.id === agentId)?.name}</div>
               <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
-                {creditsForAgent.length === 0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
-                {creditsForAgent.map((t) => (
+                {agentCredits.length === 0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
+                {agentCredits.map((t) => (
                   <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                     <div className="text-sm">
                       <div className="font-medium">{t.memo || "Credit"}</div>
@@ -1619,7 +1493,22 @@ function AdminPortal({
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
-                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onWithdraw(agentId, t.id)}>
+                      <button
+                        className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                        onClick={() => {
+                          // guard: can't make negative via withdrawal
+                          const bal = txns.reduce((s, x) => {
+                            if (x.toId === agentId && x.kind === "credit") s += x.amount;
+                            if (x.fromId === agentId && x.kind === "debit") s -= x.amount;
+                            return s;
+                          }, 0);
+                          if (bal < t.amount) {
+                            toast.error("Cannot withdraw more than current balance");
+                            return;
+                          }
+                          onWithdraw(agentId, t.id);
+                        }}
+                      >
                         Withdraw
                       </button>
                     </div>
@@ -1641,10 +1530,7 @@ function AdminPortal({
                       <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
-                        {t.kind === "credit" ? "+" : "−"}
-                        {t.amount.toLocaleString()}
-                      </div>
+                      <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
                       {t.kind === "credit" ? (
                         <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoSale(t.id)}>
                           <RotateCcw className="w-4 h-4 inline mr-1" /> Undo sale
@@ -1662,7 +1548,7 @@ function AdminPortal({
         </div>
       )}
 
-      {/* history */}
+      {/* History (everything, so withdrawals show here too) */}
       {adminTab === "history" && (
         <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">All activity</div>
@@ -1673,17 +1559,15 @@ function AdminPortal({
                   <div className="font-medium">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
                   <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                 </div>
-                <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
-                  {t.kind === "credit" ? "+" : "−"}
-                  {t.amount.toLocaleString()}
-                </div>
+                <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
               </motion.div>
             ))}
+            {txns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
           </div>
         </div>
       )}
 
-      {/* users */}
+      {/* Users (PINs + Reset + Complete Reset) */}
       {adminTab === "users" && (
         <div className={classNames("rounded-2xl border p-4 grid md:grid-cols-2 gap-4", neonBox(theme))}>
           <div className="rounded-xl border p-4">
@@ -1697,44 +1581,38 @@ function AdminPortal({
           </div>
 
           <div className="rounded-xl border p-4">
-            <div className="text-sm opacity-70 mb-2">User settings</div>
-            <div className="grid sm:grid-cols-3 gap-2">
-              <FancySelect value={pinAgent} onChange={setPinAgent} theme={theme} placeholder="Choose agent…">
-                {accounts
-                  .filter((a) => a.role !== "system")
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-              </FancySelect>
-              <input className={inputCls(theme)} placeholder="New PIN (5 digits)" value={pinVal} onChange={(e) => setPinVal(e.target.value.replace(/[^\d]/g, "").slice(0, 5))} />
-              <div className="flex gap-2">
-                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => pinAgent && pinVal.length === 5 && onSetPin(pinAgent, pinVal)}>
-                  <Check className="w-4 h-4 inline mr-1" /> Save PIN
-                </button>
-                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={() => pinAgent && onResetPin(pinAgent)}>
-                  Reset PIN
-                </button>
-              </div>
+            <div className="text-sm opacity-70 mb-2">User settings / PINs</div>
+            <div className="space-y-3">
+              {accounts
+                .filter((a) => a.role === "agent")
+                .map((a) => (
+                  <div key={a.id} className="border rounded-xl p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">{a.name}</div>
+                      <div className="text-xs opacity-70">PIN: {pins[a.id] ? `•••••` : "—"}</div>
+                    </div>
+                    <div className="grid sm:grid-cols-4 gap-2 mt-2">
+                      <input className={classNames(inputCls(theme), "sm:col-span-2")} placeholder="Set/Change PIN (5 digits)" value={pinAgent === a.id ? pinVal : ""} onChange={(e) => { setPinAgent(a.id); setPinVal(e.target.value.replace(/[^\d]/g, "").slice(0, 5)); }} />
+                      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={() => pinVal.length === 5 && pinAgent === a.id && onSetPin(a.id, pinVal)}>
+                        Save PIN
+                      </button>
+                      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={() => onResetPin(a.id)}>
+                        Reset PIN
+                      </button>
+                    </div>
+                    <div className="mt-2">
+                      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onResetBalance(a.id)}>
+                        Reset Balance (to 0)
+                      </button>
+                    </div>
+                  </div>
+                ))}
             </div>
-
-            {pinAgent && (
-              <div className="mt-4 text-sm">
-                <div className="opacity-70 mb-1">Current PIN:</div>
-                <div className="font-mono">{pins[pinAgent] ? pins[pinAgent] : "— (not set)"}</div>
-                <div className="opacity-70 mt-3 mb-1">Epoch (history visible since):</div>
-                <div className="font-mono">{epochs[pinAgent] ? new Date(epochs[pinAgent]).toLocaleString() : "— (no reset)"}</div>
-                <div className="flex gap-2 mt-3">
-                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme))} onClick={() => onResetBalance(pinAgent)}>
-                    Reset Balance to 0
-                  </button>
-                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme))} onClick={() => onEraseHistory(pinAgent)}>
-                    Hide Past History
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="mt-4 border-t pt-4">
+              <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={onCompleteReset}>
+                🔥 Complete Reset (extra PIN)
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1742,29 +1620,7 @@ function AdminPortal({
   );
 }
 
-/* =============================
-   Feed & Sandbox
-   ============================= */
-
-function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
-  return (
-    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
-      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-        <div className="text-sm opacity-70 mb-3">Activity Feed</div>
-        <div className="space-y-2 max-h-[70vh] overflow-auto pr-2">
-          {notifs.length === 0 && <div className="text-sm opacity-70">No notifications yet.</div>}
-          {notifs.map((n) => (
-            <div key={n.id} className={classNames("text-sm border rounded-xl px-3 py-2", neonBox(theme))}>
-              <div>{n.text}</div>
-              <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
+/** Sandbox */
 function SandboxPage({ onExit, theme }: { onExit: () => void; theme: Theme }) {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
@@ -1777,4 +1633,37 @@ function SandboxPage({ onExit, theme }: { onExit: () => void; theme: Theme }) {
       </div>
     </motion.div>
   );
+}
+
+/** Feed */
+function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
+  return (
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+        <div className="text-sm opacity-70 mb-2">Notifications</div>
+        <div className="space-y-2 max-h-[70vh] overflow-auto pr-2">
+          {notifs.length === 0 && <div className="text-sm opacity-70">No notifications.</div>}
+          {notifs.map((n) => (
+            <div key={n.id} className="text-sm border rounded-xl px-3 py-2">
+              <div>{n.text}</div>
+              <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ===== Confetti (unchanged) ===== */
+function confettiBurst() {
+  const el = document.createElement("div");
+  el.style.position = "fixed";
+  el.style.inset = "0";
+  el.style.pointerEvents = "none";
+  el.style.zIndex = "60";
+  el.innerHTML = `<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:42px;animation:pop .8s ease-out">🎉</div>
+  <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 800);
 }
