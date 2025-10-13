@@ -933,18 +933,6 @@ export default function GCSDApp() {
    Helpers & Components
    ========================= */
 
-function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
-const neonBox = (theme:Theme) =>
-  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
-const neonBtn = (theme:Theme, filled=false) =>
-  theme==="neon"
-    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
-    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
-const inputCls = (theme:Theme) =>
-  theme==="neon"
-    ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60"
-    : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
-
 /* ===== Epoch helpers (hide history prior to reset) ===== */
 function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, dateISO:string){
   if (!agentId) return true;
