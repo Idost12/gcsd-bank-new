@@ -1,19 +1,21 @@
+/* ===========================
+   G C S  B A N K — GCSDApp.tsx
+   (Part 1 / 4)
+   =========================== */
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
-  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap,
-  ChevronDown
+  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 
-/* ===========================
-   G C S  B A N K  (v5 realtime)
-   =========================== */
+/* ========== App constants ========== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png"; // high-res in /public/logo.png
+const LOGO_URL = "/logo.png"; // put a high-res image in /public/logo.png
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
@@ -29,22 +31,22 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system"|"agent" };
+type Account = { id: string; name: string; role?: "system" | "agent" };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
 
-// global limits
 const MAX_PRIZES_PER_AGENT = 2;
 
-// seed names
+/* ========== Lists ========== */
+
 const AGENT_NAMES = [
   "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
   "Caitlyn Stone","Rebecca Brooks","Logan Noir","Christopher O'Connor","Viktor Parks",
   "Hope Marshall","Justin Frey","Kevin Nolan","Sofie Roy"
 ];
 
-/* ---------- product rules (for admin Add Sale) ---------- */
+// Product (sales) rules
 const PRODUCT_RULES: ProductRule[] = [
   { key: "small_collection",         label: "Small Collection",          gcsd: 190 },
   { key: "big_whv",                  label: "Big WHV",                   gcsd: 320 },
@@ -57,53 +59,55 @@ const PRODUCT_RULES: ProductRule[] = [
   { key: "small_whv",                label: "Small WHV",                 gcsd: 200 },
 ];
 
-/* ---------- prizes (UPDATED list + prices from your note) ---------- */
+// Prizes (updated list / prices you gave)
 const PRIZE_ITEMS: PrizeItem[] = [
-  { key: "airfryer",        label: "Philips Airfryer",       price: 6000 },
-  { key: "soundbar",        label: "LG Soundbar",            price: 11000 },
-  { key: "burger_lunch",    label: "Burger Lunch",           price: 650  },
-  { key: "voucher_50",      label: "Cash Voucher (50 лв)",   price: 3000 },
-  { key: "poker",           label: "Texas Poker Set",        price: 1200 },
-  { key: "soda_maker",      label: "Philips Soda Maker",     price: 5200 },
-  { key: "magsafe",         label: "MagSafe Charger",        price: 600  },
-  { key: "galaxy_fit3",     label: "Samsung Galaxy Fit 3",   price: 5000 },
-  { key: "cinema_tickets",  label: "Cinema Tickets",         price: 800  },
-  { key: "neo_massager",    label: "Neo Massager",           price: 1400 },
-  { key: "logi_g102",       label: "Logitech G102 Mouse",    price: 1900 },
-  { key: "flight_madrid",   label: "Madrid Flights",         price: 11350 },
-  { key: "flight_london",   label: "London Flights",         price: 11350 },
-  { key: "flight_milan",    label: "Milan Flights",          price: 11350 },
+  { key: "airfryer",       label: "Phillips Airfryer",        price: 6000 },
+  { key: "soundbar",       label: "LG Soundbar",              price: 11000 },
+  { key: "burger_lunch",   label: "Burger Lunch",             price: 650 },
+  { key: "voucher_50",     label: "Cash Voucher 50лев",       price: 3000 },
+  { key: "poker",          label: "Texas Poker Set",          price: 1200 },
+  { key: "soda_maker",     label: "Phillips Soda Maker",      price: 5200 },
+  { key: "magsafe",        label: "MagSafe Charger",          price: 600 },
+  { key: "galaxy_fit3",    label: "Samsung Galaxy Fit 3",     price: 5000 },
+  { key: "cinema_tickets", label: "Cinema Tickets",           price: 800 },
+  { key: "neo_massager",   label: "Neo Massager",             price: 1400 },
+  { key: "logi_g102",      label: "Logitech G102 Mouse",      price: 1900 },
+  { key: "flight_madrid",  label: "Madrid Flights",           price: 11350 },
+  { key: "flight_london",  label: "London Flights",           price: 11350 },
+  { key: "flight_milan",   label: "Milan Flights",            price: 11350 },
 ];
 
-/* ---------- initial stock (may be edited in DB) ---------- */
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
-  soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
-  flight_madrid: 1, flight_london: 1, flight_milan: 1,
+  soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2,
+  neo_massager: 1, logi_g102: 1, flight_madrid: 1, flight_london: 1, flight_milan: 1,
 };
 
-/* ---------- helpers ---------- */
+/* ========== Small helpers ========== */
+
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
-const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
-const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
-const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
+const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 
-// prevent realtime overwrites
+/* Merge helpers (prevent realtime “overwrite”) */
 function mergeTxns(local: Transaction[], remote: Transaction[]) {
   const map = new Map<string, Transaction>();
   for (const t of remote) map.set(t.id, t);
-  for (const t of local)  map.set(t.id, t); // local wins on conflict
+  for (const t of local) map.set(t.id, t); // local wins
   const all = Array.from(map.values());
-  all.sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
+  all.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
   return all;
 }
 function mergeAccounts(local: Account[], remote: Account[]) {
   const map = new Map<string, Account>();
   for (const a of remote) map.set(a.id, a);
-  for (const a of local)  map.set(a.id, a);
+  for (const a of local) map.set(a.id, a);
   return Array.from(map.values());
 }
+
+/* Transaction classifiers */
 const isCorrectionDebit = (t: Transaction) =>
   t.kind === "debit" && !!t.memo && (
     t.memo.startsWith("Reversal of sale") ||
@@ -111,130 +115,166 @@ const isCorrectionDebit = (t: Transaction) =>
     t.memo.startsWith("Balance reset to 0")
   );
 
-// reversal pairing checks for prizes
-function isRedeemReversed(all: Transaction[], redeem: Transaction) {
-  if (redeem.kind !== "debit" || !redeem.fromId) return false;
-  const label = (redeem.memo || "").replace("Redeem: ","");
-  return all.some(t =>
-    t.kind === "credit" &&
-    t.toId === redeem.fromId &&
-    (t.memo || "").startsWith("Reversal of redemption:") &&
-    (t.memo || "").includes(label) &&
-    new Date(t.dateISO) >= new Date(redeem.dateISO)
+function isRedeem(t: Transaction) {
+  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
+}
+function isReversalOfRedemption(t: Transaction) {
+  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
+}
+
+/* “Epochs” to hide transactions prior to resets */
+function afterEpoch(epochs: Record<string, string>, agentId: string | undefined, dateISO: string) {
+  if (!agentId) return true;
+  const e = epochs[agentId];
+  if (!e) return true;
+  return new Date(dateISO).getTime() >= new Date(e).getTime();
+}
+
+/* For purchases list, ignore redeems that later got reversed */
+function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
+  if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
+  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
+  const after = new Date(redeemTxn.dateISO).getTime();
+  return !all.some(t =>
+    isReversalOfRedemption(t) &&
+    t.toId === redeemTxn.fromId &&
+    (t.memo || "") === `Reversal of redemption: ${label}` &&
+    new Date(t.dateISO).getTime() >= after
   );
 }
 
-/* ---------- seed data ---------- */
+/* ========== Seed data ========== */
+
 const seedAccounts: Account[] = [
   { id: uid(), name: "Bank Vault", role: "system" },
   ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
 ];
 const VAULT_ID = seedAccounts[0].id;
+
 const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-/* ---------- tiny UI helpers ---------- */
-function classNames(...xs:(string|false|undefined)[]) { return xs.filter(Boolean).join(" "); }
-function neonBox(theme:Theme){ return theme==="neon" ? "bg-[#0B0B0B]/70 border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"; }
-function neonBtn(theme:Theme, solid=false){
-  if (theme!=="neon") return solid ? "bg-black text-white dark:bg-white dark:text-black" : "border bg-white dark:bg-slate-800";
-  return solid ? "bg-orange-600 text-black border border-orange-700" : "border border-orange-700 bg-[#0B0B0B]/50";
-}
-function inputCls(theme:Theme){
-  return classNames(
-    "px-3 py-2 rounded-xl border w-full focus:outline-none",
-    theme==="neon" ? "bg-[#0B0B0B]/60 border-orange-700 text-orange-50 [color-scheme:dark]"
-                   : "bg-white dark:bg-slate-800"
-  );
-}
-
-/* ---------- small animated number ---------- */
-function NumberFlash({ value }:{ value:number }) {
+/* ========== Tiny animated number for gains/losses ========== */
+function NumberFlash({ value }: { value: number }) {
   const prev = useRef(value);
-  const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
-  useEffect(()=>{
-    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 500); }
-    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 500); }
+  const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
+
+  useEffect(() => {
+    if (value > prev.current) { setPulse("up"); setTimeout(() => setPulse("none"), 500); }
+    else if (value < prev.current) { setPulse("down"); setTimeout(() => setPulse("none"), 500); }
     prev.current = value;
   }, [value]);
+
   return (
     <motion.span
       key={value}
       initial={{ y: 4, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: .15 }}
-      className={pulse==="up" ? "text-emerald-500" : pulse==="down" ? "text-rose-500" : undefined}
+      className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}
     >
       {value.toLocaleString()} GCSD
     </motion.span>
   );
 }
 
-/* ---------- epoch helpers (history wipe without race conditions) ---------- */
-function afterEpoch(epochs: Record<string, string>, agentId?: string, dateISO?: string) {
-  if (!agentId || !dateISO) return true;
-  const e = epochs[agentId];
-  return !e || new Date(dateISO).getTime() >= new Date(e).getTime();
-}
-function filterAfterEpochForAgent(tx: Transaction, epochs: Record<string, string>, agentId: string) {
-  if (tx.toId === agentId)   return afterEpoch(epochs, agentId, tx.dateISO);
-  if (tx.fromId === agentId) return afterEpoch(epochs, agentId, tx.dateISO);
-  return false;
-}
+/* ========== Derived utilities ========== */
 
-/* ---------- balances with epoch ---------- */
 function computeBalances(accounts: Account[], txns: Transaction[], epochs: Record<string, string>) {
   const map = new Map<string, number>(accounts.map(a => [a.id, 0]));
   for (const t of txns) {
-    if (t.kind === "credit" && t.toId && afterEpoch(epochs, t.toId, t.dateISO)) {
-      map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
-    }
-    if (t.kind === "debit" && t.fromId && afterEpoch(epochs, t.fromId, t.dateISO)) {
-      map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
-    }
+    if (!afterEpoch(epochs, t.fromId, t.dateISO) || !afterEpoch(epochs, t.toId, t.dateISO)) continue;
+    if (t.kind === "credit" && t.toId) map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
+    if (t.kind === "debit" && t.fromId) map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
   }
   return map;
 }
+function bucketByDay(txns: Transaction[], nonSystem: Set<string>, epochs: Record<string, string>) {
+  const by: Record<string, Set<string>> = {};
+  for (const t of txns) {
+    if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
+    if (t.kind === "credit" && t.toId && nonSystem.has(t.toId) && t.memo !== "Mint" && !isReversalOfRedemption(t)) {
+      const d = new Date(t.dateISO); d.setHours(0, 0, 0, 0);
+      const day = d.toISOString();
+      by[t.toId] = by[t.toId] || new Set<string>();
+      by[t.toId].add(day);
+    }
+  }
+  return by;
+}
+function computeStreaks(by: Record<string, Set<string>>) {
+  const res: Record<string, number> = {};
+  for (const id of Object.keys(by)) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let streak = 0;
+    for (let i = 0; ; i++) {
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      const iso = d.toISOString();
+      if (by[id].has(iso)) streak++; else break;
+    }
+    res[id] = streak;
+  }
+  return res;
+}
 
-/* ========== MAIN APP ========== */
+/* ========== Shared helpers (only one copy!) ========== */
+function classNames(...x: (string | false | undefined)[]) {
+  return x.filter(Boolean).join(" ");
+}
+const neonBox = (theme: Theme) =>
+  theme === "neon" ? "bg-[#14110B] border border-orange-800 text-orange-50"
+                   : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800";
+const neonBtn = (theme: Theme, solid?: boolean) =>
+  theme === "neon"
+    ? solid ? "bg-orange-600 hover:bg-orange-500 text-black border border-orange-700"
+            : "bg-[#0B0B0B] hover:bg-[#0b0b0bd9] text-orange-200 border border-orange-700"
+    : solid ? "bg-black text-white dark:bg-white dark:text-black"
+            : "bg-white dark:bg-slate-800 border";
+const inputCls = (theme: Theme) =>
+  theme === "neon"
+    ? "px-3 py-2 rounded-xl border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 [color-scheme:dark] w-full"
+    : "px-3 py-2 rounded-xl border bg-white dark:bg-slate-800 w-full";
+
+/* ========== Main component start ========== */
+
 export default function GCSDApp() {
-  // persisted state
-  const [accounts, setAccounts]   = useState<Account[]>([]);
-  const [txns, setTxns]           = useState<Transaction[]>([]);
-  const [stock, setStock]         = useState<Record<string, number>>({});
-  const [pins, setPins]           = useState<Record<string, string>>({});
-  const [goals, setGoals]         = useState<Record<string, number>>({});
-  const [notifs, setNotifs]       = useState<Notification[]>([]);
-  const [epochs, setEpochs]       = useState<Record<string, string>>({}); // agentId -> ISO reset point
-  const [hydrated, setHydrated]   = useState(false);
+  // core state
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [txns, setTxns] = useState<Transaction[]>([]);
+  const [stock, setStock] = useState<Record<string, number>>({});
+  const [pins, setPins] = useState<Record<string, string>>({});
+  const [goals, setGoals] = useState<Record<string, number>>({});
+  const [epochs, setEpochs] = useState<Record<string, string>>({}); // << for “hide history”
+  const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [hydrated, setHydrated] = useState(false);
 
   // ui state
-  const [theme, setTheme]         = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
-  const [portal, setPortal]       = useState<Portal>("home");
-  const [pickerOpen, setPickerOpen]= useState(false);
-  const [isAdmin, setIsAdmin]     = useState(false);
-  const [adminPin, setAdminPin]   = useState<string>("");
+  const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
+  const [portal, setPortal] = useState<Portal>("home");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminPin, setAdminPin] = useState<string>("");
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
 
   const [showIntro, setShowIntro] = useState(true);
-  const [clock, setClock]         = useState(fmtTime(new Date()));
-  const [dateStr, setDateStr]     = useState(fmtDate(new Date()));
+  const [clock, setClock] = useState(fmtTime(new Date()));
+  const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
-  const [adminTab, setAdminTab]   = useState<"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users">("dashboard");
+  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
   const [sandboxActive, setSandboxActive] = useState(false);
-  const [receipt, setReceipt]     = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
-  const [pinModal, setPinModal]   = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
-  const [unread, setUnread]       = useState(0);
+  const [receipt, setReceipt] = useState<{ id: string; when: string; buyer: string; item: string; amount: number } | null>(null);
+  const [pinModal, setPinModal] = useState<{ open: boolean; agentId?: string; onOK?: (good: boolean) => void }>({ open: false });
+  const [unread, setUnread] = useState(0);
 
-  // theme toggling
+  /* Theme effect */
   useEffect(() => {
     localStorage.setItem("gcs-v4-theme", theme);
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
   }, [theme]);
 
-  /* hydrate */
+  /* Hydrate */
   useEffect(() => {
     (async () => {
       try {
@@ -250,20 +290,20 @@ export default function GCSDApp() {
         setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
+        setEpochs((await kvGet<Record<string, string>>("gcs-v4-epochs")) ?? {}); // hydrate epochs
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
-        setEpochs((await kvGet<Record<string, string>>("gcs-v4-epochs")) ?? {});
       } finally {
         setHydrated(true);
       }
     })();
   }, []);
 
-  /* realtime merge */
+  /* Realtime */
   useEffect(() => {
     const off = onKVChange(async ({ key, val }) => {
       if (!key) return;
       if (key === "gcs-v4-core") {
-        const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
+        const remote = (val ?? (await kvGet("gcs-v4-core"))) as { accounts: Account[]; txns: Transaction[] } | null;
         if (!remote) return;
         setAccounts(prev => mergeAccounts(prev, remote.accounts || []));
         setTxns(prev => mergeTxns(prev, remote.txns || []));
@@ -272,352 +312,104 @@ export default function GCSDApp() {
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
       if (key === "gcs-v4-pins")   setPins(val ?? (await kvGet("gcs-v4-pins")) ?? {});
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
-      if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
+      if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
     });
     return off;
   }, []);
 
-  /* persist */
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-core",  { accounts, txns }); }, [hydrated, accounts, txns]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
+  /* Persist */
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-core",   { accounts, txns }); }, [hydrated, accounts, txns]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-stock",  stock);              }, [hydrated, stock]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",   pins);               }, [hydrated, pins]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-goals",  goals);              }, [hydrated, goals]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);             }, [hydrated, epochs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);             }, [hydrated, notifs]);
 
-  /* clock + intro */
-  useEffect(()=> {
-    const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
-    return ()=> clearInterval(t);
+  /* Clock + intro */
+  useEffect(() => {
+    const t = setInterval(() => { const d = new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
+    return () => clearInterval(t);
   }, []);
-  useEffect(()=> {
+  useEffect(() => {
     if (!showIntro) return;
-    const timer = setTimeout(()=> setShowIntro(false), 1600);
-    const onKey = (e: KeyboardEvent)=> { if (e.key === "Enter") setShowIntro(false); };
+    const timer = setTimeout(() => setShowIntro(false), 2000);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Enter") setShowIntro(false); };
     window.addEventListener("keydown", onKey);
-    return ()=> { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
+    return () => { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
   }, [showIntro]);
 
-  /* derived */
-  const balances = useMemo(()=>computeBalances(accounts, txns, epochs), [accounts, txns, epochs]);
-  const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
+  /* Derived */
+  const balances = useMemo(() => computeBalances(accounts, txns, epochs), [accounts, txns, epochs]);
+  const nonSystemIds = new Set(accounts.filter(a => a.role !== "system").map(a => a.id));
 
-  const agent = accounts.find(a=>a.id===currentAgentId);
-  const agentTxns = useMemo(
-    () => txns.filter(t => currentAgentId && filterAfterEpochForAgent(t, epochs, currentAgentId)),
-    [txns, epochs, currentAgentId]
+  const agent = accounts.find(a => a.id === currentAgentId);
+  const agentTxns = txns.filter(t =>
+    afterEpoch(epochs, t.fromId, t.dateISO) &&
+    afterEpoch(epochs, t.toId, t.dateISO) &&
+    (t.fromId === currentAgentId || t.toId === currentAgentId)
   );
-  const agentBalance = balances.get(currentAgentId)||0;
 
-  const lifetimeEarn = useMemo(() => {
-    if (!currentAgentId) return 0;
-    const earned = txns
-      .filter(t =>
-        t.kind === "credit" &&
-        t.toId === currentAgentId &&
-        t.memo !== "Mint" &&
-        afterEpoch(epochs, currentAgentId, t.dateISO) &&
-        !(t.memo || "").startsWith("Reversal of redemption:")
-      )
-      .reduce((a, b) => a + b.amount, 0);
+  const agentBalance = balances.get(currentAgentId) || 0;
 
-    const withdrawn = txns
-      .filter(t =>
-        isCorrectionDebit(t) &&
-        t.fromId === currentAgentId &&
-        afterEpoch(epochs, currentAgentId, t.dateISO)
-      )
-      .reduce((a, b) => a + b.amount, 0);
+  const lifetimeEarn = agentTxns
+    .filter(t => t.kind === "credit" && t.toId === currentAgentId && t.memo !== "Mint" && !isReversalOfRedemption(t))
+    .reduce((a, b) => a + b.amount, 0)
+    - agentTxns.filter(t => isCorrectionDebit(t) && t.fromId === currentAgentId).reduce((a, b) => a + b.amount, 0);
 
-    return earned - withdrawn;
-  }, [txns, epochs, currentAgentId]);
+  const lifetimeSpend = agentTxns
+    .filter(t => t.kind === "debit" && t.fromId === currentAgentId && !isCorrectionDebit(t))
+    .reduce((a, b) => a + b.amount, 0);
 
-  const lifetimeSpend = useMemo(() => {
-    if (!currentAgentId) return 0;
-    return txns
-      .filter(t =>
-        t.kind === "debit" &&
-        t.fromId === currentAgentId &&
-        !isCorrectionDebit(t) &&
-        afterEpoch(epochs, currentAgentId, t.dateISO)
-      )
-      .reduce((a, b) => a + b.amount, 0);
-  }, [txns, epochs, currentAgentId]);
+  const prizeCount = agentTxns.filter(t => isRedeem(t)).length;
 
-  const prizeCount = useMemo(() =>
-    txns.filter(t =>
-      t.kind === "debit" &&
-      (t.memo || "").startsWith("Redeem:") &&
-      t.fromId === currentAgentId &&
-      afterEpoch(epochs, currentAgentId, t.dateISO)
-    ).length
-  , [txns, epochs, currentAgentId]);
+  /* Leaderboard */
+  const dayBuckets = bucketByDay(txns, nonSystemIds, epochs);
+  const streaks = computeStreaks(dayBuckets);
+  const leaderboard = Array.from(nonSystemIds).map(id => {
+    const earnedCredits = txns.filter(t =>
+      t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !isReversalOfRedemption(t) &&
+      afterEpoch(epochs, t.toId, t.dateISO)
+    ).reduce((a, b) => a + b.amount, 0);
+    const withdrawn = txns.filter(t =>
+      isCorrectionDebit(t) && t.fromId === id && afterEpoch(epochs, t.fromId, t.dateISO)
+    ).reduce((a, b) => a + b.amount, 0);
+    const earned = earnedCredits - withdrawn;
+    return { id, name: accounts.find(a => a.id === id)?.name || "—", earned, streak: streaks[id] || 0 };
+  }).sort((a, b) => b.earned - a.earned);
 
-  // leaderboard (earned minus withdrawals), epoch-aware
-  const leaderboard = useMemo(() => {
-    return Array.from(nonSystemIds).map(id => {
-      const credited = txns
-        .filter(t =>
-          t.kind === "credit" &&
-          t.toId === id &&
-          t.memo !== "Mint" &&
-          afterEpoch(epochs, id, t.dateISO) &&
-          !(t.memo || "").startsWith("Reversal of redemption:")
-        ).reduce((a, b) => a + b.amount, 0);
-
-      const withdrawn = txns
-        .filter(t =>
-          isCorrectionDebit(t) &&
-          t.fromId === id &&
-          afterEpoch(epochs, id, t.dateISO)
-        ).reduce((a, b) => a + b.amount, 0);
-
-      return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned: credited - withdrawn };
-    }).sort((a, b) => b.earned - a.earned);
-  }, [accounts, txns, epochs, nonSystemIds]);
-
-  // streaks (epoch-aware)
-  function bucketByDay(all:Transaction[], nonSystem:Set<string>, epochs:Record<string,string>){
-    const by: Record<string, Set<string>> = {};
-    for (const t of all) {
-      if (t.kind==="credit" && t.toId && nonSystem.has(t.toId) && t.memo!=="Mint" && afterEpoch(epochs, t.toId, t.dateISO)) {
-        const d = new Date(t.dateISO); d.setHours(0,0,0,0);
-        const day = d.toISOString();
-        by[t.toId] = by[t.toId] || new Set<string>();
-        by[t.toId].add(day);
-      }
-    }
-    return by;
-  }
-  function computeStreaks(by: Record<string, Set<string>>){
-    const res: Record<string, number> = {};
-    for (const id of Object.keys(by)) {
-      const today = new Date(); today.setHours(0,0,0,0);
-      let streak = 0;
-      for (let i=0; ; i++){
-        const d = new Date(today); d.setDate(today.getDate() - i);
-        const iso = d.toISOString();
-        if (by[id].has(iso)) streak++; else break;
-      }
-      res[id] = streak;
-    }
-    return res;
-  }
-  const dayBuckets = useMemo(() => bucketByDay(txns, nonSystemIds, epochs), [txns, nonSystemIds, epochs]);
-  const streaks = useMemo(() => computeStreaks(dayBuckets), [dayBuckets]);
-
-  // star of day / leader of month (epoch-aware)
+  /* Star of the day / leader of month */
   const todayKey = new Date().toLocaleDateString();
-  const curMonth  = monthKey(new Date());
-  const earnedToday: Record<string, number> = {}, earnedMonth: Record<string, number> = {};
+  const curMonth = monthKey(new Date());
+  const earnedToday: Record<string, number> = {};
+  const earnedMonth: Record<string, number> = {};
+
   for (const t of txns) {
-    if (t.kind!=="credit" || !t.toId || t.memo==="Mint" || !nonSystemIds.has(t.toId)) continue;
     if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
-    if ((t.memo||"").startsWith("Reversal of redemption:")) continue;
+    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
-    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId]||0) + t.amount;
-    if (monthKey(d) === curMonth)           earnedMonth[t.toId] = (earnedMonth[t.toId]||0) + t.amount;
+    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+    if (monthKey(d) === curMonth)         earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
   }
-  const starId   = Object.entries(earnedToday).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  const leaderId = Object.entries(earnedMonth).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedToday[starId] } : null;
-  const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
-  /* helpers */
-  const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
-    setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev ]);
-  const notify = (text:string) => { setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200)); setUnread(c => c + 1); };
-  const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
-  const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
+  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find(a => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
+  const leaderOfMonth = leaderId ? { name: accounts.find(a => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
-  /* actions (credit, redeem, reversal, withdraw, reset, sandbox) come in Part 2/4 */
-  // … (continued below)
-  /* ===== Actions (admin + agent) ===== */
+  /* Helpers */
+  const postTxn = (partial: Partial<Transaction> & Pick<Transaction, "kind" | "amount">) =>
+    setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev]);
 
-  const confettiBurst = () => {
-    // lightweight celebratory ping (no-op placeholder to avoid runtime deps)
-    try { console.log("🎉 confetti"); } catch {}
+  const notify = (text: string) => {
+    setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0, 200));
+    setUnread(c => c + 1);
   };
 
-  function ensureNonNegative(agentId: string, debitAmount: number) {
-    const bal = balances.get(agentId) || 0;
-    if (debitAmount > bal) {
-      toast.error("Insufficient balance — agents cannot go negative.");
-      return false;
-    }
-    return true;
-  }
+  const getName = (id: string) => accounts.find(a => a.id === id)?.name || "—";
+  const openAgentPin = (agentId: string, cb: (ok: boolean) => void) => setPinModal({ open: true, agentId, onOK: cb });
 
-  function adminCredit(agentId:string, ruleKey:string, qty:number){
-    if (!isAdmin) return toast.error("Admin only");
-    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
-    if (!agentId) return toast.error("Choose agent");
-
-    const amount = rule.gcsd * Math.max(1, qty||1);
-    postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
-    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
-    toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
-  }
-
-  function manualTransfer(agentId:string, amount:number, note:string){
-    if (!isAdmin) return toast.error("Admin only");
-    if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
-    postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
-    notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
-    toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
-  }
-
-  function redeemPrize(agentId:string, prizeKey:string){
-    const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
-    const left = stock[prizeKey] ?? 0;
-    const bal  = balances.get(agentId)||0;
-    const count= txns.filter(t=>
-      t.kind==="debit" &&
-      t.fromId===agentId &&
-      afterEpoch(epochs, agentId, t.dateISO) &&
-      (t.memo||"").startsWith("Redeem:")
-    ).length;
-
-    if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
-    if (left <= 0) return toast.error("Out of stock");
-    if (bal  < prize.price) return toast.error("Insufficient balance");
-
-    openAgentPin(agentId, (ok)=>{
-      if (!ok) return toast.error("Wrong PIN");
-      postTxn({ kind:"debit", amount: prize.price, fromId: agentId, memo:`Redeem: ${prize.label}` });
-      setStock(s=> ({...s, [prizeKey]: left-1}));
-      notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
-      confettiBurst();
-      setReceipt({
-        id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
-        when: new Date().toLocaleString(),
-        buyer: getName(agentId), item: prize.label, amount: prize.price
-      });
-      toast.success(`Redeemed ${prize.label}`);
-    });
-  }
-
-  function undoSale(txId:string){
-    if (!isAdmin) return toast.error("Admin only");
-    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
-    // epoch-aware: only allow undo if the credit is after the agent epoch
-    if (!afterEpoch(epochs, t.toId, t.dateISO)) return toast.error("This sale is before agent reset and cannot be undone.");
-    // ensure we won't push the agent negative
-    if (!ensureNonNegative(t.toId, t.amount)) return;
-    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo || "Credit"}` });
-    notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
-    toast.success("Sale reversed");
-  }
-
-  function undoRedemption(txId:string){
-    if (!isAdmin) return toast.error("Admin only");
-    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="debit" || !t.fromId) return;
-    if (!afterEpoch(epochs, t.fromId, t.dateISO)) return toast.error("This redemption is before agent reset and cannot be undone.");
-
-    const label = (t.memo||"").replace("Redeem: ","");
-    const prize = PRIZE_ITEMS.find(p=>p.label===label);
-
-    // create a credit with a memo that is excluded from "earned"
-    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}` });
-    if (prize) setStock(s=> ({...s, [prize.key]: (s[prize.key]??0)+1}));
-
-    notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
-    toast.success("Redemption reversed & stock restored");
-  }
-
-  function withdrawAgentCredit(agentId:string, txId:string){
-    if (!isAdmin) return toast.error("Admin only");
-    const t = txns.find(x=>x.id===txId);
-    if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
-    if (!afterEpoch(epochs, agentId, t.dateISO)) return toast.error("This credit is before agent reset");
-
-    // do not allow negative after withdrawal
-    if (!ensureNonNegative(agentId, t.amount)) return;
-
-    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
-    notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
-    toast.success("Credits withdrawn");
-  }
-
-  function addAgent(name:string){
-    if (!isAdmin) return toast.error("Admin only");
-    const trimmed = name.trim();
-    if (!trimmed) return toast.error("Enter a name");
-    if (accounts.some(a => a.role==="agent" && a.name.toLowerCase()===trimmed.toLowerCase()))
-      return toast.error("Agent already exists");
-
-    const a: Account = { id: uid(), name: trimmed, role: "agent" };
-    setAccounts(prev=> [...prev, a]);
-    notify(`👤 New agent added: ${trimmed}`);
-    toast.success(`Added agent ${trimmed}`);
-  }
-
-  function setAgentPin(agentId:string, pin:string){
-    if (!isAdmin) return toast.error("Admin only");
-    if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
-    setPins(prev=> ({...prev, [agentId]: pin}));
-    notify(`🔐 PIN set/reset for ${getName(agentId)}`);
-    toast.success("PIN updated");
-  }
-
-  function resetPin(agentId:string){
-    if (!isAdmin) return toast.error("Admin only");
-    setPins(prev=> { const next = {...prev}; delete next[agentId]; return next; });
-    notify(`🔐 PIN cleared for ${getName(agentId)}`);
-    toast.success("PIN reset (cleared)");
-  }
-
-  function setSavingsGoal(agentId:string, amount:number){
-    if (amount <= 0) return toast.error("Enter a positive goal");
-    openAgentPin(agentId, (ok)=>{
-      if (!ok) return toast.error("Wrong PIN");
-      setGoals(prev=> ({...prev, [agentId]: amount}));
-      notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
-      toast.success("Goal updated");
-    });
-  }
-
-  // Epoch-based hard reset for an agent (erases their visible history and balances)
-  function resetAgentBalance(agentId:string){
-    if (!isAdmin) return toast.error("Admin only");
-    const name = getName(agentId);
-    setEpochs(prev => ({ ...prev, [agentId]: nowISO() }));
-    notify(`🧮 Reset balance & history for ${name}`);
-    toast.success(`Balance & history cleared for ${name}`);
-  }
-
-  // Full app reset (requires an extra PIN prompt)
-  async function completeReset() {
-    if (!isAdmin) return toast.error("Admin only");
-    const confirmPin = prompt("Enter Admin PIN again to confirm full reset:");
-    if (!confirmPin || confirmPin !== adminPin) return toast.error("PIN mismatch — reset cancelled.");
-
-    const freshAccounts = seedAccounts;
-    const freshTxns     = seedTxns;
-    const freshStock    = INITIAL_STOCK;
-
-    setAccounts(freshAccounts);
-    setTxns(freshTxns);
-    setStock(freshStock);
-    setPins({});
-    setGoals({});
-    setNotifs([]);
-    setEpochs({});
-    setCurrentAgentId("");
-    setPortal("home");
-    setSandboxActive(false);
-
-    await kvSet("gcs-v4-core",   { accounts: freshAccounts, txns: freshTxns });
-    await kvSet("gcs-v4-stock",   freshStock);
-    await kvSet("gcs-v4-pins",   {});
-    await kvSet("gcs-v4-goals",  {});
-    await kvSet("gcs-v4-notifs", []);
-    await kvSet("gcs-v4-epochs", {});
-    toast.success("System has been reset.");
-  }
-
-  /* Sandbox (explicit enter/exit; Home does NOT exit) */
+  /* Sandbox controls — do NOT auto-exit when clicking Home */
   function enterSandbox() {
     const pin = prompt("Admin PIN to enter Sandbox:");
     if (!pin || !/^\d{5,8}$/.test(pin)) return toast.error("Enter a valid PIN");
@@ -628,12 +420,162 @@ export default function GCSDApp() {
   }
   function exitSandbox() {
     setSandboxActive(false);
-    // stay on current portal unless user navigates; do not force Home
     toast.success("Sandbox cleared");
+    // stay on current portal unless user navigates
   }
 
-  /* ===== Render (header, modals, pages) continues in Part 3/4 ===== */
-  /* ===== Render ===== */
+  /* ==== Part 1 ends here. Header, pages, actions and Admin portal continue in Part 2… ==== */
+  /* ========= Actions ========= */
+
+  function adminCredit(agentId: string, ruleKey: string, qty: number) {
+    if (!isAdmin) return toast.error("Admin only");
+    const rule = PRODUCT_RULES.find(r => r.key === ruleKey); if (!rule) return;
+    if (!agentId) return toast.error("Choose agent");
+    const amount = rule.gcsd * Math.max(1, qty || 1);
+    postTxn({ kind: "credit", amount, toId: agentId, memo: `${rule.label}${qty > 1 ? ` x${qty}` : ""}`, meta: { product: rule.key, qty } });
+    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty > 1 ? ` ×${qty}` : ""}`);
+    toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
+  }
+
+  function manualTransfer(agentId: string, amount: number, note: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    if (!agentId || !amount || amount <= 0) return toast.error("Enter agent and amount");
+    postTxn({ kind: "credit", amount, toId: agentId, memo: note || "Manual transfer" });
+    notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
+    toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
+  }
+
+  function redeemPrize(agentId: string, prizeKey: string) {
+    const prize = PRIZE_ITEMS.find(p => p.key === prizeKey); if (!prize) return;
+    const left = stock[prizeKey] ?? 0;
+    const bal = balances.get(agentId) || 0;
+    const count = txns.filter(t => isRedeem(t) && t.fromId === agentId).length;
+    if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
+    if (left <= 0) return toast.error("Out of stock");
+    if (bal < prize.price) return toast.error("Insufficient balance");
+
+    openAgentPin(agentId, (ok) => {
+      if (!ok) return toast.error("Wrong PIN");
+      postTxn({ kind: "debit", amount: prize.price, fromId: agentId, memo: `Redeem: ${prize.label}` });
+      setStock(s => ({ ...s, [prizeKey]: left - 1 }));
+      notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
+      setReceipt({
+        id: "ORD-" + Math.random().toString(36).slice(2, 7).toUpperCase(),
+        when: new Date().toLocaleString(),
+        buyer: getName(agentId),
+        item: prize.label,
+        amount: prize.price
+      });
+      toast.success(`Redeemed ${prize.label}`);
+    });
+  }
+
+  function undoSale(txId: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x => x.id === txId); if (!t || t.kind !== "credit" || !t.toId) return;
+    postTxn({ kind: "debit", amount: t.amount, fromId: t.toId, memo: `Reversal of sale: ${t.memo}` });
+    notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
+    toast.success("Sale reversed");
+  }
+
+  function undoRedemption(txId: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x => x.id === txId); if (!t || t.kind !== "debit" || !t.fromId) return;
+    const label = (t.memo || "").replace("Redeem: ", "");
+    const prize = PRIZE_ITEMS.find(p => p.label === label);
+    postTxn({ kind: "credit", amount: t.amount, toId: t.fromId, memo: `Reversal of redemption: ${label}` });
+    if (prize) setStock(s => ({ ...s, [prize.key]: (s[prize.key] ?? 0) + 1 }));
+    notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
+    toast.success("Redemption reversed & stock restored");
+  }
+
+  function withdrawAgentCredit(agentId: string, txId: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    const t = txns.find(x => x.id === txId);
+    if (!t || t.kind !== "credit" || t.toId !== agentId) return toast.error("Choose a credit to withdraw");
+    postTxn({ kind: "debit", amount: t.amount, fromId: agentId, memo: `Correction (withdraw): ${t.memo || "Credit"}` });
+    notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
+    toast.success("Credits withdrawn");
+  }
+
+  function addAgent(name: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    const trimmed = name.trim();
+    if (!trimmed) return toast.error("Enter a name");
+    if (accounts.some(a => a.role === "agent" && a.name.toLowerCase() === trimmed.toLowerCase())) {
+      return toast.error("Agent already exists");
+    }
+    const a: Account = { id: uid(), name: trimmed, role: "agent" };
+    setAccounts(prev => [...prev, a]);
+    notify(`👤 New agent added: ${trimmed}`);
+    toast.success(`Added agent ${trimmed}`);
+  }
+
+  function setAgentPin(agentId: string, pin: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
+    setPins(prev => ({ ...prev, [agentId]: pin }));
+    notify(`🔐 PIN set/reset for ${getName(agentId)}`);
+    toast.success("PIN updated");
+  }
+
+  function resetPin(agentId: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    setPins(prev => { const next = { ...prev }; delete next[agentId]; return next; });
+    notify(`🔐 PIN cleared for ${getName(agentId)}`);
+    toast.success("PIN reset (cleared)");
+  }
+
+  function setSavingsGoal(agentId: string, amount: number) {
+    if (amount <= 0) return toast.error("Enter a positive goal");
+    openAgentPin(agentId, (ok) => {
+      if (!ok) return toast.error("Wrong PIN");
+      setGoals(prev => ({ ...prev, [agentId]: amount }));
+      notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
+      toast.success("Goal updated");
+    });
+  }
+
+  function resetAgentBalance(agentId: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    const bal = balances.get(agentId) || 0;
+    if (bal === 0) return toast.info("Balance already zero");
+    if (bal > 0) {
+      postTxn({ kind: "debit", amount: bal, fromId: agentId, memo: `Balance reset to 0` });
+      notify(`🧮 Reset balance of ${getName(agentId)} by −${bal} GCSD`);
+    } else {
+      postTxn({ kind: "credit", amount: -bal, toId: agentId, memo: `Balance reset to 0` });
+      notify(`🧮 Reset balance of ${getName(agentId)} by +${-bal} GCSD`);
+    }
+    // mark epoch so history prior to now is hidden
+    setEpochs(prev => ({ ...prev, [agentId]: nowISO() }));
+    toast.success("Balance reset & history hidden prior to reset");
+  }
+
+  function eraseAgentHistory(agentId: string) {
+    if (!isAdmin) return toast.error("Admin only");
+    setEpochs(prev => ({ ...prev, [agentId]: nowISO() }));
+    notify(`🧹 History hidden prior to reset for ${getName(agentId)}`);
+    toast.success("Agent history (prior to now) hidden");
+  }
+
+  function fullResetWithPin() {
+    if (!isAdmin) return toast.error("Admin only");
+    const extra = prompt("Enter extra reset PIN (6–8 digits):");
+    if (!extra || !/^\d{6,8}$/.test(extra)) return toast.error("Invalid extra PIN");
+    // Clear all non-system data but keep seed vault + products
+    const newEpoch = nowISO();
+    setEpochs({});
+    setPins({});
+    setGoals({});
+    setStock(INITIAL_STOCK);
+    setTxns(seedTxns);
+    setAccounts(seedAccounts);
+    notify("🧯 Full reset executed");
+    toast.success("Application reset");
+  }
+
+  /* ========= Render ========= */
 
   return (
     <div
@@ -645,29 +587,20 @@ export default function GCSDApp() {
     >
       <Toaster position="top-center" richColors />
 
-      {/* Intro screen */}
+      {/* Intro */}
       <AnimatePresence>
         {showIntro && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className={`fixed inset-0 z-50 grid place-items-center ${
-              theme === "neon" ? "bg-[#0B0B0B]" : "bg-black/85"
-            } text-white`}
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className={`fixed inset-0 z-50 grid place-items-center ${theme === "neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
             <motion.div initial={{ scale: 0.96 }} animate={{ scale: 1 }} className="text-center p-8">
-              <div className="mx-auto mb-6 w-56 h-56 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
-                <img src={LOGO_URL} alt="GCS Bank logo" className="w-48 h-48 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]" />
+              <div className="mx-auto mb-6 w-52 h-52 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
+                <img src={LOGO_URL} alt="GCS Bank logo" className="w-44 h-44 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]" />
               </div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <div className="text-white/70 mt-2 mb-6">Press Enter to continue</div>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.97 }}
+              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}
                 className="px-4 py-2 rounded-xl bg-white text-black"
-                onClick={() => setShowIntro(false)}
-              >
+                onClick={() => setShowIntro(false)}>
                 Skip
               </motion.button>
             </motion.div>
@@ -687,15 +620,13 @@ export default function GCSDApp() {
           <div className="flex items-center gap-3">
             <img src={LOGO_URL} alt="GCS Bank logo" className="h-14 w-14 rounded drop-shadow-sm" />
             <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
-
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={() => setPortal("home")} // Home should NOT exit sandbox
+              onClick={() => setPortal("home")}
               title="Go Home"
             >
               <HomeIcon className="w-4 h-4" /> Home
             </button>
-
             <button
               className={classNames("ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
               onClick={() => (portal === "sandbox" ? exitSandbox() : enterSandbox())}
@@ -704,39 +635,20 @@ export default function GCSDApp() {
               <Shield className="w-4 h-4" /> {portal === "sandbox" ? "Exit Sandbox" : "Sandbox"}
             </button>
           </div>
-
           <div className="flex items-center gap-3">
-            <NotificationsBell
-              notifs={notifs}
-              theme={theme}
-              unread={unread}
-              onOpenFeed={() => {
-                setPortal("feed");
-                setUnread(0);
-              }}
-            />
-            <span
-              className={classNames(
-                "text-xs font-mono",
-                theme === "neon" ? "text-orange-200" : "text-slate-600 dark:text-slate-300"
-              )}
-            >
-              {dateStr} • {clock}
-            </span>
+            <NotificationsBell notifs={notifs} theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
+            <span className={classNames("text-xs font-mono", theme === "neon" ? "text-orange-200" : "text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme} />
-            <motion.button
-              whileHover={{ y: -1, boxShadow: "0 6px 16px rgba(0,0,0,.08)" }}
-              whileTap={{ scale: 0.98 }}
+            <motion.button whileHover={{ y: -1, boxShadow: "0 6px 16px rgba(0,0,0,.08)" }} whileTap={{ scale: 0.98 }}
               className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
-              onClick={() => setPickerOpen(true)}
-            >
+              onClick={() => setPickerOpen(true)}>
               <Users className="w-4 h-4" /> Switch User
             </motion.button>
           </div>
         </div>
       </div>
 
-      {/* Switch User picker */}
+      {/* Switch user modal */}
       <AnimatePresence>
         {pickerOpen && (
           <Picker
@@ -744,35 +656,21 @@ export default function GCSDApp() {
             accounts={accounts}
             balances={balances}
             onClose={() => setPickerOpen(false)}
-            onChooseAdmin={() => {
-              setPortal("admin");
-              setIsAdmin(false);
-              setPickerOpen(false);
-            }}
-            onChooseAgent={(id) => {
-              setCurrentAgentId(id);
-              setPortal("agent");
-              setIsAdmin(false);
-              setPickerOpen(false);
-            }}
+            onChooseAdmin={() => { setPortal("admin"); setIsAdmin(false); setPickerOpen(false); }}
+            onChooseAgent={(id) => { setCurrentAgentId(id); setPortal("agent"); setIsAdmin(false); setPickerOpen(false); }}
           />
         )}
       </AnimatePresence>
 
-      {/* Admin PIN modal */}
+      {/* Admin PIN gate */}
       <AnimatePresence>
         {portal === "admin" && !isAdmin && (
           <PinModalGeneric
             title="Admin PIN"
             maxLen={8}
-            onClose={() => {
-              setPortal("home");
-            }}
+            onClose={() => { setPortal("home"); }}
             onOk={(pin) => {
-              if (!/^\d{5,8}$/.test(pin)) {
-                toast.error("Enter a valid PIN");
-                return;
-              }
+              if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
               setAdminPin(pin);
               setIsAdmin(true);
               toast.success("Admin unlocked");
@@ -796,42 +694,18 @@ export default function GCSDApp() {
       {/* Receipt */}
       <AnimatePresence>
         {receipt && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/40 grid place-items-center"
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}
-            >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
               <div className="flex items-center justify-between mb-3">
-                <div className="font-semibold flex items-center gap-2">
-                  <Gift className="w-4 h-4" /> Receipt
-                </div>
-                <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={() => setReceipt(null)}>
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4" /> Receipt</div>
+                <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={() => setReceipt(null)}><X className="w-4 h-4" /></button>
               </div>
               <div className="text-sm space-y-2">
-                <div>
-                  <b>Order ID:</b> {receipt.id}
-                </div>
-                <div>
-                  <b>Date:</b> {receipt.when}
-                </div>
-                <div>
-                  <b>Buyer:</b> {receipt.buyer}
-                </div>
-                <div>
-                  <b>Prize:</b> {receipt.item}
-                </div>
-                <div>
-                  <b>Amount:</b> {receipt.amount.toLocaleString()} GCSD
-                </div>
+                <div><b>Order ID:</b> {receipt.id}</div>
+                <div><b>Date:</b> {receipt.when}</div>
+                <div><b>Buyer:</b> {receipt.buyer}</div>
+                <div><b>Prize:</b> {receipt.item}</div>
+                <div><b>Amount:</b> {receipt.amount.toLocaleString()} GCSD</div>
               </div>
               <div className="mt-4 text-xs opacity-70">Tip: screenshot or print this popup for records.</div>
             </motion.div>
@@ -851,46 +725,23 @@ export default function GCSDApp() {
             leaderboard={leaderboard}
             starOfDay={starOfDay}
             leaderOfMonth={leaderOfMonth}
-            epochs={epochs}
           />
         )}
 
         {portal === "agent" && currentAgentId && (
           <AgentPortal
             theme={theme}
-            agentName={accounts.find(a => a.id === currentAgentId)?.name || ""}
-            agentBalance={balances.get(currentAgentId) || 0}
-            lifetimeEarn={
-              txns
-                .filter(
-                  t =>
-                    t.kind === "credit" &&
-                    t.toId === currentAgentId &&
-                    t.memo !== "Mint" &&
-                    afterEpoch(epochs, currentAgentId, t.dateISO) &&
-                    !isReversalOfRedemption(t)
-                )
-                .reduce((a, b) => a + b.amount, 0) -
-              txns
-                .filter(t => isCorrectionDebit(t) && t.fromId === currentAgentId && afterEpoch(epochs, currentAgentId, t.dateISO))
-                .reduce((a, b) => a + b.amount, 0)
-            }
-            lifetimeSpend={txns.filter(t => t.kind === "debit" && t.fromId === currentAgentId && !isCorrectionDebit(t) && afterEpoch(epochs, currentAgentId, t.dateISO)).reduce((a,b)=>a+b.amount,0)}
+            agentName={agent?.name || ""}
+            agentBalance={agentBalance}
+            lifetimeEarn={lifetimeEarn}
+            lifetimeSpend={lifetimeSpend}
             goal={goals[currentAgentId] || 0}
-            setGoal={amt => setSavingsGoal(currentAgentId, amt)}
-            txns={txns.filter(t => (t.fromId === currentAgentId || t.toId === currentAgentId) && afterEpoch(epochs, currentAgentId, t.dateISO))}
+            setGoal={(amt) => setSavingsGoal(currentAgentId, amt)}
+            txns={agentTxns}
             prizes={PRIZE_ITEMS}
             stock={stock}
-            prizeCount={
-              txns.filter(
-                t =>
-                  t.kind === "debit" &&
-                  t.fromId === currentAgentId &&
-                  (t.memo || "").startsWith("Redeem:") &&
-                  afterEpoch(epochs, currentAgentId, t.dateISO)
-              ).length
-            }
-            onRedeem={k => redeemPrize(currentAgentId, k)}
+            prizeCount={prizeCount}
+            onRedeem={(k) => redeemPrize(currentAgentId, k)}
           />
         )}
 
@@ -912,57 +763,344 @@ export default function GCSDApp() {
             onSetPin={setAgentPin}
             onResetPin={(id) => resetPin(id)}
             onResetBalance={(id) => resetAgentBalance(id)}
+            onEraseHistory={(id) => eraseAgentHistory(id)}
+            onFullReset={fullResetWithPin}
             pins={pins}
-            adminTab={adminTab}
-            setAdminTab={setAdminTab}
-            onCompleteReset={completeReset}
             epochs={epochs}
+            adminTab={adminTab} setAdminTab={setAdminTab}
           />
         )}
 
-        {portal === "sandbox" && <SandboxPage onExit={exitSandbox} theme={theme} />}
+        {portal === "sandbox" && <SandboxPage onExit={() => { setPortal("sandbox"); /* explicit stay */ }} theme={theme} />}
 
         {portal === "feed" && <FeedPage theme={theme} notifs={notifs} />}
       </div>
     </div>
   );
 }
+/* =============================
+   Shared UI Components
+   ============================= */
 
-/* ===== Helpers, UI components, and pages continue in Part 4/4 ===== */
-
-/* ---------- shared helpers (keep ONE copy only) ---------- */
-function classNames(...x: (string | false | undefined)[]) {
-  return x.filter(Boolean).join(" ");
+function TypeLabel({ text }: { text: string }) {
+  return (
+    <div aria-label={text} className="text-2xl font-semibold">
+      {text.split("").map((ch, i) => (
+        <motion.span
+          key={i}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.08, delay: i * 0.015 }}
+        >
+          {ch}
+        </motion.span>
+      ))}
+    </div>
+  );
 }
 
-const neonBox = (theme: Theme) =>
-  theme === "neon"
-    ? "bg-[#14110B] border border-orange-800 text-orange-50"
-    : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800";
+function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
+  const isDark = theme === "dark";
+  const isNeon = theme === "neon";
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setTheme(isDark ? "light" : "dark")}
+        className={
+          theme === "neon"
+            ? "h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60"
+            : "h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
+        }
+        aria-label={isDark ? "Switch to light" : "Switch to dark"}
+        title={isDark ? "Light" : "Dark"}
+      >
+        <AnimatePresence initial={false} mode="wait">
+          {isDark ? (
+            <motion.span
+              key="moon"
+              initial={{ rotate: -20, scale: 0.7, opacity: 0 }}
+              animate={{ rotate: 0, scale: 1, opacity: 1 }}
+              exit={{ rotate: 20, scale: 0.7, opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              <Moon className="w-4 h-4" />
+            </motion.span>
+          ) : (
+            <motion.span
+              key="sun"
+              initial={{ rotate: 20, scale: 0.7, opacity: 0 }}
+              animate={{ rotate: 0, scale: 1, opacity: 1 }}
+              exit={{ rotate: -20, scale: 0.7, opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              <Sun className="w-4 h-4" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </button>
 
-const neonBtn = (theme: Theme, solid = false) =>
-  theme === "neon"
-    ? solid
-      ? "bg-orange-600 text-black border border-orange-700 hover:bg-orange-500"
-      : "bg-[#0B0B0B] border border-orange-700 hover:bg-[#14110B]"
-    : solid
-    ? "bg-black text-white dark:bg-white dark:text-black hover:opacity-90"
-    : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700";
-
-const inputCls = (theme: Theme) =>
-  classNames(
-    "w-full px-3 py-2 rounded-xl border focus:outline-none",
-    theme === "neon"
-      ? "bg-[#0B0B0B] border-orange-700 text-orange-50 [color-scheme:dark]"
-      : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+      <button
+        onClick={() => setTheme(isNeon ? "light" : "neon")}
+        className={
+          isNeon
+            ? "h-8 px-2 rounded-full border border-orange-700 bg-orange-700 text-black inline-flex items-center gap-1"
+            : "h-8 px-2 rounded-full border inline-flex items-center gap-1 bg-white dark:bg-slate-800"
+        }
+        title="Neon mode"
+      >
+        <Zap className="w-4 h-4" /> Neon
+      </button>
+    </div>
   );
+}
+
+function NotificationsBell({
+  notifs,
+  theme,
+  unread,
+  onOpenFeed
+}: {
+  notifs: Notification[];
+  theme: Theme;
+  unread: number;
+  onOpenFeed: () => void;
+}) {
+  return (
+    <button
+      className={
+        theme === "neon"
+          ? "relative h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60"
+          : "relative h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
+      }
+      onClick={onOpenFeed}
+      title="Notifications"
+    >
+      {unread > 0 && (
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] text-[11px] rounded-full grid place-items-center bg-rose-600 text-white px-1">
+          {Math.min(99, unread)}
+        </span>
+      )}
+      <Bell className="w-4 h-4" />
+    </button>
+  );
+}
+
+function Picker({
+  theme,
+  accounts,
+  balances,
+  onClose,
+  onChooseAdmin,
+  onChooseAgent
+}: {
+  theme: Theme;
+  accounts: Account[];
+  balances: Map<string, number>;
+  onClose: () => void;
+  onChooseAdmin: () => void;
+  onChooseAgent: (id: string) => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center"
+    >
+      <motion.div
+        initial={{ y: 18, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 160, damping: 18 }}
+        className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            <h2 className="text-xl font-semibold">Switch User</h2>
+          </div>
+          <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-2">
+          <HoverCard theme={theme} onClick={onChooseAdmin}>
+            <div className="font-semibold flex items-center gap-2">
+              <Lock className="w-4 h-4" /> Admin Portal
+            </div>
+            <div className="text-xs opacity-70 mt-1">PIN required</div>
+          </HoverCard>
+
+          {accounts
+            .filter(a => a.role !== "system")
+            .map((a, i) => (
+              <HoverCard key={a.id} theme={theme} delay={0.03 + i * 0.02} onClick={() => onChooseAgent(a.id)}>
+                <div className="font-medium">{a.name}</div>
+                <div className="text-xs opacity-70">
+                  Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD
+                </div>
+              </HoverCard>
+            ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function HoverCard({
+  children,
+  onClick,
+  delay = 0.03,
+  theme
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  delay?: number;
+  theme: Theme;
+}) {
+  return (
+    <motion.button
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+      whileHover={{ y: -3, boxShadow: "0 10px 22px rgba(0,0,0,.10)" }}
+      whileTap={{ scale: 0.98 }}
+      onClick={onClick}
+      className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}
+    >
+      {children}
+    </motion.button>
+  );
+}
+
+/* Reusable pretty select (with Neon contrast fix) */
+function FancySelect({
+  value,
+  onChange,
+  children,
+  theme,
+  placeholder
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  children: React.ReactNode;
+  theme: Theme;
+  placeholder?: string;
+}) {
+  return (
+    <div
+      className={classNames(
+        "relative rounded-xl",
+        theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800"
+      )}
+    >
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={classNames(
+          "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none",
+          theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent"
+        )}
+      >
+        {placeholder && <option value="">{placeholder}</option>}
+        {children}
+      </select>
+      <ChevronDown
+        className={classNames(
+          "pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4",
+          theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300"
+        )}
+      />
+    </div>
+  );
+}
+
+/* PIN Modals */
+function PinModal({
+  open,
+  onClose,
+  onCheck
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCheck: (pin: string) => void;
+}) {
+  return (
+    <AnimatePresence>
+      {open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} />}
+    </AnimatePresence>
+  );
+}
+
+function PinModalGeneric({
+  title,
+  onClose,
+  onOk,
+  maxLen
+}: {
+  title: string;
+  onClose: () => void;
+  onOk: (pin: string) => void;
+  maxLen: number;
+}) {
+  const [pin, setPin] = useState("");
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-black/40 grid place-items-center"
+    >
+      <motion.div
+        initial={{ scale: 0.95 }}
+        animate={{ scale: 1 }}
+        exit={{ scale: 0.95 }}
+        className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(440px,92vw)]"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="font-semibold flex items-center gap-2">
+            <Lock className="w-4 h-4" /> {title}
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div className="text-sm opacity-70">Enter {maxLen}-digit PIN.</div>
+          <input
+            className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800"
+            placeholder="PIN"
+            type="password"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            maxLength={maxLen}
+          />
+          <button
+            className="px-3 py-1.5 rounded-xl border bg-black text-white"
+            onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}
+          >
+            <Check className="w-4 h-4 inline mr-1" /> OK
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+/* =========================
+   Helpers & Components
+   ========================= */
+
+function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
+const neonBox = (theme:Theme) =>
+  theme==="neon" ? "bg-[#14110B] border border-orange-800 text-orange-50" : "bg-white dark:bg-slate-800";
+const neonBtn = (theme:Theme, filled=false) =>
+  theme==="neon"
+    ? (filled ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
+    : (filled ? "bg-black text-white" : "bg-white dark:bg-slate-800");
+const inputCls = (theme:Theme) =>
+  theme==="neon"
+    ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60"
+    : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
 
 /* ===== Epoch helpers (hide history prior to reset) ===== */
-function afterEpoch(
-  epochs: Record<string, string>,
-  agentId: string | undefined,
-  dateISO: string
-) {
+function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, dateISO:string){
   if (!agentId) return true;
   const e = epochs[agentId];
   if (!e) return true;
@@ -970,80 +1108,51 @@ function afterEpoch(
 }
 
 /* Treat undo-redeem credits as non-earnings */
-function isReversalOfRedemption(t: Transaction) {
+function isReversalOfRedemption(t: Transaction){
   return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
 }
-function isRedeem(t: Transaction) {
+function isRedeem(t: Transaction){
   return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
 }
 
 /* For purchases list, exclude redeems that have a later matching reversal */
 function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
   if (!isRedeem(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
+  const label = (redeemTxn.memo||"").replace("Redeem: ","");
   const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(
-    (t) =>
-      isReversalOfRedemption(t) &&
-      t.toId === redeemTxn.fromId &&
-      (t.memo || "") === `Reversal of redemption: ${label}` &&
-      new Date(t.dateISO).getTime() >= after
+  return !all.some(t =>
+    isReversalOfRedemption(t) &&
+    t.toId === redeemTxn.fromId &&
+    (t.memo||"") === `Reversal of redemption: ${label}` &&
+    new Date(t.dateISO).getTime() >= after
   );
 }
 
 /* ===== Simple chart ===== */
-function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
+function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
   const max = Math.max(1, ...earned, ...spent);
-  const h = 110,
-    w = 420,
-    pad = 10,
-    step = (w - pad * 2) / (earned.length - 1 || 1);
-  const toPath = (arr: number[]) =>
-    arr
-      .map(
-        (v, i) =>
-          `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`
-      )
-      .join(" ");
+  const h = 110, w = 420, pad = 10, step = (w - pad*2) / (earned.length - 1 || 1);
+  const toPath = (arr:number[]) =>
+    arr.map((v,i)=> `${i===0 ? "M" : "L"} ${pad + i*step},${h - pad - (v/max)*(h-pad*2)}`).join(" ");
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
-      <path
-        d={toPath(earned)}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="text-emerald-500"
-      />
-      <path
-        d={toPath(spent)}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="text-rose-500"
-      />
+      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
+      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
       <g className="text-xs">
-        <text x={pad} y={h - 2} className="fill-current opacity-60">
-          Earned
-        </text>
-        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
-          Spent
-        </text>
+        <text x={pad} y={h-2} className="fill-current opacity-60">Earned</text>
+        <text x={pad+70} y={h-2} className="fill-current opacity-60">Spent</text>
       </g>
     </svg>
   );
 }
-
-function TileRow({ label, value }: { label: string; value: number }) {
+function TileRow({ label, value }:{ label:string; value:number }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">
-        <NumberFlash value={value} />
-      </div>
+      <div className="text-2xl font-semibold"><NumberFlash value={value}/></div>
     </div>
   );
 }
-
 function Highlight({ title, value }:{ title:string; value:string }) {
   return (
     <div className="rounded-xl border p-3">
@@ -1640,3 +1749,4 @@ function FeedPage({ theme, notifs }:{ theme:Theme; notifs: Notification[] }) {
 /* =========================
    END GCSDApp.tsx
    ========================= */
+
