@@ -3,16 +3,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
-  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap
+  Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Edit3, Shield, Zap
 } from "lucide-react";
-import { kvGet, kvSet } from "./lib/db";
+import { kvGet, kvSet, onKVChange } from "./lib/db";
 
 /* ===========================
-   G C S  B A N K  —  Single-file app
+   G C S  B A N K — App
    =========================== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png";              // Put high-res in /public/logo.png
+const LOGO_URL = "/logo.png";
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox";
@@ -73,8 +73,24 @@ const PRIZE_ITEMS: PrizeItem[] = [
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
   soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
-  flight_madrid: 1, flight_london: 1, flight_milan: 1,         // Madrid explicitly 1
+  flight_madrid: 1, flight_london: 1, flight_milan: 1,
 };
+
+// KV keys
+const KV_CORE   = "gcs-v4-core";   // { accounts, txns }
+const KV_STOCK  = "gcs-v4-stock";  // Record<prizeKey, number>
+const KV_PINS   = "gcs-v4-pins";   // Record<agentId, pin>
+const KV_GOALS  = "gcs-v4-goals";  // Record<agentId, goal>
+const KV_NOTIFS = "gcs-v4-notifs"; // Notification[]
+
+type Snapshot = {
+  accounts: Account[];
+  txns: Transaction[];
+  stock: Record<string, number>;
+  pins: Record<string, string>;
+  goals: Record<string, number>;
+  notifs: Notification[];
+} | null;
 
 /* ---------- helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -86,7 +102,7 @@ const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padSt
 /* ---------- seed ---------- */
 const seedAccounts: Account[] = [
   { id: uid(), name: "Bank Vault", role: "system" },
-  ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as "agent" })),
+  ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
 ];
 const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
@@ -97,7 +113,7 @@ const seedTxns: Transaction[] = [
    App
    ================================= */
 export default function GCSDApp() {
-  // State defaults (no localStorage for shared state)
+  // State (remote-first)
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [stock, setStock] = useState<Record<string, number>>({});
@@ -107,12 +123,17 @@ export default function GCSDApp() {
   const [hydrated, setHydrated] = useState(false);
 
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
+  // Apply Tailwind dark mode by toggling class on <html>
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("gcs-v4-theme", theme);
+  }, [theme]);
 
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminPin, setAdminPin] = useState<string>(""); // kept in-memory only
-
+  const [adminPin, setAdminPin] = useState<string>("");
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
 
   const [showIntro, setShowIntro] = useState(true);
@@ -122,50 +143,52 @@ export default function GCSDApp() {
   const [adminTab, setAdminTab] = useState<"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users">("dashboard");
 
   const [sandboxActive, setSandboxActive] = useState(false);
+  const [snapshot, setSnapshot] = useState<Snapshot>(null);
+
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
 
-  // Theme persistence only
-  useEffect(() => { localStorage.setItem("gcs-v4-theme", theme); }, [theme]);
-
-  // Hydrate from Supabase KV once on mount
+  // Hydrate once from KV
   useEffect(() => {
     (async () => {
       try {
-        const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>('gcs-v4-core');
-        if (core?.accounts && core?.txns) {
-          setAccounts(core.accounts);
-          setTxns(core.txns);
-        } else {
-          setAccounts(seedAccounts);
-          setTxns(seedTxns);
-        }
-        const s = await kvGet<Record<string, number>>('gcs-v4-stock');
-        setStock(s ?? INITIAL_STOCK);
-        const p = await kvGet<Record<string, string>>('gcs-v4-pins');
-        setPins(p ?? {});
-        const g = await kvGet<Record<string, number>>('gcs-v4-goals');
-        setGoals(g ?? {});
-        const n = await kvGet<Notification[]>('gcs-v4-notifs');
-        setNotifs(n ?? []);
-      } finally {
-        setHydrated(true);
-      }
+        const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>(KV_CORE);
+        if (core?.accounts && core?.txns) { setAccounts(core.accounts); setTxns(core.txns); }
+        else { setAccounts(seedAccounts); setTxns(seedTxns); }
+
+        setStock((await kvGet<Record<string, number>>(KV_STOCK)) ?? INITIAL_STOCK);
+        setPins((await kvGet<Record<string, string>>(KV_PINS)) ?? {});
+        setGoals((await kvGet<Record<string, number>>(KV_GOALS)) ?? {});
+        setNotifs((await kvGet<Notification[]>(KV_NOTIFS)) ?? []);
+      } finally { setHydrated(true); }
     })();
   }, []);
 
-  // Persist changes to Supabase KV
-  useEffect(() => { if (hydrated) kvSet('gcs-v4-core',  { accounts, txns }); }, [hydrated, accounts, txns]);
-  useEffect(() => { if (hydrated) kvSet('gcs-v4-stock', stock);             }, [hydrated, stock]);
-  useEffect(() => { if (hydrated) kvSet('gcs-v4-pins',  pins);              }, [hydrated, pins]);
-  useEffect(() => { if (hydrated) kvSet('gcs-v4-goals', goals);             }, [hydrated, goals]);
-  useEffect(() => { if (hydrated) kvSet('gcs-v4-notifs', notifs);           }, [hydrated, notifs]);
+  // Realtime sync (skip while sandbox)
+  useEffect(() => {
+    if (!hydrated) return;
+    const stop = onKVChange([KV_CORE, KV_STOCK, KV_PINS, KV_GOALS, KV_NOTIFS], (key, value) => {
+      if (sandboxActive) return;
+      if (key === KV_CORE && value) {
+        const v = value as { accounts: Account[]; txns: Transaction[] };
+        if (Array.isArray(v.accounts) && Array.isArray(v.txns)) { setAccounts(v.accounts); setTxns(v.txns); }
+      } else if (key === KV_STOCK) setStock(value ?? {});
+      else if (key === KV_PINS)    setPins(value ?? {});
+      else if (key === KV_GOALS)   setGoals(value ?? {});
+      else if (key === KV_NOTIFS)  setNotifs(value ?? []);
+    });
+    return stop;
+  }, [hydrated, sandboxActive]);
 
-  /* clock + intro every load */
-  useEffect(()=> {
-    const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
-    return ()=> clearInterval(t);
-  }, []);
+  // Persist (guarded in sandbox)
+  useEffect(()=> { if (hydrated && !sandboxActive) kvSet(KV_CORE,  { accounts, txns }); }, [hydrated, sandboxActive, accounts, txns]);
+  useEffect(()=> { if (hydrated && !sandboxActive) kvSet(KV_STOCK, stock);               }, [hydrated, sandboxActive, stock]);
+  useEffect(()=> { if (hydrated && !sandboxActive) kvSet(KV_PINS,  pins);                }, [hydrated, sandboxActive, pins]);
+  useEffect(()=> { if (hydrated && !sandboxActive) kvSet(KV_GOALS, goals);               }, [hydrated, sandboxActive, goals]);
+  useEffect(()=> { if (hydrated && !sandboxActive) kvSet(KV_NOTIFS, notifs);             }, [hydrated, sandboxActive, notifs]);
+
+  // Clock + intro
+  useEffect(()=> { const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000); return ()=> clearInterval(t); }, []);
   useEffect(()=> {
     if (!showIntro) return;
     const timer = setTimeout(()=> setShowIntro(false), 2000);
@@ -174,10 +197,9 @@ export default function GCSDApp() {
     return ()=> { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
   }, [showIntro]);
 
-  /* derived */
+  // Derived
   const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
   const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
-
   const agent = accounts.find(a=>a.id===currentAgentId);
   const agentTxns = txns.filter(t=> t.fromId===currentAgentId || t.toId===currentAgentId);
   const agentBalance = balances.get(currentAgentId)||0;
@@ -185,7 +207,6 @@ export default function GCSDApp() {
   const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
   const prizeCount = agentTxns.filter(t=> t.kind==="debit" && (t.memo||"").startsWith("Redeem:")).length;
 
-  // leaderboard + streaks
   const dayBuckets = bucketByDay(txns, nonSystemIds);
   const streaks = computeStreaks(dayBuckets);
   const leaderboard = Array.from(nonSystemIds).map(id => {
@@ -193,7 +214,6 @@ export default function GCSDApp() {
     return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
   }).sort((a,b)=> b.earned - a.earned);
 
-  // star of the day / leader of month
   const todayKey = new Date().toLocaleDateString();
   const curMonth  = monthKey(new Date());
   const earnedToday: Record<string, number> = {}, earnedMonth: Record<string, number> = {};
@@ -214,6 +234,7 @@ export default function GCSDApp() {
   const notify = (text:string) => setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
+  const getAgentCredits = (list:Transaction[], id:string) => list.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint");
 
   /* actions */
   function adminCredit(agentId:string, ruleKey:string, qty:number){
@@ -282,10 +303,10 @@ export default function GCSDApp() {
   }
   function setAgentPin(agentId:string, pin:string){
     if (!isAdmin) return toast.error("Admin only");
-    if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
+    if (pin !== "" && !/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
     setPins(prev=> ({...prev, [agentId]: pin}));
-    notify(`🔐 PIN set/reset for ${getName(agentId)}`);
-    toast.success("PIN updated");
+    notify(pin ? `🔐 PIN set/reset for ${getName(agentId)}` : `🔐 PIN cleared for ${getName(agentId)}`);
+    toast.success(pin ? "PIN updated" : "PIN reset");
   }
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
@@ -297,17 +318,35 @@ export default function GCSDApp() {
     });
   }
 
-  /* Sandbox (PIN-gated enter, sticky until Exit) */
+  /* Sandbox */
   function enterSandbox() {
     const pin = prompt("Admin PIN to enter Sandbox:");
     if (!pin || !/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
     setAdminPin(pin);
+    setSnapshot({ accounts, txns, stock, pins, goals, notifs });
+
+    setAccounts(seedAccounts);
+    setTxns(seedTxns);
+    setStock({ ...INITIAL_STOCK });
+    setPins({});
+    setGoals({});
+    setNotifs([]);
+
     setSandboxActive(true);
     setPortal("sandbox");
-    toast.success("Sandbox started");
+    toast.success("Sandbox started (isolated)");
   }
   function exitSandbox() {
+    if (snapshot) {
+      setAccounts(snapshot.accounts);
+      setTxns(snapshot.txns);
+      setStock(snapshot.stock);
+      setPins(snapshot.pins);
+      setGoals(snapshot.goals);
+      setNotifs(snapshot.notifs);
+    }
     setSandboxActive(false);
+    setSnapshot(null);
     setPortal("home");
     toast.success("Sandbox cleared");
   }
@@ -323,14 +362,14 @@ export default function GCSDApp() {
     >
       <Toaster position="top-center" richColors />
 
-      {/* Intro (every visit) */}
+      {/* Intro */}
       <AnimatePresence>
         {showIntro && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
             className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
             <motion.div initial={{scale:0.96}} animate={{scale:1}} className="text-center p-8">
-              <div className="mx-auto mb-6 w-32 h-32 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_80px_rgba(59,130,246,.45)]">
-                <img src={LOGO_URL} alt="GCS Bank logo" className="w-24 h-24 rounded drop-shadow-[0_6px_18px_rgba(59,130,246,.35)]"/>
+              <div className="mx-auto mb-6 w-40 h-40 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_80px_rgba(59,130,246,.45)]">
+                <img src={LOGO_URL} alt="GCS Bank logo" className="w-28 h-28 rounded drop-shadow-[0_6px_18px_rgba(59,130,246,.35)]"/>
               </div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <div className="text-white/70 mt-2 mb-6">Press Enter to continue</div>
@@ -356,6 +395,7 @@ export default function GCSDApp() {
           <div className="flex items-center gap-3">
             <img src={LOGO_URL} alt="GCS Bank logo" className="h-10 w-10 rounded drop-shadow-sm" />
             <span className="font-semibold">{APP_NAME}</span>
+
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
               onClick={()=> setPortal("home")}
@@ -363,6 +403,7 @@ export default function GCSDApp() {
             >
               <HomeIcon className="w-4 h-4"/> Home
             </button>
+
             <button
               className={classNames("ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
               onClick={()=> portal==="sandbox" ? exitSandbox() : enterSandbox()}
@@ -371,10 +412,24 @@ export default function GCSDApp() {
               <Shield className="w-4 h-4"/> {portal==="sandbox" ? "Exit Sandbox" : "Sandbox"}
             </button>
           </div>
+
           <div className="flex items-center gap-3">
-            <NotificationsBell notifs={notifs} theme={theme}/>
+            {/* bell */}
+            <button
+              className={classNames(
+                "h-8 w-8 grid place-items-center rounded-full border",
+                theme==="neon" ? "bg-[#0B0B0B] text-orange-200 border-orange-800" : "bg-white dark:bg-slate-800"
+              )}
+              onClick={()=> setNotifOpen(true)}
+              title="Notifications"
+            >
+              <Bell className="w-4 h-4" />
+            </button>
+
             <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+
             <ThemeToggle theme={theme} setTheme={setTheme}/>
+
             <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
               className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
               onClick={()=> setPickerOpen(true)}>
@@ -383,6 +438,9 @@ export default function GCSDApp() {
           </div>
         </div>
       </div>
+
+      {/* Notifications panel */}
+      <NotificationsBellController notifs={notifs} theme={theme} />
 
       {/* Switch User */}
       <AnimatePresence>
@@ -398,56 +456,23 @@ export default function GCSDApp() {
         )}
       </AnimatePresence>
 
-      {/* Admin unlock modal */}
-      <AnimatePresence>
-        {portal==="admin" && !isAdmin && (
-          <PinModalGeneric
-            title="Admin PIN"
-            maxLen={8}
-            onClose={() => { setPortal("home"); }}
-            onOk={(pin) => {
-              if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
-              setAdminPin(pin);
-              setIsAdmin(true);
-              toast.success("Admin unlocked");
-            }}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Agent PIN modal */}
-      <PinModal
-        open={pinModal.open}
-        onClose={()=> setPinModal({open:false})}
-        onCheck={(pin)=>{
-          const aId = pinModal.agentId!;
-          const ok = pins[aId] && pin === pins[aId];
-          pinModal.onOK?.(!!ok);
-          setPinModal({open:false});
-        }}
-      />
-
-      {/* Receipt */}
-      <AnimatePresence>
-        {receipt && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4"/> Receipt</div>
-                <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={()=>setReceipt(null)}><X className="w-4 h-4"/></button>
-              </div>
-              <div className="text-sm space-y-2">
-                <div><b>Order ID:</b> {receipt.id}</div>
-                <div><b>Date:</b> {receipt.when}</div>
-                <div><b>Buyer:</b> {receipt.buyer}</div>
-                <div><b>Prize:</b> {receipt.item}</div>
-                <div><b>Amount:</b> {receipt.amount.toLocaleString()} GCSD</div>
-              </div>
-              <div className="mt-4 text-xs opacity-70">Tip: screenshot or print this popup for records.</div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Admin PIN prompt inline (simple) */}
+      {portal==="admin" && !isAdmin && (
+        <div className="max-w-6xl mx-auto px-4 py-6">
+          <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
+            <div className="flex items-center justify-center gap-2 mb-2"><Lock className="w-5 h-5"/><b>Admin PIN</b></div>
+            <p className="text-sm opacity-80 mb-3">Enter 5–8 digits to unlock Admin.</p>
+            <PinAsk
+              theme={theme}
+              maxLen={8}
+              onOk={(pin)=>{
+                if (!/^\d{5,8}$/.test(pin)) return toast.error("Enter a valid PIN");
+                setAdminPin(pin); setIsAdmin(true); toast.success("Admin unlocked");
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Pages */}
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -481,7 +506,7 @@ export default function GCSDApp() {
           />
         )}
 
-        {portal==="admin" && (
+        {portal==="admin" && isAdmin && (
           <AdminPortal
             theme={theme}
             isAdmin={isAdmin}
@@ -497,6 +522,7 @@ export default function GCSDApp() {
             onAddAgent={addAgent}
             onSetPin={setAgentPin}
             adminTab={adminTab} setAdminTab={setAdminTab}
+            postTxn={postTxn} notify={notify} getName={getName}
           />
         )}
 
@@ -544,7 +570,7 @@ function computeStreaks(by: Record<string, Set<string>>){
   return res;
 }
 
-/* ========== Shared UI ========== */
+/* ========== Shared UI bits ========== */
 
 function TypeLabel({ text }:{ text:string }) {
   return (
@@ -558,52 +584,11 @@ function TypeLabel({ text }:{ text:string }) {
   );
 }
 
-function ThemeToggle({theme, setTheme}:{theme:Theme; setTheme:(t:Theme)=>void}) {
-  const isDark = theme === "dark";
-  const isNeon = theme === "neon";
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => setTheme(isDark ? "light" : "dark")}
-        className="h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
-        aria-label={isDark ? "Switch to light" : "Switch to dark"}
-        title={isDark ? "Light" : "Dark"}
-      >
-        <AnimatePresence initial={false} mode="wait">
-          {isDark ? (
-            <motion.span key="moon" initial={{ rotate:-20, scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
-              <Moon className="w-4 h-4" />
-            </motion.span>
-          ) : (
-            <motion.span key="sun"  initial={{ rotate:20,  scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:-20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
-              <Sun className="w-4 h-4" />
-            </motion.span>
-          )}
-        </AnimatePresence>
-      </button>
-      <button
-        onClick={() => setTheme(isNeon ? "light" : "neon")}
-        className={classNames("h-8 px-2 rounded-full border inline-flex items-center gap-1",
-          isNeon ? "bg-orange-700 text-black border-orange-600" : "bg-white dark:bg-slate-800")}
-        title="Neon mode"
-      >
-        <Zap className="w-4 h-4" /> Neon
-      </button>
-    </div>
-  );
-}
-
-function NotificationsBell({ notifs, theme }:{ notifs: Notification[]; theme:Theme }) {
+/* Notifications controller (keeps neon colors consistent) */
+function NotificationsBellController({ notifs, theme }:{ notifs:Notification[]; theme:Theme }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button
-        className="h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
-        onClick={()=> setOpen(true)}
-        title="Notifications"
-      >
-        <Bell className="w-4 h-4" />
-      </button>
       <AnimatePresence>
         {open && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-40 bg-black/30" onClick={()=>setOpen(false)}>
@@ -625,7 +610,51 @@ function NotificationsBell({ notifs, theme }:{ notifs: Notification[]; theme:The
           </motion.div>
         )}
       </AnimatePresence>
+      {/* trigger lives in header; we call setOpen(true) from there */}
+      <span className="hidden" />
+      {/* small helper to expose setter via window for header button */}
+      {useEffect(() => { (window as any).__openNotifs = () => setOpen(true); }, []), null}
     </>
+  );
+}
+
+function ThemeToggle({theme, setTheme}:{theme:Theme; setTheme:(t:Theme)=>void}) {
+  const isDark = theme === "dark";
+  const isNeon = theme === "neon";
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setTheme(isDark ? "light" : "dark")}
+        className={classNames(
+          "h-8 w-8 grid place-items-center rounded-full border",
+          theme==="neon" ? "bg-[#0B0B0B] text-orange-200 border-orange-800" : "bg-white dark:bg-slate-800"
+        )}
+        aria-label={isDark ? "Switch to light" : "Switch to dark"}
+        title={isDark ? "Light" : "Dark"}
+      >
+        <AnimatePresence initial={false} mode="wait">
+          {isDark ? (
+            <motion.span key="moon" initial={{ rotate:-20, scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
+              <Moon className="w-4 h-4" />
+            </motion.span>
+          ) : (
+            <motion.span key="sun"  initial={{ rotate:20,  scale:0.7, opacity:0 }} animate={{ rotate:0, scale:1, opacity:1 }} exit={{ rotate:-20, scale:0.7, opacity:0 }} transition={{ duration:0.1 }}>
+              <Sun className="w-4 h-4" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </button>
+      <button
+        onClick={() => setTheme(isNeon ? "light" : "neon")}
+        className={classNames(
+          "h-8 px-2 rounded-full border inline-flex items-center gap-1",
+          isNeon ? "bg-orange-700 text-black border-orange-600" : (theme==="dark" ? "bg-slate-800" : "bg-white")
+        )}
+        title="Neon mode"
+      >
+        <Zap className="w-4 h-4" /> Neon
+      </button>
+    </div>
   );
 }
 
@@ -677,7 +706,20 @@ function HoverCard({ children, onClick, delay=0.03, theme }:{
   );
 }
 
-/* PIN modals */
+function PinAsk({ theme, maxLen=8, onOk }:{ theme?:Theme; maxLen?:number; onOk:(pin:string)=>void }) {
+  const [pin, setPin] = useState("");
+  return (
+    <div className="flex items-center justify-center gap-2">
+      <input className={classNames("border rounded-xl px-3 py-2 w-48", theme==="neon" ? "bg-[#0B0B0B] border-orange-800 text-orange-100":"bg-white dark:bg-slate-800")}
+        placeholder="PIN" type="password" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))} maxLength={maxLen}/>
+      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme||"light", true))} onClick={()=> pin.length>=5 ? onOk(pin) : toast.error(`PIN must be 5–${maxLen} digits`)}>
+        <Check className="w-4 h-4 inline mr-1"/> OK
+      </button>
+    </div>
+  );
+}
+
+/* PIN modals for agent redeem */
 function PinModal({ open, onClose, onCheck }:{ open:boolean; onClose:()=>void; onCheck:(pin:string)=>void }) {
   return (
     <AnimatePresence>
@@ -708,7 +750,7 @@ function PinModalGeneric({ title, onClose, onOk, maxLen }:{ title:string; onClos
   );
 }
 
-/* ========== Home ========== */
+/* ====== Home ====== */
 function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, leaderOfMonth }:{
   theme:Theme;
   accounts:Account[]; txns:Transaction[]; stock:Record<string,number>; prizes:PrizeItem[];
@@ -722,10 +764,10 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
 
   // 30-day finance series
   const days = Array.from({length:30}, (_,i)=> { const d=new Date(); d.setDate(d.getDate()-(29-i)); d.setHours(0,0,0,0); return d; });
-  const earnedSeries: number[] = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="credit" && !!t.toId && nonSystemIds.has(t.toId as string) && t.memo!=="Mint"));
-  const spentSeries: number[]  = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="debit" && !!t.fromId && nonSystemIds.has(t.fromId as string)));
-  const totalEarned = earnedSeries.reduce((a: number, b: number)=>a+b,0);
-  const totalSpent  = spentSeries.reduce((a: number, b: number)=>a+b,0);
+  const earnedSeries = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="credit" && t.toId && nonSystemIds.has(t.toId) && t.memo!=="Mint"));
+  const spentSeries  = days.map(d=> sumInRange(txns, d, 1, t => t.kind==="debit" && t.fromId && nonSystemIds.has(t.fromId)));
+  const totalEarned = earnedSeries.reduce((a,b)=>a+b,0);
+  const totalSpent  = spentSeries.reduce((a,b)=>a+b,0);
 
   return (
     <motion.div layout initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
@@ -753,7 +795,7 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
               <div className="text-sm mb-2">Total purchases: <b>{purchases.length}</b></div>
               <div className="space-y-2 max-h-40 overflow-auto pr-1">
                 {purchases.map((p, i)=> (
-                  <div key={i} className={classNames("flex items-center justify-between text-sm border rounded-lg px-3 py-1.5", neonBox(theme))}>
+                  <div key={i} className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5">
                     <span>{p.memo.replace("Redeem: ","")}</span>
                     <span className="opacity-70">{p.when.toLocaleString()}</span>
                   </div>
@@ -784,18 +826,14 @@ function Home({ theme, accounts, txns, stock, prizes, leaderboard, starOfDay, le
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {prizes.map(p=>(
+            {PRIZE_ITEMS.map(p=>(
               <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
-                  <span
-                    className={
-                      theme==="neon"
-                        ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200"
-                        : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"
-                    }
-                  >
+                  <span className={theme==="neon"
+                      ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200"
+                      : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"}>
                     Stock: {stock[p.key] ?? 0}
                   </span>
                 </div>
@@ -811,8 +849,6 @@ function sumInRange(txns:Transaction[], day:Date, spanDays:number, pred:(t:Trans
   const start = new Date(day); const end = new Date(day); end.setDate(start.getDate()+spanDays);
   return txns.filter(t=> pred(t) && new Date(t.dateISO)>=start && new Date(t.dateISO)<end).reduce((a,b)=>a+b.amount,0);
 }
-
-/* small tiles + chart */
 function TileRow({ label, value }:{ label:string; value:number }) {
   return (
     <div className="rounded-xl border p-3">
@@ -834,7 +870,6 @@ function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
   const h = 110, w = 420, pad = 10, step = (w - pad*2) / (earned.length - 1 || 1);
   const toPath = (arr:number[]) =>
     arr.map((v,i)=> `${i===0 ? "M" : "L"} ${pad + i*step},${h - pad - (v/max)*(h-pad*2)}`).join(" ");
-
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
       <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
@@ -847,7 +882,7 @@ function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
   );
 }
 
-/* ========== Agent Portal ========== */
+/* ====== Agent Portal ====== */
 function AgentPortal({
   theme, agentName, agentBalance, lifetimeEarn, lifetimeSpend, goal, setGoal,
   txns, prizes, stock, prizeCount, onRedeem,
@@ -918,7 +953,7 @@ function AgentPortal({
             <div className="text-xs opacity-70">Balance: {agentBalance.toLocaleString()} GCSD</div>
           </div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-            {PRIZE_ITEMS.map(p=>{
+            {prizes.map(p=>{
               const left = stock[p.key] ?? 0;
               const can = left>0 && agentBalance>=p.price && prizeCount<MAX_PRIZES_PER_AGENT;
               return (
@@ -944,11 +979,11 @@ function AgentPortal({
   );
 }
 
-/* ========== Admin Portal ========== */
+/* ====== Admin Portal ====== */
 function AdminPortal({
   theme, isAdmin, accounts, balances, stock, rules, txns,
   onCredit, onManualTransfer, onUndoSale, onUndoRedemption, onAddAgent, onSetPin,
-  adminTab, setAdminTab
+  adminTab, setAdminTab, postTxn, notify, getName
 }:{
   theme:Theme; isAdmin:boolean; accounts:Account[]; balances:Map<string,number>;
   stock:Record<string,number>; rules:ProductRule[]; txns:Transaction[];
@@ -958,6 +993,9 @@ function AdminPortal({
   onAddAgent:(name:string)=>void; onSetPin:(agentId:string, pin:string)=>void;
   adminTab:"dashboard"|"addsale"|"transfer"|"corrections"|"history"|"users";
   setAdminTab:(t:any)=>void;
+  postTxn:(t: Partial<Transaction> & Pick<Transaction,"kind"|"amount">)=>void;
+  notify:(s:string)=>void;
+  getName:(id:string)=>string;
 }) {
   const [agentId, setAgentId] = useState("");
   const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
@@ -967,15 +1005,6 @@ function AdminPortal({
   const [newAgent, setNewAgent] = useState("");
   const [pinAgent, setPinAgent] = useState("");
   const [pinVal, setPinVal] = useState("");
-
-  if (!isAdmin) {
-    return (
-      <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
-        <Lock className="w-5 h-5 mx-auto mb-2"/>
-        <div>Enter Admin PIN to access the portal.</div>
-      </div>
-    );
-  }
 
   return (
     <div className="grid gap-4">
@@ -991,8 +1020,7 @@ function AdminPortal({
         ].map(([k,lab])=>(
           <button key={k}
             onClick={()=> setAdminTab(k as any)}
-            className={classNames("px-3 py-1.5 rounded-xl text-sm",
-              adminTab===k ? neonBtn(theme,true) : neonBtn(theme))}
+            className={classNames("px-3 py-1.5 rounded-xl text-sm", adminTab===k ? neonBtn(theme,true) : neonBtn(theme))}
           >
             {lab}
           </button>
@@ -1028,42 +1056,54 @@ function AdminPortal({
             <div className="text-sm opacity-70 mb-2">Quick Tips</div>
             <ul className="text-sm list-disc pl-5 space-y-1 opacity-80">
               <li>“Add Sale” posts credits by product rule.</li>
-              <li>“Corrections” lets you reverse a sale or redemption.</li>
-              <li>Each agent can redeem up to {MAX_PRIZES_PER_AGENT} prizes.</li>
+              <li>“Corrections” can reverse or withdraw.</li>
+              <li>Agents can redeem up to {MAX_PRIZES_PER_AGENT} prizes.</li>
             </ul>
           </div>
         </div>
       )}
 
-      {/* add sale */}
+      {/* add sale (polished) */}
       {adminTab==="addsale" && (
-        <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-2 gap-4", neonBox(theme))}>
+        <div className={classNames("rounded-2xl border p-5 grid sm:grid-cols-2 gap-5", neonBox(theme))}>
           <div>
-            <div className="text-sm opacity-70 mb-2">Agent</div>
-            <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={agentId} onChange={(e)=>setAgentId(e.target.value)}>
+            <div className="text-xs opacity-70 mb-1">Agent</div>
+            <select
+              className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 transition"
+              value={agentId} onChange={(e)=>setAgentId(e.target.value)}>
               <option value="">Choose agent…</option>
-              {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+              {accounts.filter(a=>a.role!=="system").map(a=>(
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
             </select>
           </div>
           <div>
-            <div className="text-sm opacity-70 mb-2">Product</div>
-            <select className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={ruleKey} onChange={(e)=>setRuleKey(e.target.value)}>
-              {rules.map(r=>(<option key={r.key} value={r.key}>{r.label} — {r.gcsd}</option>))}
+            <div className="text-xs opacity-70 mb-1">Product</div>
+            <select
+              className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 transition"
+              value={ruleKey} onChange={(e)=>setRuleKey(e.target.value)}>
+              {rules.map(r=>(
+                <option key={r.key} value={r.key}>{r.label} — {r.gcsd}</option>
+              ))}
             </select>
           </div>
           <div>
-            <div className="text-sm opacity-70 mb-2">Quantity</div>
-            <input className="border rounded-xl px-3 py-2 w-40 bg-white dark:bg-slate-800" value={qty} onChange={(e)=> setQty(Math.max(1,parseInt(e.target.value||"1",10)))} />
+            <div className="text-xs opacity-70 mb-1">Quantity</div>
+            <input
+              className="border rounded-xl px-3 py-2 w-40 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-black/20 dark:focus:ring-white/20 transition"
+              value={qty} onChange={(e)=> setQty(Math.max(1,parseInt(e.target.value||"1",10)))}
+            />
           </div>
           <div className="flex items-end">
-            <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> onCredit(agentId, ruleKey, qty)}>
+            <button className={classNames("px-5 py-2 rounded-xl shadow-sm hover:shadow-md transition", neonBtn(theme,true))}
+              onClick={()=> onCredit(agentId, ruleKey, qty)}>
               <Plus className="w-4 h-4 inline mr-1"/> Add Sale
             </button>
           </div>
         </div>
       )}
 
-      {/* manual transfer */}
+      {/* transfer */}
       {adminTab==="transfer" && (
         <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-3 gap-4", neonBox(theme))}>
           <div>
@@ -1090,35 +1130,88 @@ function AdminPortal({
         </div>
       )}
 
-      {/* corrections */}
+      {/* corrections: reverse & withdraw */}
       {adminTab==="corrections" && (
-        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Reverse a sale or redemption</div>
-          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {txns.filter(t=>t.memo && t.memo!=="Mint").map(t=>(
-              <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                <div className="text-sm">
-                  <div className="font-medium">{t.memo}</div>
-                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
-                    {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Reverse list */}
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Reverse a sale or redemption</div>
+            <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
+              {txns.filter(t=>t.memo && t.memo!=="Mint").map(t=>(
+                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="text-sm">
+                    <div className="font-medium">{t.memo}</div>
+                    <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                   </div>
-                  {t.kind==="credit" ? (
-                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                      onClick={()=> onUndoSale(t.id)}>
-                      <RotateCcw className="w-4 h-4 inline mr-1"/> Undo sale
-                    </button>
-                  ) : (
-                    <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                      onClick={()=> onUndoRedemption(t.id)}>
-                      <RotateCcw className="w-4 h-4 inline mr-1"/> Undo redeem
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
+                      {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                    </div>
+                    {t.kind==="credit" ? (
+                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                        onClick={()=> onUndoSale(t.id)}>
+                        <RotateCcw className="w-4 h-4 inline mr-1"/> Undo sale
+                      </button>
+                    ) : (
+                      <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                        onClick={()=> onUndoRedemption(t.id)}>
+                        <RotateCcw className="w-4 h-4 inline mr-1"/> Undo redeem
+                      </button>
+                    )}
+                  </div>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Withdraw by agent & sale */}
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Withdraw (deduct) by Agent & Sale</div>
+
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs opacity-70 mb-1">Agent</div>
+                <select
+                  className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800"
+                  value={agentId}
+                  onChange={(e)=>setAgentId(e.target.value)}
+                >
+                  <option value="">Choose agent…</option>
+                  {accounts.filter(a=>a.role!=="system").map(a=>(
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
               </div>
-            ))}
+            </div>
+
+            <div className="mt-3 text-xs opacity-70">Choose a credited sale to deduct the same amount from the agent’s balance.</div>
+
+            <div className="space-y-2 max-h-[420px] overflow-auto pr-2 mt-3">
+              {agentId
+                ? txns.filter(t=> t.kind==="credit" && t.toId===agentId && t.memo!=="Mint").map(t => (
+                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                      <div className="text-sm">
+                        <div className="font-medium">{t.memo || "Credited sale"}</div>
+                        <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
+                        <button
+                          className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme,true))}
+                          onClick={() => {
+                            postTxn({ kind:"debit", amount:t.amount, fromId: t.toId!, memo:`Admin withdraw for: ${t.memo || "sale"}` });
+                            notify(`↘️ Withdrawn −${t.amount} from ${getName(t.toId!)} (for ${t.memo || "sale"})`);
+                            toast.success("Withdrawn from agent");
+                          }}
+                        >
+                          Withdraw
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                : <div className="text-sm opacity-70">Pick an agent to list credited sales.</div>
+              }
+            </div>
           </div>
         </div>
       )}
@@ -1149,14 +1242,8 @@ function AdminPortal({
           <div className="rounded-xl border p-4">
             <div className="text-sm opacity-70 mb-2">Add agent</div>
             <div className="flex items-center gap-2">
-              <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="Full name" onKeyDown={(e)=>{ if (e.key==='Enter') (e.target as HTMLInputElement).nextElementSibling?.dispatchEvent(new MouseEvent('click')); }} value={undefined as any}/>
-              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=>{
-                const el = (document.activeElement as HTMLInputElement);
-                const wrap = el?.closest('div');
-                const input = wrap?.querySelector('input') as HTMLInputElement | null;
-                const name = input?.value?.trim();
-                if (name) addAgent(name);
-              }}>
+              <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" value={newAgent} onChange={(e)=>setNewAgent(e.target.value)} placeholder="Full name"/>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> newAgent && onAddAgent(newAgent)}>
                 <Plus className="w-4 h-4 inline mr-1"/> Add
               </button>
             </div>
@@ -1164,8 +1251,19 @@ function AdminPortal({
           <div className="rounded-xl border p-4">
             <div className="text-sm opacity-70 mb-2">Set / reset PIN (5 digits)</div>
             <div className="grid sm:grid-cols-3 gap-2">
-              {/* We keep the simple controlled UI from earlier for reliability */}
-              {/* (Kept in main Admin "users" tab in previous block) */}
+              <select className="border rounded-xl px-3 py-2 bg-white dark:bg-slate-800" value={pinAgent} onChange={(e)=>setPinAgent(e.target.value)}>
+                <option value="">Choose agent…</option>
+                {accounts.filter(a=>a.role!=="system").map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
+              </select>
+              <input className="border rounded-xl px-3 py-2 bg-white dark:bg-slate-800" placeholder="12345" value={pinVal} onChange={(e)=> setPinVal(e.target.value.replace(/[^\d]/g,"").slice(0,5))}/>
+              <div className="flex items-center gap-2">
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme,true))} onClick={()=> pinAgent && pinVal.length===5 && onSetPin(pinAgent, pinVal)}>
+                  <Check className="w-4 h-4 inline mr-1"/> Save PIN
+                </button>
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={()=> pinAgent && onSetPin(pinAgent, "")}>
+                  Reset
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1174,15 +1272,12 @@ function AdminPortal({
   );
 }
 
-/* ========== Sandbox ========== */
 function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
   return (
     <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} transition={{type:"spring", stiffness:160, damping:18}}>
       <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
         <div className="text-xl font-semibold mb-2">Sandbox</div>
-        <div className="opacity-80 text-sm">
-          Use this area to experiment. Data here is temporary and resets when you exit.
-        </div>
+        <div className="opacity-80 text-sm">This is isolated. Exit to restore real data.</div>
         <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme,true))} onClick={onExit}>
           Exit Sandbox
         </button>
@@ -1191,7 +1286,7 @@ function SandboxPage({ onExit, theme }:{ onExit:()=>void; theme:Theme }) {
   );
 }
 
-/* helpers for UI */
+/* utils & styles */
 function classNames(...x:(string|false|undefined)[]){ return x.filter(Boolean).join(" "); }
 function confettiBurst() {
   const el = document.createElement("div");
