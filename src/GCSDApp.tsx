@@ -7,6 +7,95 @@ import {
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 
+/* ===== SAFE (namespaced) helpers — paste ONCE ===== */
+
+function G_G_isCorrectionDebit(t: Transaction): boolean {
+  return (
+    t.kind === "debit" &&
+    !!t.memo &&
+    (t.memo.startsWith("Reversal of sale") ||
+      t.memo.startsWith("Correction (withdraw)") ||
+      t.memo.startsWith("Balance reset to 0"))
+  );
+}
+
+function G_isReversalOfRedemption(t: Transaction): boolean {
+  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
+}
+
+function G_isRedeemTxn(t: Transaction): boolean {
+  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
+}
+
+function G_isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]): boolean {
+  if (!G_isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
+  const label = (redeemTxn.memo ?? "").replace("Redeem: ", "");
+  const after = new Date(redeemTxn.dateISO).getTime();
+  return !all.some(
+    (t) =>
+      G_isReversalOfRedemption(t) &&
+      t.toId === redeemTxn.fromId &&
+      (t.memo ?? "") === `Reversal of redemption: ${label}` &&
+      new Date(t.dateISO).getTime() >= after
+  );
+}
+
+function G_LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
+  const max = Math.max(1, ...earned, ...spent);
+  const h = 110, w = 420, pad = 10;
+  const step = (w - pad * 2) / (earned.length - 1 || 1);
+  const toPath = (arr: number[]) =>
+    arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
+      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
+      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <g className="text-xs">
+        <text x={pad} y={h - 2} className="fill-current opacity-60">Earned</text>
+        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">Spent</text>
+      </g>
+    </svg>
+  );
+}
+
+function G_TileRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{label}</div>
+      <div className="text-2xl font-semibold"><G_NumberFlash value={value} /></div>
+    </div>
+  );
+}
+
+function G_NumberFlash({ value }: { value: number }) {
+  const prev = React.useRef<number>(value);
+  const [pulse, setPulse] = React.useState<"up" | "down" | "none">("none");
+
+  React.useEffect(() => {
+    if (value > prev.current) {
+      setPulse("up");
+      const t = setTimeout(() => setPulse("none"), 500);
+      prev.current = value;
+      return () => clearTimeout(t);
+    }
+    if (value < prev.current) {
+      setPulse("down");
+      const t = setTimeout(() => setPulse("none"), 500);
+      prev.current = value;
+      return () => clearTimeout(t);
+    }
+    prev.current = value;
+  }, [value]);
+
+  return (
+    <span className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}>
+      {value.toLocaleString()} GCSD
+    </span>
+  );
+}
+
+
 /* ===========================
    G C S  B A N K
    =========================== */
@@ -114,7 +203,7 @@ const seedTxns: Transaction[] = [
 ];
 
 /* ---------- Animated number ---------- */
-function NumberFlash({ value }:{ value:number }) {
+function G_NumberFlash({ value }:{ value:number }) {
   const prev = useRef(value);
   const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
   useEffect(()=>{
@@ -259,16 +348,16 @@ export default function GCSDApp() {
   const lifetimeEarn = agentTxns
     .filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint" && !isRevRedeem(t))
     .reduce((a,b)=>a+b.amount,0)
-    - agentTxns.filter(t=> isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
-  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId && !isCorrectionDebit(t)).reduce((a,b)=>a+b.amount,0);
-  const prizeCount = agentTxns.filter(t=> isRedeemTxn(t)).length;
+    - agentTxns.filter(t=> G_isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
+  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId && !G_isCorrectionDebit(t)).reduce((a,b)=>a+b.amount,0);
+  const prizeCount = agentTxns.filter(t=> G_isRedeemTxn(t)).length;
 
   // leaderboard + streaks (exclude reversal-of-redemption from earned)
   const dayBuckets = bucketByDay(txns, nonSystemIds, afterEpoch);
   const streaks = computeStreaks(dayBuckets);
   const leaderboard = Array.from(nonSystemIds).map(id => {
     const credited = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint" && !isRevRedeem(t) && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
-    const withdrawn = txns.filter(t=> isCorrectionDebit(t) && t.fromId===id && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
+    const withdrawn = txns.filter(t=> G_isCorrectionDebit(t) && t.fromId===id && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
     const earned = credited - withdrawn;
     return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
   }).sort((a,b)=> b.earned - a.earned);
@@ -326,7 +415,7 @@ export default function GCSDApp() {
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
     const bal  = balances.get(agentId)||0;
-    const count= txns.filter(t=> t.fromId===agentId && isRedeemTxn(t) && afterEpoch(agentId, t.dateISO)).length;
+    const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && afterEpoch(agentId, t.dateISO)).length;
 
     if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
@@ -697,7 +786,7 @@ function afterEpoch(epochs: Record<string, string>, agentId: string | undefined,
 }
 
 /* ===== Transaction classifiers ===== */
-function isCorrectionDebit(t: Transaction) {
+function G_isCorrectionDebit(t: Transaction) {
   return (
     t.kind === "debit" &&
     !!t.memo &&
@@ -706,21 +795,21 @@ function isCorrectionDebit(t: Transaction) {
       t.memo.startsWith("Balance reset to 0"))
   );
 }
-function isReversalOfRedemption(t: Transaction) {
+function G_isReversalOfRedemption(t: Transaction) {
   return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
 }
-function isRedeemTxn(t: Transaction) {
+function G_isRedeemTxn(t: Transaction) {
   return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
 }
 
 /** For purchases list, exclude redeems that later got reversed */
-function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
-  if (!isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
+function G_isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
+  if (!G_isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
   const label = (redeemTxn.memo || "").replace("Redeem: ", "");
   const after = new Date(redeemTxn.dateISO).getTime();
   return !all.some(
     (t) =>
-      isReversalOfRedemption(t) &&
+      G_isReversalOfRedemption(t) &&
       t.toId === redeemTxn.fromId &&
       (t.memo || "") === `Reversal of redemption: ${label}` &&
       new Date(t.dateISO).getTime() >= after
@@ -728,7 +817,7 @@ function isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
 }
 
 /* ===== Mini chart/tiles ===== */
-function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
+function G_LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
   const max = Math.max(1, ...earned, ...spent);
   const h = 110,
     w = 420,
@@ -751,19 +840,19 @@ function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
     </svg>
   );
 }
-function TileRow({ label, value }: { label: string; value: number }) {
+function G_TileRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{label}</div>
       <div className="text-2xl font-semibold">
-        <NumberFlash value={value} />
+        <G_NumberFlash value={value} />
       </div>
     </div>
   );
 }
 
 /* ===== Animated number flash (up/down) ===== */
-function NumberFlash({ value }: { value: number }) {
+function G_NumberFlash({ value }: { value: number }) {
   const prev = React.useRef(value);
   const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
 
@@ -1005,8 +1094,8 @@ function Home({
 
   // Purchases list – only active redeems (not reversed)
   const purchases = txns
-    .filter((t) => isRedeemTxn(t) && t.fromId && nonSystemIds.has(t.fromId))
-    .filter((t) => isRedeemStillActive(t, txns))
+    .filter((t) => G_isRedeemTxn(t) && t.fromId && nonSystemIds.has(t.fromId))
+    .filter((t) => G_isRedeemStillActive(t, txns))
     .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
   // 30-day series
@@ -1022,15 +1111,15 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !isReversalOfRedemption(t)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)
     );
-    const withdraws = sumInRange(txns, d, 1, (t) => isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId));
+    const withdraws = sumInRange(txns, d, 1, (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId));
     // never negative on daily
     return Math.max(0, credits - withdraws);
   });
 
   const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !isCorrectionDebit(t))
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t))
   );
 
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
@@ -1040,9 +1129,9 @@ function Home({
   const leaderboard = Array.from(nonSystemIds)
     .map((id) => {
       const credits = txns
-        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !isReversalOfRedemption(t))
+        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
         .reduce((a, b) => a + b.amount, 0);
-      const withdraws = txns.filter((t) => isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
+      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
       return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
     })
     .sort((a, b) => b.earned - a.earned);
@@ -1053,7 +1142,7 @@ function Home({
   const earnedToday: Record<string, number> = {};
   const earnedMonth: Record<string, number> = {};
   for (const t of txns) {
-    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
     if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -1115,7 +1204,7 @@ function Home({
                   <span className="font-medium">{row.name}</span>
                 </div>
                 <div className="text-sm">
-                  <NumberFlash value={row.earned} />
+                  <G_NumberFlash value={row.earned} />
                 </div>
               </motion.div>
             ))}
@@ -1186,10 +1275,10 @@ function AgentPortal({
 
   const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
   const lifetimeEarn =
-    agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
-    agentTxns.filter((t) => isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
-  const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
-  const prizeCount = agentTxns.filter((t) => isRedeemTxn(t)).length;
+    agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
+    agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
+  const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !G_isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
+  const prizeCount = agentTxns.filter((t) => G_isRedeemTxn(t)).length;
 
   const goal = goals[agentId] || 0;
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
