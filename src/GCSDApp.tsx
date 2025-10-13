@@ -929,9 +929,12 @@ export default function GCSDApp() {
 }
 
 /* ===== Helpers, UI components, and pages continue in Part 4/4 ===== */
-/* =========================
-   Helpers & Components
-   ========================= */
+
+/* ========================= */
+function classNames(...
+const neonBox = (theme:Theme) => ...
+const neonBtn  = (theme:Theme, solid?:boolean) => ...
+const inputCls = (theme:Theme) => ...
 
 /* ===== Epoch helpers (hide history prior to reset) ===== */
 function afterEpoch(epochs:Record<string,string>, agentId:string|undefined, dateISO:string){
