@@ -1300,26 +1300,46 @@ function AdminPortal({
 
       {/* history */}
       {adminTab==="history" && (
-        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">All activity</div>
-          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-            {txns.map(t=>(
-              <motion.div key={t.id} layout whileHover={{y:-2}} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                <div className="text-sm">
-                  <div className="font-medium">{t.memo || (t.kind==="credit"?"Credit":"Debit")}</div>
-                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                </div>
-                <div className={classNames("text-sm", t.kind==="credit" ? "text-emerald-500" : "text-rose-500")}>
-                  {t.kind==="credit" ? "text-emerald-500" : "text-rose-500"}
-                                        {t.kind==="credit" ? "+" : "−"}{t.amount.toLocaleString()}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+  <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+    <div className="text-sm opacity-70 mb-2">All activity</div>
+    <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+      {txns.map((t) => (
+        <motion.div
+          key={t.id}
+          layout
+          whileHover={{ y: -2 }}
+          className={classNames(
+            "border rounded-xl px-3 py-2 flex items-center justify-between",
+            neonBox(theme)
+          )}
+        >
+          <div className="text-sm">
+            <div className="font-medium">
+              {t.memo || (t.kind === "credit" ? "Credit" : "Debit")}
+            </div>
+            <div className="opacity-70 text-xs">
+              {new Date(t.dateISO).toLocaleString()}
             </div>
           </div>
-        </div>
+          <div
+            className={classNames(
+              "text-sm",
+              t.kind === "credit" ? "text-emerald-500" : "text-rose-500"
+            )}
+          >
+            {t.kind === "credit" ? "+" : "−"}
+            {t.amount.toLocaleString()}
+          </div>
+        </motion.div>
+      ))}
+
+      {txns.length === 0 && (
+        <div className="text-sm opacity-70">No activity yet.</div>
       )}
+    </div>
+  </div>
+)}
+
 
       {/* users */}
       {adminTab==="users" && (
