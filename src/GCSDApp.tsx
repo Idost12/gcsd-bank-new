@@ -9,7 +9,7 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
 
 /* ===== SAFE (namespaced) helpers — paste ONCE ===== */
 
-function G_G_isCorrectionDebit(t: Transaction): boolean {
+function G_isCorrectionDebit(t: Transaction): boolean {
   return (
     t.kind === "debit" &&
     !!t.memo &&
@@ -189,16 +189,20 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   for (const a of local) map.set(a.id, a);
   return Array.from(map.values());
 }
+const isCorrectionDebit = (t: Transaction) =>
+  t.kind === "debit" && !!t.memo && (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)") || t.memo.startsWith("Balance reset to 0"));
 
-
+/* ---------- seed ---------- */
+const seedAccounts: Account[] = [
+  { id: uid(), name: "Bank Vault", role: "system" },
+  ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
+];
 const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-/* ---------- Animated number ---------- */
-
-
+/* ---------- Animated number ---------- */:{ value:number }) {
   const prev = useRef(value);
   const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
   useEffect(()=>{
@@ -791,29 +795,9 @@ function G_isCorrectionDebit(t: Transaction) {
   );
 }
 
-
-
-
-/* duplicate G_isRedeemTxn removed */
-
-
 /** For purchases list, exclude redeems that later got reversed */
 
-
-  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
-  const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(
-    (t) =>
-      G_isReversalOfRedemption(t) &&
-      t.toId === redeemTxn.fromId &&
-      (t.memo || "") === `Reversal of redemption: ${label}` &&
-      new Date(t.dateISO).getTime() >= after
-  );
-}
-
-/* ===== Mini chart/tiles ===== */
-
-
+/* ===== Mini chart/tiles ===== */: { earned: number[]; spent: number[] }) {
   const max = Math.max(1, ...earned, ...spent);
   const h = 110,
     w = 420,
@@ -835,15 +819,18 @@ function G_isCorrectionDebit(t: Transaction) {
       </g>
     </svg>
   );
+}: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{label}</div>
+      <div className="text-2xl font-semibold">
+        <G_NumberFlash value={value} />
+      </div>
+    </div>
+  );
 }
 
-
-
-
-/* duplicate G_NumberFlash removed */
-: { value: number }) {
-/* DEDUP_REMOVED_END G_NumberFlash */
-
+/* ===== Animated number flash (up/down) ===== */) {
   const prev = React.useRef(value);
   const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
 
