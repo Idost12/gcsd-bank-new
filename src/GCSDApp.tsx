@@ -9,7 +9,7 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
 
 /* ===== SAFE (namespaced) helpers — paste ONCE ===== */
 
-function G_isCorrectionDebit(t: Transaction): boolean {
+function G_G_isCorrectionDebit(t: Transaction): boolean {
   return (
     t.kind === "debit" &&
     !!t.memo &&
@@ -202,7 +202,9 @@ const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-/* ---------- Animated number ---------- */:{ value:number }) {
+/* ---------- Animated number ---------- */
+/* DUPLICATE REMOVED: function G_NumberFlash */
+function G_NumberFlash({ value }:{ value:number }) {
   const prev = useRef(value);
   const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
   useEffect(()=>{
@@ -794,10 +796,18 @@ function G_isCorrectionDebit(t: Transaction) {
       t.memo.startsWith("Balance reset to 0"))
   );
 }
+/* DUPLICATE REMOVED: function G_isReversalOfRedemption */
+
+/* DUPLICATE REMOVED: function G_isRedeemTxn */
+
 
 /** For purchases list, exclude redeems that later got reversed */
+/* DUPLICATE REMOVED: function G_isRedeemStillActive */
 
-/* ===== Mini chart/tiles ===== */: { earned: number[]; spent: number[] }) {
+
+/* ===== Mini chart/tiles ===== */
+/* DUPLICATE REMOVED: function G_LineChart */
+: { earned: number[]; spent: number[] }) {
   const max = Math.max(1, ...earned, ...spent);
   const h = 110,
     w = 420,
@@ -819,7 +829,9 @@ function G_isCorrectionDebit(t: Transaction) {
       </g>
     </svg>
   );
-}: { label: string; value: number }) {
+}
+/* DUPLICATE REMOVED: function G_TileRow */
+: { label: string; value: number }) {
   return (
     <div className="rounded-xl border p-3">
       <div className="text-xs opacity-70 mb-1">{label}</div>
@@ -830,7 +842,9 @@ function G_isCorrectionDebit(t: Transaction) {
   );
 }
 
-/* ===== Animated number flash (up/down) ===== */) {
+/* ===== Animated number flash (up/down) ===== */
+/* DUPLICATE REMOVED: function G_NumberFlash */
+function G_NumberFlash({ value }:{ value:number }) {
   const prev = React.useRef(value);
   const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
 
