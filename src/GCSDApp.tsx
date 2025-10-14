@@ -7,6 +7,23 @@ import {
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err: any }> {
+  constructor(props:any){ super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err:any){ return { err }; }
+  componentDidCatch(err:any, info:any){ console.error("[GCSD] Runtime error:", err, info); }
+  render(){
+    if (this.state.err) {
+      return (
+        <div style={{padding:16,fontFamily:"ui-sans-serif,system-ui"}}>
+          <h2 style={{fontWeight:600,marginBottom:8}}>Something went wrong.</h2>
+          <div style={{whiteSpace:"pre-wrap",fontSize:12,opacity:.8}}>{String(this.state.err)}</div>
+        </div>
+      );
+    }
+    return this.props.children as any;
+  }
+}
+
 
 /* ===========================
    Types & constants
@@ -490,7 +507,11 @@ export default function GCSDApp() {
   /* clock + intro */
   useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
-    return ()=> clearInterval(t);
+    return (
+    <ErrorBoundary>
+
+    </ErrorBoundary>
+)=> clearInterval(t);
   }, []);
   useEffect(()=> {
     if (!showIntro) return;
