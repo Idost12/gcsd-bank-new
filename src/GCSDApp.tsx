@@ -9,7 +9,7 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
 
 /* ===== SAFE (namespaced) helpers — paste ONCE ===== */
 
-function G_G_isCorrectionDebit(t: Transaction): boolean {
+function G_isCorrectionDebit(t: Transaction): boolean {
   return (
     t.kind === "debit" &&
     !!t.memo &&
@@ -67,11 +67,6 @@ function G_TileRow({ label, value }: { label: string; value: number }) {
     </div>
   );
 }
-
-/* ===== Aliases for non-prefixed components ===== */
-const LineChart = G_LineChart as any;
-const TileRow = G_TileRow as any;
-
 
 function G_NumberFlash({ value }: { value: number }) {
   const prev = React.useRef<number>(value);
@@ -206,10 +201,6 @@ const VAULT_ID = seedAccounts[0].id;
 const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
-
-/* ---------- Animated number ---------- */
-/* Removed duplicate of function G_NumberFlash */
-
 
 /* =================================
    App
@@ -752,111 +743,25 @@ const neonBox = (theme: Theme) =>
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
-    ? (solid ? "bg-orange-700 text-black border border-orange-600" : "bg-[#0B0B0B] border border-orange-800 text-orange-50")
-    : (solid ? "bg-black text-white" : "bg-white dark:bg-slate-800");
+    ? solid
+      ? "bg-orange-700 text-black border border-orange-600"
+      : "bg-[#0B0B0B] border border-orange-800 text-orange-50"
+    : solid
+      ? "bg-black text-white"
+      : "bg-white dark:bg-slate-800";
 
 const inputCls = (theme: Theme) =>
   theme === "neon"
     ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60 [color-scheme:dark]"
     : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
 
-/* ===== Balances helper (sum credits - debits) ===== */
-function computeBalances(accounts: Account[], txns: Transaction[]) {
-  const m = new Map<string, number>();
-  for (const a of accounts) m.set(a.id, 0);
-  for (const t of txns) {
-    if (t.kind === "credit" && t.toId) {
-      m.set(t.toId, (m.get(t.toId) || 0) + t.amount);
-    } else if (t.kind === "debit" && t.fromId) {
-      m.set(t.fromId, (m.get(t.fromId) || 0) - t.amount);
-    }
-  }
-  return m;
-}
-
-
-/* ===== Day buckets & streaks (credits-only; excludes reversal-of-redemption) ===== */
-function bucketByDay(
-  txns: Transaction[],
-  nonSystemIds: Set<string>,
-  afterEpochFn: (agentId: string | undefined, dateISO: string) => boolean
-) {
-  // Build last 60 days keys
-  const days: string[] = [];
-  const today = new Date();
-  for (let i = 59; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    d.setHours(0,0,0,0);
-    days.push(d.toISOString().slice(0,10));
-  }
-  const map: Record<string, boolean[]> = {};
-  for (const id of Array.from(nonSystemIds)) map[id] = new Array(days.length).fill(false);
-
-  for (const t of txns) {
-    if (t.kind !== "credit" || !t.toId || !nonSystemIds.has(t.toId)) continue;
-    if (t.memo === "Mint" || G_isReversalOfRedemption(t)) continue;
-    if (!afterEpochFn(t.toId, t.dateISO)) continue;
-    const key = new Date(t.dateISO).toISOString().slice(0,10);
-    const idx = days.indexOf(key);
-    if (idx >= 0) map[t.toId][idx] = true;
-  }
-  return { days, map };
-}
-
-function computeStreaks(buckets: { days: string[]; map: Record<string, boolean[]> }) {
-  const out: Record<string, number> = {};
-  for (const id of Object.keys(buckets.map)) {
-    const arr = buckets.map[id];
-    let streak = 0;
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (arr[i]) streak++;
-      else break;
-    }
-    out[id] = streak;
-  }
-  return out;
-}
-
-
-
 /* ===== Epoch helpers (hide history prior to reset) ===== */
-
-/* Removed duplicate afterEpoch */
-
+function afterEpoch(epochs: Record<string, string>, agentId: string | undefined, dateISO: string) {
+  if (!agentId) return true;
   const e = epochs[agentId];
   if (!e) return true;
   return new Date(dateISO).getTime() >= new Date(e).getTime();
 }
-
-/* ===== Transaction classifiers ===== */
-function G_isCorrectionDebit(t: Transaction) {
-  return (
-    t.kind === "debit" &&
-    !!t.memo &&
-    (t.memo.startsWith("Reversal of sale") ||
-      t.memo.startsWith("Correction (withdraw)") ||
-      t.memo.startsWith("Balance reset to 0"))
-  );
-}
-/* Removed duplicate of function G_isReversalOfRedemption */
-
-/* Removed duplicate of function G_isRedeemTxn */
-
-
-/** For purchases list, exclude redeems that later got reversed */
-/* Removed duplicate of function G_isRedeemStillActive */
-
-
-/* ===== Mini chart/tiles ===== */
-/* Removed duplicate of function G_LineChart */
-
-/* Removed duplicate of function G_TileRow */
-
-
-/* ===== Animated number flash (up/down) ===== */
-/* Removed duplicate of function G_NumberFlash */
-
 
 /* ===== Misc helpers ===== */
 function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: Transaction) => boolean, epochs?: Record<string, string>) {
@@ -1049,6 +954,35 @@ function PinModalGeneric({ title, onClose, onOk, maxLen }: { title: string; onCl
    =========================== */
 
 /** HOME: computes leaderboard/30d stats AFTER epoch cutoffs and excludes reversal credits from "earned" */
+
+/* ===== Simple chart (for Home) ===== */
+function LineChart({ earned, spent }:{ earned:number[]; spent:number[] }) {
+  const max = Math.max(1, ...earned, ...spent);
+  const h = 110, w = 420, pad = 10;
+  const step = (w - pad*2) / (earned.length - 1 || 1);
+  const toPath = (arr:number[]) => arr
+    .map((v,i)=> `${i===0 ? "M" : "L"} ${pad + i*step},${h - pad - (v/max)*(h-pad*2)}`)
+    .join(" ");
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
+      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
+      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <g className="text-xs">
+        <text x={pad} y={h-2} className="fill-current opacity-60">Earned</text>
+        <text x={pad+70} y={h-2} className="fill-current opacity-60">Spent</text>
+      </g>
+    </svg>
+  );
+}
+
+function TileRow({ label, value }:{ label:string; value:number }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{label}</div>
+      <div className="text-2xl font-semibold"><G_NumberFlash value={value}/></div>
+    </div>
+  );
+}
 function Home({
   theme,
   accounts,
