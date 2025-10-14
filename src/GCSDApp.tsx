@@ -7,23 +7,6 @@ import {
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err: any }> {
-  constructor(props:any){ super(props); this.state = { err: null }; }
-  static getDerivedStateFromError(err:any){ return { err }; }
-  componentDidCatch(err:any, info:any){ console.error("[GCSD] Runtime error:", err, info); }
-  render(){
-    if (this.state.err) {
-      return (
-        <div style={{padding:16}}>
-          <h2>Something went wrong.</h2>
-          <pre style={{whiteSpace:"pre-wrap"}}>{String(this.state.err)}</pre>
-        </div>
-      );
-    }
-    return this.props.children as any;
-  }
-}
-
 
 /* ===========================
    Types & constants
@@ -468,7 +451,7 @@ export default function GCSDApp() {
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
       } finally {
-        setHydrated(true); console.log("[GCSD] hydrated", {accountsCount: (core?.accounts||seedAccounts).length, txnsCount: (core?.txns||seedTxns).length});
+        setHydrated(true);
       }
     })();
   }, []);
@@ -507,9 +490,7 @@ export default function GCSDApp() {
   /* clock + intro */
   useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
-    return (
-    <ErrorBoundary>
-)=> clearInterval(t);
+    return ()=> clearInterval(t);
   }, []);
   useEffect(()=> {
     if (!showIntro) return;
@@ -904,7 +885,6 @@ export default function GCSDApp() {
         {portal==="feed" && <FeedPage theme={theme} notifs={notifs} />}
       </div>
     </div>
-    </ErrorBoundary>
   );
 }
 
