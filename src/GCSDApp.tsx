@@ -247,14 +247,6 @@ function classNames(...x: (string | false | undefined | null)[]) {
   return x.filter(Boolean).join(" ");
 }
 
-/** Normalize names for deduping (case/spacing/diacritics/punctuation insensitive) */
-function normalizeNameKey(name: string) {
-  const trimmed = (name || "").trim().toLowerCase();
-  const noDiacritics = trimmed.normalize("NFKD").replace(/\p{M}+/gu, "");
-  const collapsed = noDiacritics.replace(/[_\-]+/g, " ").replace(/\s+/g, " ").replace(/[^a-z0-9 ]/g, "");
-  return collapsed;
-}
-
 /** Neon-aware containers/buttons/inputs */
 const neonBox = (theme: Theme) =>
   theme === "neon"
@@ -333,7 +325,7 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
       title="Notifications"
     >
       {unread > 0 && (
-        <span className="absolute -top-1 -right-1 min-w=[18px] h-[18px] text-[11px] rounded-full grid place-items-center bg-rose-600 text-white px-1">
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] text-[11px] rounded-full grid place-items-center bg-rose-600 text-white px-1">
           {Math.min(99, unread)}
         </span>
       )}
@@ -353,14 +345,11 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
 /** Neon-friendly select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B] text-orange-50" : "border bg-white dark:bg-slate-800")}>
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames(
-          "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/20",
-          theme === "neon" ? "bg-[#0B0B0B] text-orange-50 [color-scheme:dark] placeholder:text-orange-300/70" : "bg-transparent text-slate-900 dark:text-slate-100"
-        )}
+        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none", theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent")}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
@@ -859,7 +848,6 @@ export default function GCSDApp() {
             stock={stock}
             prizes={PRIZE_ITEMS}
             metrics={metrics}
-            epochs={epochs}
           />
         )}
 
@@ -922,7 +910,6 @@ function Home({
   stock,
   prizes,
   metrics,
-  epochs,
 }: {
   theme: Theme;
   accounts: Account[];
@@ -930,7 +917,6 @@ function Home({
   stock: Record<string, number>;
   prizes: PrizeItem[];
   metrics: MetricsEpoch;
-  epochs: Record<string, string>;
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
@@ -949,98 +935,754 @@ function Home({
   });
 
   const earnedSeries: number[] = days.map((d) => {
-    const creditsActive = sumInRange(
+    const credits = sumInRange(
       txns,
       d,
       1,
-      (t) =>
-        t.kind === "credit" &&
-        !!t.toId &&
-        nonSystemIds.has(t.toId) &&
-        t.memo !== "Mint" &&
-        !G_isReversalOfRedemption(t) &&
-        afterISO(metrics.earned30d, t.dateISO) &&
-        G_isSaleStillActive(t, txns)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
     );
-    const withdrawCorrections = sumInRange(
+    const withdraws = sumInRange(
       txns,
       d,
       1,
       (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
     );
-    return Math.max(0, creditsActive - withdrawCorrections);
+    return Math.max(0, credits - withdraws); // never negative
   });
 
-  const spentSeries: number[] = days.map((d) => {
-    const val = sumInRange(
-      txns,
-      d,
-      1,
-      (t) => G_isRedeemTxn(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.spent30d, t.dateISO) && G_isRedeemStillActive(t, txns)
-    );
-    return Math.max(0, val);
-  });
+  const spentSeries: number[] = days.map((d) =>
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
+  );
+
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
   const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
 
-  // Leaderboard (dedup by name; per-agent epoch applied)
-  const byName = new Map<string, { id: string; name: string; earned: number }>();
-  for (const a of accounts) {
-    if (a.role === "system") continue;
-    const id = a.id;
-    const name = a.name;
-    const key = normalizeNameKey(name);
-    const credits = txns
-      .filter(
-        (t) =>
-          t.kind === "credit" &&
-          t.toId === id &&
-          t.memo !== "Mint" &&
-          !G_isReversalOfRedemption(t) &&
-          afterEpoch(epochs, id, t.dateISO) &&
-          G_isSaleStillActive(t, txns)
-      )
-      .reduce((sum, t) => sum + t.amount, 0);
-    const withdraws = txns
-      .filter((t) => G_isCorrectionDebit(t) && t.fromId === id && afterEpoch(epochs, id, t.dateISO))
-      .reduce((sum, t) => sum + t.amount, 0);
-    const earned = Math.max(0, credits - withdraws);
-    const prev = byName.get(key);
-    if (prev) byName.set(key, { id: key, name, earned: prev.earned + earned });
-    else byName.set(key, { id: key, name, earned });
-  }
-  const leaderboard = Array.from(byName.values()).sort((a, b) => b.earned - a.earned);
+  // Leaderboard: earned = credits (non-reversal) - corrections; ignore Mint
+  const leaderboard = Array.from(nonSystemIds)
+    .map((id) => {
+      const credits = txns
+        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
+        .reduce((a, b) => a + b.amount, 0);
+      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
+      return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
+    })
+    .sort((a, b) => b.earned - a.earned);
 
-  {/* Purchases (Active Redeems) */}
-  <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-    <div className="text-sm opacity-70 mb-2">Purchases</div>
-    <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-      {txns
-        .filter((t) => G_isRedeemTxn(t) && t.fromId && accounts.some(a => a.id === t.fromId && a.role !== "system"))
-        .filter((t) => G_isRedeemStillActive(t, txns))
-        .sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime())
-        .map((t) => {
-          const agent = accounts.find(a=>a.id===t.fromId)?.name || "—";
-          const item  = (t.memo || "").replace("Redeem: ", "");
-          return (
-            <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-              <div>
-                <div className="font-medium">{agent}</div>
-                <div className="text-xs opacity-70">{item}</div>
+  // Simple "star of day" & "leader of month" (apply metric epochs)
+  const todayKey = new Date().toLocaleDateString();
+  const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const earnedToday: Record<string, number> = {};
+  const earnedMonth: Record<string, number> = {};
+  for (const t of txns) {
+    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+    const d = new Date(t.dateISO);
+    if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
+      earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+    }
+    const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
+      earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+    }
+  }
+  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
+  const leaderOfMonth = leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
+
+  return (
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className="grid md:grid-cols-3 gap-4">
+        {/* Dashboard */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Dashboard</div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} />
+            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Finance (30 days)</div>
+            <LineChart earned={earnedSeries} spent={spentSeries} />
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4 mt-4">
+            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
+            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Purchased Prizes (Active)</div>
+            <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
+              <div className="text-sm mb-2">
+                Total purchases: <b>{purchases.length}</b>
               </div>
-              <div className="text-right text-sm">
-                <div>{t.amount.toLocaleString()} GCSD</div>
-                <div className="text-xs opacity-70">{new Date(t.dateISO).toLocaleString()}</div>
+              <div className="space-y-2 max-h-40 overflow-auto pr-1">
+                {purchases.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5">
+                    <span>{p.memo.replace("Redeem: ", "")}</span>
+                    <span className="opacity-70">{p.when.toLocaleString()}</span>
+                  </div>
+                ))}
+                {purchases.length === 0 && <div className="text-sm opacity-70">No purchases yet.</div>}
               </div>
             </div>
-          );
-        })}
-      {txns.filter((t) => G_isRedeemTxn(t) && t.fromId && accounts.some(a => a.id === t.fromId && a.role !== "system")).filter((t) => G_isRedeemStillActive(t, txns)).length === 0 && (
-        <div className="text-sm opacity-70">No purchases yet.</div>
-      )}
-    </div>
-  </div>
-  ;
+          </div>
+        </div>
+
+        {/* Leaderboard */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Leaderboard</div>
+          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
+            {leaderboard.map((row, i) => (
+              <motion.div key={row.id} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                <div className="flex items-center gap-2">
+                  <span className="w-5 text-right">{i + 1}.</span>
+                  <span className="font-medium">{row.name}</span>
+                </div>
+                <div className="text-sm">
+                  <NumberFlash value={row.earned} />
+                </div>
+              </motion.div>
+            ))}
+            {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
+          </div>
+        </div>
+
+        {/* Prizes */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
+          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
+            {prizes.map((p) => (
+              <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                <div className="font-medium">{p.label}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
+                  <span className={theme === "neon" ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200" : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"}>
+                    Stock: {stock[p.key] ?? 0}
+                  </span>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
 }
 
-/* Keep your existing AgentPortal, AdminPortal, Picker, SandboxPage, and FeedPage implementations below */
+function Highlight({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="text-xs opacity-70 mb-1">{title}</div>
+      <div>{value}</div>
+    </div>
+  );
+}
+
+/** Agent Portal */
+function AgentPortal({
+  theme,
+  agentId,
+  accounts,
+  txns,
+  stock,
+  prizes,
+  goals,
+  onSetGoal,
+  onRedeem,
+}: {
+  theme: Theme;
+  agentId: string;
+  accounts: Account[];
+  txns: Transaction[];
+  stock: Record<string, number>;
+  prizes: PrizeItem[];
+  goals: Record<string, number>;
+  onSetGoal: (n: number) => void;
+  onRedeem: (k: string) => void;
+}) {
+  const name = accounts.find((a) => a.id === agentId)?.name || "—";
+  const balance = txns.reduce((s, t) => {
+    if (t.toId === agentId && t.kind === "credit") s += t.amount;
+    if (t.fromId === agentId && t.kind === "debit") s -= t.amount;
+    return s;
+  }, 0);
+
+  const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
+  const lifetimeEarn =
+    agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
+    agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
+  const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !G_isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
+  /** only ACTIVE redeems count towards the 2-prize limit */
+  const prizeCount = agentTxns.filter((t) => G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
+
+  const goal = goals[agentId] || 0;
+  const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
+  const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
+
+  return (
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* Summary */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Agent</div>
+          <div className="text-xl font-semibold mb-1">{name}</div>
+          <div className="grid sm:grid-cols-3 gap-3 mt-3">
+            <TileRow label="Balance" value={balance} />
+            <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
+            <TileRow label="Lifetime Spent" value={lifetimeSpend} />
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Savings goal</div>
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center gap-3">
+                <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
+                <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={() => (goalInput ? onSetGoal(parseInt(goalInput, 10)) : null)}>
+                  <Check className="w-4 h-4 inline mr-1" /> Set goal
+                </button>
+              </div>
+              <div className="mt-3 text-sm opacity-70">{goal > 0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
+              <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10">
+                <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Recent activity</div>
+            <div className="space-y-2 max-h-56 overflow-auto pr-2">
+              {agentTxns.slice(0, 60).map((t) => (
+                <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
+                  <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
+                </motion.div>
+              ))}
+              {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Shop */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
+            <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
+          </div>
+          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+            {prizes.map((p) => {
+              const left = stock[p.key] ?? 0;
+              const can = left > 0 && balance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
+              return (
+                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                  <div>
+                    <div className="font-medium">{p.label}</div>
+                    <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
+                  </div>
+                  <button disabled={!can} className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} onClick={() => onRedeem(p.key)}>
+                    <Gift className="w-4 h-4 inline mr-1" /> Redeem
+                  </button>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/** Admin */
+function AdminPortal({
+  theme,
+  isAdmin,
+  accounts,
+  txns,
+  stock,
+  rules,
+  pins,
+  epochs,
+  onCredit,
+  onManualTransfer,
+  onUndoSale,
+  onUndoRedemption,
+  onWithdraw,
+  onWithdrawManual,
+  onAddAgent,
+  onSetPin,
+  onResetPin,
+  onResetBalance,
+  onCompleteReset,
+  onResetMetric,
+}: {
+  theme: Theme;
+  isAdmin: boolean;
+  accounts: Account[];
+  txns: Transaction[];
+  stock: Record<string, number>;
+  rules: ProductRule[];
+  pins: Record<string, string>;
+  epochs: Record<string, string>;
+  onCredit: (agentId: string, ruleKey: string, qty: number) => void;
+  onManualTransfer: (agentId: string, amount: number, note: string) => void;
+  onUndoSale: (txId: string) => void;
+  onUndoRedemption: (txId: string) => void;
+  onWithdraw: (agentId: string, txId: string) => void;
+  onWithdrawManual: (agentId: string, amount: number, note?: string) => void;
+  onAddAgent: (name: string) => void;
+  onSetPin: (agentId: string, pin: string) => void;
+  onResetPin: (agentId: string) => void;
+  onResetBalance: (agentId: string) => void;
+  onCompleteReset: () => void;
+  onResetMetric: (k: keyof MetricsEpoch) => void;
+}) {
+  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
+  const [agentId, setAgentId] = useState("");
+  const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
+  const [qty, setQty] = useState(1);
+  const [xferAmt, setXferAmt] = useState("");
+  const [xferNote, setXferNote] = useState("");
+  const [manualAmt, setManualAmt] = useState("");
+  const [manualNote, setManualNote] = useState("");
+  const [newAgent, setNewAgent] = useState("");
+  const [pinAgent, setPinAgent] = useState("");
+  const [pinVal, setPinVal] = useState("");
+
+  if (!isAdmin) {
+    return (
+      <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
+        <Lock className="w-5 h-5 mx-auto mb-2" />
+        <div>Enter Admin PIN to access the portal.</div>
+      </div>
+    );
+  }
+
+  /** show only ACTIVE credits (not already reversed/withdrawn) */
+  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && G_isSaleStillActive(t, txns));
+  const agentRedeems = txns.filter((t)=> G_isRedeemTxn(t) && t.fromId === agentId);
+
+  return (
+    <div className="grid gap-4">
+      {/* Tabs */}
+      <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
+        {[
+          ["dashboard", "Dashboard"],
+          ["addsale", "Add Sale"],
+          ["transfer", "Transfer"],
+          ["corrections", "Corrections"],
+          ["history", "History"],
+          ["users", "Users"],
+        ].map(([k, lab]) => (
+          <button key={k} onClick={() => setAdminTab(k as any)} className={classNames("px-3 py-1.5 rounded-xl text-sm", adminTab === k ? neonBtn(theme, true) : neonBtn(theme))}>
+            {lab}
+          </button>
+        ))}
+      </div>
+
+      {/* Dashboard */}
+      {adminTab === "dashboard" && (
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Balances</div>
+            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+              {accounts
+                .filter((a) => a.role !== "system")
+                .map((a) => {
+                  const bal = txns.reduce((s, t) => {
+                    if (t.toId === a.id && t.kind === "credit") s += t.amount;
+                    if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
+                    return s;
+                  }, 0);
+                  return (
+                    <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                      <div className="font-medium">{a.name}</div>
+                      <div className="text-sm">{bal.toLocaleString()} GCSD</div>
+                    </motion.div>
+                  );
+                })}
+            </div>
+          </div>
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Prize Stock</div>
+            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+              {PRIZE_ITEMS.map((p) => (
+                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div>{p.label}</div>
+                  <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+          {/* Reset metrics panel */}
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Reset metrics</div>
+            <div className="grid gap-2">
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("earned30d")}>Reset “Total GCSD Earned (30d)”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("spent30d")}>Reset “Total GCSD Spent (30d)”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("starOfDay")}>Reset “Star of the Day”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("leaderOfMonth")}>Reset “Leader of the Month”</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add sale */}
+      {adminTab === "addsale" && (
+        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <div className="text-xs opacity-70 mb-1">Agent</div>
+              <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
+                {accounts
+                  .filter((a) => a.role !== "system")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </FancySelect>
+            </div>
+            <div>
+              <div className="text-xs opacity-70 mb-1">Product</div>
+              <FancySelect value={ruleKey} onChange={setRuleKey} theme={theme}>
+                {rules.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label} — {r.gcsd}
+                  </option>
+                ))}
+              </FancySelect>
+            </div>
+            <div>
+              <div className="text-xs opacity-70 mb-1">Qty</div>
+              <input className={inputCls(theme)} value={qty} onChange={(e) => setQty(Math.max(1, parseInt((e.target.value || "1").replace(/[^\d]/g, ""), 10)))} />
+            </div>
+            <div className="sm:col-span-3 flex justify-end">
+              <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onCredit(agentId, ruleKey, qty)}>
+                <Plus className="w-4 h-4 inline mr-1" /> Add Sale
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer */}
+      {adminTab === "transfer" && (
+        <div className={classNames("rounded-2xl border p-4 grid sm:grid-cols-3 gap-4", neonBox(theme))}>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Agent</div>
+            <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
+              {accounts
+                .filter((a) => a.role !== "system")
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+            </FancySelect>
+          </div>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Amount</div>
+            <input className={inputCls(theme)} value={xferAmt} onChange={(e) => setXferAmt(e.target.value.replace(/[^\d]/g, ""))} />
+          </div>
+          <div>
+            <div className="text-sm opacity-70 mb-2">Note</div>
+            <input className={inputCls(theme)} value={xferNote} onChange={(e) => setXferNote(e.target.value)} placeholder="Manual transfer" />
+          </div>
+          <div className="sm:col-span-3">
+            <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onManualTransfer(agentId, parseInt(xferAmt || "0", 10), xferNote)}>
+              <Wallet className="w-4 h-4 inline mr-1" /> Transfer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Corrections */}
+      {adminTab === "corrections" && (
+        <div className={classNames("rounded-2xl border p-4 grid gap-4", neonBox(theme))}>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs opacity-70 mb-1">Choose agent to withdraw from</div>
+              <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
+                {accounts
+                  .filter((a) => a.role !== "system")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </FancySelect>
+            </div>
+          </div>
+
+          {agentId && (
+            <div className="rounded-xl border p-3">
+              <div className="text-sm opacity-70 mb-2">Credits posted to {accounts.find((a) => a.id === agentId)?.name}</div>
+              <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
+                {agentCredits.length === 0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
+                {agentCredits.map((t) => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">
+                      <div className="font-medium">{t.memo || "Credit"}</div>
+                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
+                      <button
+                        className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                        onClick={() => onWithdraw(agentId, t.id)}
+                      >
+                        Withdraw
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Manual withdraw */}
+          <div className="rounded-xl border p-3">
+            <div className="text-sm opacity-70 mb-2">Manual withdraw</div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div>
+                <div className="text-xs opacity-70 mb-1">Agent</div>
+                <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
+                  {accounts
+                    .filter((a) => a.role !== "system")
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                </FancySelect>
+              </div>
+              <div>
+                <div className="text-xs opacity-70 mb-1">Amount</div>
+                <input className={inputCls(theme)} value={manualAmt} onChange={(e)=> setManualAmt(e.target.value.replace(/[^\d]/g,""))} placeholder="Amount" />
+              </div>
+              <div>
+                <div className="text-xs opacity-70 mb-1">Note (optional)</div>
+                <input className={inputCls(theme)} value={manualNote} onChange={(e)=> setManualNote(e.target.value)} placeholder="Manual correction" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onWithdrawManual(agentId, parseInt(manualAmt||"0",10), manualNote)}>
+                Withdraw amount
+              </button>
+            </div>
+
+            <div className="mt-6">
+              <div className="text-sm opacity-70 mb-2">Undo redemptions</div>
+              <div className="space-y-2 max-h-[200px] overflow-auto pr-2">
+                {agentId && agentRedeems.length>0 ? agentRedeems.map(t => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
+                    <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={()=> onUndoRedemption(agentId, t.id)}>
+                      <RotateCcw className="w-4 h-4 inline mr-1" />Undo
+                    </button>
+                  </motion.div>
+                )) : <div className="opacity-60 text-sm">No redeems.</div>}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border p-3">
+            <div className="text-sm opacity-70 mb-2">Quick reversals</div>
+            <div className="space-y-2 max-h-[320px] overflow-auto pr-2">
+              {txns
+                .filter((t) => t.memo && t.memo !== "Mint")
+                .map((t) => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">
+                      <div className="font-medium">{t.memo}</div>
+                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
+                      {t.kind === "credit" ? (
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoSale(t.id)}>
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo sale
+                        </button>
+                      ) : (
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoRedemption(t.id)}>
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo redeem
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* History (everything) */}
+      {adminTab === "history" && (
+        <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">All activity</div>
+          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
+            {txns.map((t) => (
+              <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div className="text-sm">
+                  <div className="font-medium">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
+                  <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                </div>
+                <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
+              </motion.div>
+            ))}
+            {txns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Users */}
+      {adminTab === "users" && (
+        <div className={classNames("rounded-2xl border p-4 grid md:grid-cols-2 gap-4", neonBox(theme))}>
+          <div className="rounded-xl border p-4">
+            <div className="text-sm opacity-70 mb-2">Add agent</div>
+            <div className="flex items-center gap-2">
+              <input className={inputCls(theme)} value={newAgent} onChange={(e) => setNewAgent(e.target.value)} placeholder="Full name" />
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => newAgent && onAddAgent(newAgent)}>
+                <Plus className="w-4 h-4 inline mr-1" /> Add
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border p-4">
+            <div className="text-sm opacity-70 mb-2">User settings / PINs</div>
+            <div className="space-y-3">
+              {accounts
+                .filter((a) => a.role === "agent")
+                .map((a) => (
+                  <div key={a.id} className="border rounded-xl p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">{a.name}</div>
+                      <div className="text-xs opacity-70">PIN: {pins[a.id] ? `•••••` : "—"}</div>
+                    </div>
+                    <div className="grid sm:grid-cols-4 gap-2 mt-2">
+                      <input className={classNames(inputCls(theme), "sm:col-span-2")} placeholder="Set/Change PIN (5 digits)" value={pinAgent === a.id ? pinVal : ""} onChange={(e) => { setPinAgent(a.id); setPinVal(e.target.value.replace(/[^\d]/g, "").slice(0, 5)); }} />
+                      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={() => pinVal.length === 5 && pinAgent === a.id && onSetPin(a.id, pinVal)}>
+                        Save PIN
+                      </button>
+                      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme))} onClick={() => onResetPin(a.id)}>
+                        Reset PIN
+                      </button>
+                    </div>
+                    <div className="mt-2">
+                      <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onResetBalance(a.id)}>
+                        Reset Balance (to 0)
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+            <div className="mt-4 border-t pt-4">
+              <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={onCompleteReset}>
+                🔥 Complete Reset (extra PIN)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Picker */
+function Picker({
+  theme,
+  accounts,
+  balances,
+  onClose,
+  onChooseAdmin,
+  onChooseAgent,
+}: {
+  theme: Theme;
+  accounts: Account[];
+  balances: Map<string, number>;
+  onClose: () => void;
+  onChooseAdmin: () => void;
+  onChooseAgent: (id: string) => void;
+}) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
+      <motion.div initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 18 }} className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            <h2 className="text-xl font-semibold">Switch User</h2>
+          </div>
+          <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-2">
+          <HoverCard theme={theme} onClick={onChooseAdmin}>
+            <div className="font-semibold flex items-center gap-2">
+              <Lock className="w-4 h-4" /> Admin Portal
+            </div>
+            <div className="text-xs opacity-70 mt-1">PIN required</div>
+          </HoverCard>
+
+          {accounts
+            .filter((a) => a.role !== "system")
+            .map((a, i) => (
+              <HoverCard key={a.id} theme={theme} delay={0.03 + i * 0.02} onClick={() => onChooseAgent(a.id)}>
+                <div className="font-medium">{a.name}</div>
+                <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
+              </HoverCard>
+            ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/** Sandbox */
+function SandboxPage({ onExit, theme }: { onExit: () => void; theme: Theme }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
+        <div className="text-xl font-semibold mb-2">Sandbox</div>
+        <div className="opacity-80 text-sm">Use this area to experiment. Data here is temporary and resets when you exit.</div>
+        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={onExit}>
+          Exit Sandbox
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+/** Feed */
+function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
+  return (
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+        <div className="text-sm opacity-70 mb-2">Notifications</div>
+        <div className="space-y-2 max-h-[70vh] overflow-auto pr-2">
+          {notifs.length === 0 && <div className="text-sm opacity-70">No notifications.</div>}
+          {notifs.map((n) => (
+            <div key={n.id} className="text-sm border rounded-xl px-3 py-2">
+              <div>{n.text}</div>
+              <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ===== Confetti (unchanged) ===== */
+function confettiBurst() {
+  const el = document.createElement("div");
+  el.style.position = "fixed";
+  el.style.inset = "0";
+  el.style.pointerEvents = "none";
+  el.style.zIndex = "60";
+  el.innerHTML = `<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:42px;animation:pop .8s ease-out">🎉</div>
+  <style>@keyframes pop{0%{transform:scale(.6);opacity:.2}60%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:0}}</style>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 800);
+}
