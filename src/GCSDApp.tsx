@@ -68,30 +68,6 @@ function G_TileRow({ label, value }: { label: string; value: number }) {
   );
 }
 
-function G_NumberFlash({ value }: { value: number }) {
-  const prev = React.useRef<number>(value);
-  const [pulse, setPulse] = React.useState<"up" | "down" | "none">("none");
-
-  React.useEffect(() => {
-    if (value > prev.current) {
-      setPulse("up");
-      const t = setTimeout(() => setPulse("none"), 500);
-      prev.current = value;
-      return () => clearTimeout(t);
-    }
-    if (value < prev.current) {
-      setPulse("down");
-      const t = setTimeout(() => setPulse("none"), 500);
-      prev.current = value;
-      return () => clearTimeout(t);
-    }
-    prev.current = value;
-  }, [value]);
-
-  return (
-    <span className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}>
-      {value.toLocaleString()} GCSD
-    </span>
   );
 }
 
@@ -799,108 +775,6 @@ function afterEpoch(epochs: Record<string, string>, agentId: string | undefined,
   if (!e) return true;
   return new Date(dateISO).getTime() >= new Date(e).getTime();
 }
-
-/* ===== Transaction classifiers ===== */
-function G_isCorrectionDebit(t: Transaction) {
-  return (
-    t.kind === "debit" &&
-    !!t.memo &&
-    (t.memo.startsWith("Reversal of sale") ||
-      t.memo.startsWith("Correction (withdraw)") ||
-      t.memo.startsWith("Balance reset to 0"))
-  );
-}
-function G_isReversalOfRedemption(t: Transaction) {
-  return t.kind === "credit" && !!t.memo && t.memo.startsWith("Reversal of redemption:");
-}
-function G_isRedeemTxn(t: Transaction) {
-  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Redeem:");
-}
-
-/** For purchases list, exclude redeems that later got reversed */
-function G_isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
-  if (!G_isRedeemTxn(redeemTxn) || !redeemTxn.fromId) return false;
-  const label = (redeemTxn.memo || "").replace("Redeem: ", "");
-  const after = new Date(redeemTxn.dateISO).getTime();
-  return !all.some(
-    (t) =>
-      G_isReversalOfRedemption(t) &&
-      t.toId === redeemTxn.fromId &&
-      (t.memo || "") === `Reversal of redemption: ${label}` &&
-      new Date(t.dateISO).getTime() >= after
-  );
-}
-
-/* ===== Mini chart/tiles ===== */
-function G_LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
-  const max = Math.max(1, ...earned, ...spent);
-  const h = 110,
-    w = 420,
-    pad = 10,
-    step = (w - pad * 2) / (earned.length - 1 || 1);
-  const toPath = (arr: number[]) =>
-    arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
-  return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
-      <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
-      <path d={toPath(spent)} fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
-      <g className="text-xs">
-        <text x={pad} y={h - 2} className="fill-current opacity-60">
-          Earned
-        </text>
-        <text x={pad + 70} y={h - 2} className="fill-current opacity-60">
-          Spent
-        </text>
-      </g>
-    </svg>
-  );
-}
-function G_TileRow({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">
-        <G_NumberFlash value={value} />
-      </div>
-    </div>
-  );
-}
-
-/* ===== Animated number flash (up/down) ===== */
-function G_NumberFlash({ value }: { value: number }) {
-  const prev = React.useRef(value);
-  const [pulse, setPulse] = useState<"up" | "down" | "none">("none");
-
-  useEffect(() => {
-    if (value > prev.current) {
-      setPulse("up");
-      const t = setTimeout(() => setPulse("none"), 500);
-      return () => clearTimeout(t);
-    } else if (value < prev.current) {
-      setPulse("down");
-      const t = setTimeout(() => setPulse("none"), 500);
-      return () => clearTimeout(t);
-    }
-    prev.current = value;
-  }, [value]);
-
-  useEffect(() => {
-    prev.current = value;
-  }, [value]);
-
-  return (
-    <motion.span
-      key={value}
-      initial={{ y: 4, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.15 }}
-      className={pulse === "up" ? "text-emerald-500" : pulse === "down" ? "text-rose-500" : undefined}
-    >
-      {value.toLocaleString()} GCSD
-    </motion.span>
-  );
-}
-
 /* ===== Misc helpers ===== */
 function sumInRange(
   txns: Transaction[],
