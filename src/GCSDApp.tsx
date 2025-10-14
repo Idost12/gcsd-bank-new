@@ -34,6 +34,9 @@ type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
 
+type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
+
+
 const MAX_PRIZES_PER_AGENT = 2;
 
 const AGENT_NAMES = [
@@ -123,6 +126,32 @@ function afterEpoch(epochs: Record<string, string>, agentId: string | undefined,
   return new Date(dateISO).getTime() >= new Date(e).getTime();
 }
 
+
+function afterISO(epochISO: string | undefined, dateISO: string) {
+  if (!epochISO) return true;
+  return new Date(dateISO).getTime() >= new Date(epochISO).getTime();
+}
+/** A credited sale counts as 'active' unless later withdrawn or reversed */
+function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
+  if (creditTxn.kind !== "credit" || !creditTxn.toId) return false;
+  const label = creditTxn.memo || "Sale";
+  const rid = creditTxn.id;
+  const after = new Date(creditTxn.dateISO).getTime();
+  return !all.some(t =>
+    t.kind === "debit" &&
+    !!t.fromId && t.fromId === creditTxn.toId &&
+    !!t.memo &&
+    (
+      t.memo.startsWith("Reversal of sale:") ||
+      t.memo.startsWith("Correction (withdraw)")
+    ) &&
+    new Date(t.dateISO).getTime() >= after &&
+    (
+      (t.meta && (t.meta as any).reversesTxnId === rid) ||
+      t.memo.replace(/^Reversal of sale:\s*/, "") === label
+    )
+  );
+}
 /* ===== Transaction classifiers (single definitions) ===== */
 function G_isCorrectionDebit(t: Transaction) {
   return (
@@ -522,7 +551,7 @@ export default function GCSDApp() {
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
     const bal  = balances.get(agentId)||0;
-    const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && afterEpoch(epochs, agentId, t.dateISO)).length;
+    const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && afterEpoch(epochs, agentId, t.dateISO) && G_isRedeemStillActive(t, txns)).length;
 
     if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
@@ -563,7 +592,17 @@ export default function GCSDApp() {
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
     const bal = balances.get(agentId)||0;
     if (bal < t.amount) return toast.error("Cannot withdraw more than current balance");
-    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
+    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}
+  function withdrawManual(agentId:string, amount:number, note?:string){
+    if (!agentId) return toast.error("Choose an agent");
+    if (!amount || amount <= 0) return toast.error("Enter a positive amount");
+    const bal = balances.get(agentId)||0;
+    if (bal < amount) return toast.error("Cannot withdraw more than current balance");
+    postTxn({ kind:"debit", amount, fromId: agentId, memo:`Correction (withdraw): ${note?.trim() || "Manual correction"}` });
+    notify(`🧾 Withdrawn ${amount} GCSD from ${getName(agentId)} (manual correction)`);
+    toast.success("Credits withdrawn");
+  }
+` });
     notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
     toast.success("Credits withdrawn");
   }
@@ -861,6 +900,25 @@ function Home({
   prizes: PrizeItem[];
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
+  const [metrics, setMetrics] = React.useState<MetricsEpoch>({});
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const m = await kvGet<MetricsEpoch>("gcs-v4-metrics");
+        if (mounted) setMetrics(m ?? {});
+      } catch {}
+    })();
+    const off = onKVChange(async ({ key, val }) => {
+      if (key === "gcs-v4-metrics") {
+        try {
+          setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
+        } catch {}
+      }
+    });
+    return off;
+  }, []);
+
 
   // Purchases list – only active redeems (not reversed)
   const purchases = txns
@@ -881,19 +939,19 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
     );
     const withdraws = sumInRange(
       txns,
       d,
       1,
-      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId)
+      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
     );
     return Math.max(0, credits - withdraws); // never negative
   });
 
   const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t))
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
   );
 
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
@@ -918,6 +976,7 @@ function Home({
   for (const t of txns) {
     if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
+    if (!afterISO(metrics.starOfDay, t.dateISO) && !afterISO(metrics.leaderOfMonth, t.dateISO)) continue;
     if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
@@ -965,6 +1024,16 @@ function Home({
               </div>
             </div>
           </div>
+          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+            <div className="text-sm opacity-70 mb-2">Reset metrics</div>
+            <div className="grid grid-cols-1 gap-2">
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> resetMetric("earned30d")}>Reset “Total GCSD Earned (30d)”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> resetMetric("spent30d")}>Reset “Total GCSD Spent (30d)”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> resetMetric("starOfDay")}>Reset “Star of the Day”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> resetMetric("leaderOfMonth")}>Reset “Leader of the Month”</button>
+            </div>
+          </div>
+
         </div>
 
         {/* Leaderboard */}
@@ -1178,6 +1247,12 @@ function AdminPortal({
   const [newAgent, setNewAgent] = useState("");
   const [pinAgent, setPinAgent] = useState("");
   const [pinVal, setPinVal] = useState("");
+  async function resetMetric(kind: keyof MetricsEpoch){
+    const prev = (await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {};
+    await kvSet("gcs-v4-metrics", { ...prev, [kind]: nowISO() });
+    toast.success("Reset applied");
+  }
+
 
   if (!isAdmin) {
     return (
@@ -1188,7 +1263,7 @@ function AdminPortal({
     );
   }
 
-  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
+  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && G_isSaleStillActive(t, txns));
 
   return (
     <div className="grid gap-4">
@@ -1330,6 +1405,17 @@ function AdminPortal({
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <div className="text-xs opacity-70 mb-1">Choose agent to withdraw from</div>
+        <div className={classNames("rounded-2xl border p-4 mt-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Manual withdraw</div>
+          <div className="flex items-center gap-2">
+            <input className={inputCls(theme)} placeholder="Amount" value={xferAmt} onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g, ""))} />
+            <input className={inputCls(theme)} placeholder="Note (optional)" value={xferNote} onChange={(e)=> setXferNote(e.target.value)} />
+            <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> withdrawManual(agentId, parseInt(xferAmt||"0",10), xferNote)}>
+              Withdraw amount
+            </button>
+          </div>
+        </div>
+
               <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
                 {accounts
                   .filter((a) => a.role !== "system")
