@@ -34,6 +34,9 @@ type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
 
+type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
+
+
 const MAX_PRIZES_PER_AGENT = 2;
 
 const AGENT_NAMES = [
@@ -124,6 +127,25 @@ function afterEpoch(epochs: Record<string, string>, agentId: string | undefined,
 }
 
 /* ===== Transaction classifiers (single definitions) ===== */
+function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
+  if (creditTxn.kind !== "credit" || !creditTxn.toId) return true;
+  const rid = (creditTxn as any).id;
+  const after = new Date(creditTxn.dateISO).getTime();
+  return !all.some(t =>
+    t.kind === "debit" &&
+    !!t.memo &&
+    (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)")) &&
+    t.fromId === creditTxn.toId &&
+    // exact match by meta if present, else fall back to label and time window
+    ((t.meta && t.meta.reversesTxnId === rid) ||
+      (t.memo.replace(/^Reversal of sale:\s*/, "") === (creditTxn.memo || "Sale") && new Date(t.dateISO).getTime() >= after))
+  );
+}
+function afterISO(epochISO: string | undefined, dateISO: string) {
+  if (!epochISO) return true;
+  return new Date(dateISO).getTime() >= new Date(epochISO).getTime();
+}
+
 function G_isCorrectionDebit(t: Transaction) {
   return (
     t.kind === "debit" &&
@@ -171,10 +193,10 @@ function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
     </svg>
   );
 }
-function TileRow({ label, value }: { label: string; value: number }) {
+function TileRow({ label, value, onReset, isAdmin }: { label: string; value: number; onReset?: () => void; isAdmin?: boolean }) {
   return (
     <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{label}</div>
+      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{label}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset} title="Reset this metric">Reset</button>)}</div>
       <div className="text-2xl font-semibold"><NumberFlash value={value} /></div>
     </div>
   );
@@ -317,16 +339,16 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
 /** Neon-friendly select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-800/80 bg-black/30 text-orange-50 shadow-[0_0_0_1px_rgba(251,146,60,0.3)]" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none", theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent")}
+        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2", theme === "neon" ? "bg-black/10 text-orange-50 [color-scheme:dark] focus:ring-orange-500/50"  : "bg-transparent")}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
       </select>
-      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300")} />
+      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-300" : "text-slate-500 dark:text-slate-300")} />
     </div>
   );
 }
@@ -412,7 +434,9 @@ export default function GCSDApp() {
   useEffect(() => {
     (async () => {
       try {
-        const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>("gcs-v4-core");
+        const core = await kvGet<{ accounts: Account[];
+  const [metrics, setMetrics] = useState<MetricsEpoch>({});
+ txns: Transaction[] }>("gcs-v4-core");
         if (core?.accounts && core?.txns) {
           setAccounts(core.accounts);
           setTxns(core.txns);
@@ -426,6 +450,7 @@ export default function GCSDApp() {
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
+        setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
       } finally {
         setHydrated(true);
       }
@@ -448,6 +473,7 @@ export default function GCSDApp() {
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
+      if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
     });
     return off;
   }, []);
@@ -458,8 +484,12 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);
+  }, [hydrated, epochs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);           }, [hydrated, metrics]);
 
+  /* clock + intro */
+  useEffect(()=> {
   /* clock + intro */
   useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
@@ -502,6 +532,12 @@ export default function GCSDApp() {
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
   /* actions */
+  function resetMetric(kind: keyof MetricsEpoch){
+    const now = nowISO();
+    setMetrics(prev => ({ ...prev, [kind]: now }));
+    toast.success("Reset applied");
+  }
+
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
     if (!agentId) return toast.error("Choose agent");
@@ -563,10 +599,20 @@ export default function GCSDApp() {
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
     const bal = balances.get(agentId)||0;
     if (bal < t.amount) return toast.error("Cannot withdraw more than current balance");
-    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
+    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Reversal of sale: ${t.memo || "Sale"}`, meta: { reversesTxnId: t.id } });
     notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
     toast.success("Credits withdrawn");
   }
+  function withdrawManual(agentId:string, amount:number, note?:string){
+    if (!agentId) return toast.error("Choose an agent");
+    if (!amount || amount <= 0) return toast.error("Enter a positive amount");
+    const bal = balances.get(agentId)||0;
+    if (bal < amount) return toast.error("Cannot withdraw more than current balance");
+    postTxn({ kind:"debit", amount, fromId: agentId, memo:`Correction (withdraw): ${note?.trim() || "Manual correction"}` });
+    notify(`🧾 Withdrawn ${amount} GCSD from ${getName(agentId)} (manual correction)`);
+    toast.success("Credits withdrawn");
+  }
+
 
   function addAgent(name:string){
     const trimmed = name.trim();
@@ -794,6 +840,9 @@ export default function GCSDApp() {
             txns={txns}
             stock={stock}
             prizes={PRIZE_ITEMS}
+            isAdmin={isAdmin}
+            onResetMetric={resetMetric}
+            metrics={metrics}
           />
         )}
 
@@ -853,12 +902,18 @@ function Home({
   txns,
   stock,
   prizes,
+  isAdmin,
+  onResetMetric,
+  metrics,
 }: {
   theme: Theme;
   accounts: Account[];
   txns: Transaction[];
   stock: Record<string, number>;
   prizes: PrizeItem[];
+  isAdmin: boolean;
+  onResetMetric: (k: keyof MetricsEpoch) => void;
+  metrics: MetricsEpoch;
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
@@ -881,19 +936,19 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
     );
     const withdraws = sumInRange(
       txns,
       d,
       1,
-      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId)
+      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
     );
     return Math.max(0, credits - withdraws); // never negative
   });
 
   const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t))
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
   );
 
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
@@ -918,6 +973,7 @@ function Home({
   for (const t of txns) {
     if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
+    if (!afterISO(metrics.starOfDay, t.dateISO) && !afterISO(metrics.leaderOfMonth, t.dateISO)) continue;
     if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
@@ -934,8 +990,8 @@ function Home({
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Dashboard</div>
           <div className="grid sm:grid-cols-2 gap-4">
-            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} />
-            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
+            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} isAdmin={isAdmin} onReset={()=>onResetMetric("earned30d")} />
+            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} isAdmin={isAdmin} onReset={()=>onResetMetric("spent30d")} />
           </div>
 
           <div className="mt-4">
@@ -944,8 +1000,8 @@ function Home({
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4 mt-4">
-            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
-            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
+            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} isAdmin={isAdmin} onReset={()=>onResetMetric("starOfDay")} />
+            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} isAdmin={isAdmin} onReset={()=>onResetMetric("leaderOfMonth")} />
           </div>
 
           <div className="mt-4">
@@ -962,6 +1018,16 @@ function Home({
                   </div>
                 ))}
                 {purchases.length === 0 && <div className="text-sm opacity-70">No purchases yet.</div>}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs opacity-70 mb-1">Manual withdraw</div>
+              <div className="flex items-center gap-2">
+                <input className={inputCls(theme)} placeholder="Amount" onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g, ""))} value={xferAmt} />
+                <input className={inputCls(theme)} placeholder="Note (optional)" onChange={(e)=> setXferNote(e.target.value)} value={xferNote} />
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> withdrawManual(agentId, parseInt(xferAmt||"0",10), xferNote)}>
+                  Withdraw amount
+                </button>
               </div>
             </div>
           </div>
@@ -1008,10 +1074,10 @@ function Home({
   );
 }
 
-function Highlight({ title, value }: { title: string; value: string }) {
+function Highlight({ title, value, onReset, isAdmin }: { title: string; value: string; onReset?: () => void; isAdmin?: boolean }) {
   return (
     <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1">{title}</div>
+      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{title}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset} title="Reset this metric">Reset</button>)}</div>
       <div>{value}</div>
     </div>
   );
@@ -1026,6 +1092,7 @@ function AgentPortal({
   stock,
   prizes,
   goals,
+  epochs,
   onSetGoal,
   onRedeem,
 }: {
@@ -1036,6 +1103,7 @@ function AgentPortal({
   stock: Record<string, number>;
   prizes: PrizeItem[];
   goals: Record<string, number>;
+  epochs: Record<string, string>;
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
 }) {
@@ -1046,12 +1114,13 @@ function AgentPortal({
     return s;
   }, 0);
 
-  const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
+  const agentTxns = txns.filter((t) => (t.toId === agentId || t.fromId === agentId) && afterEpoch(epochs, agentId, t.dateISO))
+    .filter(t => !(t.kind==="credit" && t.toId===agentId && t.memo!=="Mint" && !G_isReversalOfRedemption(t) && !G_isSaleStillActive(t, txns)));
   const lifetimeEarn =
     agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
     agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
   const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !G_isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
-  const prizeCount = agentTxns.filter((t) => G_isRedeemTxn(t)).length;
+  const prizeCount = txns.filter((t) => G_isRedeemTxn(t) && t.fromId===agentId && afterEpoch(epochs, agentId, t.dateISO) && G_isRedeemStillActive(t, txns)).length;
 
   const goal = goals[agentId] || 0;
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
@@ -1188,7 +1257,7 @@ function AdminPortal({
     );
   }
 
-  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
+  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && G_isSaleStillActive(t, txns));
 
   return (
     <div className="grid gap-4">
