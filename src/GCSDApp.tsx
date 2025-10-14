@@ -489,8 +489,6 @@ export default function GCSDApp() {
 
   /* clock + intro */
   useEffect(()=> {
-  /* clock + intro */
-  useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
     return ()=> clearInterval(t);
   }, []);
