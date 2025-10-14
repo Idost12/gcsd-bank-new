@@ -34,9 +34,6 @@ type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
 
-type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
-
-
 const MAX_PRIZES_PER_AGENT = 2;
 
 const AGENT_NAMES = [
@@ -174,10 +171,10 @@ function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
     </svg>
   );
 }
-function TileRow({ label, value, isAdmin, onReset }: { label: string; value: number; isAdmin?: boolean; onReset?: () => void }) {
+function TileRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{label}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset}>Reset</button>)}</div>
+      <div className="text-xs opacity-70 mb-1">{label}</div>
       <div className="text-2xl font-semibold"><NumberFlash value={value} /></div>
     </div>
   );
@@ -386,7 +383,6 @@ export default function GCSDApp() {
   const [goals, setGoals] = useState<Record<string, number>>({});
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const [metrics, setMetrics] = useState<MetricsEpoch>({});
 
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
   const [portal, setPortal] = useState<Portal>("home");
@@ -430,7 +426,6 @@ export default function GCSDApp() {
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
-        setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
       } finally {
         setHydrated(true);
       }
@@ -453,7 +448,6 @@ export default function GCSDApp() {
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
-      if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
     });
     return off;
   }, []);
@@ -508,8 +502,6 @@ export default function GCSDApp() {
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
   /* actions */
-  function resetMetric(kind: keyof MetricsEpoch){ setMetrics(prev => ({...prev, [kind]: nowISO()})); toast.success("Reset applied"); }
-
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
     if (!agentId) return toast.error("Choose agent");
@@ -571,17 +563,7 @@ export default function GCSDApp() {
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
     const bal = balances.get(agentId)||0;
     if (bal < t.amount) return toast.error("Cannot withdraw more than current balance");
-    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}
-  function withdrawManual(agentId:string, amount:number, note?:string){
-    if (!agentId) return toast.error("Choose an agent");
-    if (!amount || amount <= 0) return toast.error("Enter a positive amount");
-    const bal = balances.get(agentId)||0;
-    if (bal < amount) return toast.error("Cannot withdraw more than current balance");
-    postTxn({ kind:"debit", amount, fromId: agentId, memo:`Correction (withdraw): ${note?.trim() || "Manual correction"}` });
-    notify(`🧾 Withdrawn ${amount} GCSD from ${getName(agentId)} (manual correction)`);
-    toast.success("Credits withdrawn");
-  }
-` });
+    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
     notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
     toast.success("Credits withdrawn");
   }
@@ -812,9 +794,6 @@ export default function GCSDApp() {
             txns={txns}
             stock={stock}
             prizes={PRIZE_ITEMS}
-            isAdmin={isAdmin}
-            metrics={metrics}
-            onResetMetric={resetMetric}
           />
         )}
 
@@ -874,18 +853,12 @@ function Home({
   txns,
   stock,
   prizes,
-  isAdmin,
-  metrics,
-  onResetMetric,
 }: {
   theme: Theme;
   accounts: Account[];
   txns: Transaction[];
   stock: Record<string, number>;
   prizes: PrizeItem[];
-  isAdmin: boolean;
-  metrics: MetricsEpoch;
-  onResetMetric: (k: keyof MetricsEpoch) => void;
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
@@ -908,19 +881,19 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)
     );
     const withdraws = sumInRange(
       txns,
       d,
       1,
-      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
+      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId)
     );
     return Math.max(0, credits - withdraws); // never negative
   });
 
   const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t))
   );
 
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
@@ -945,7 +918,6 @@ function Home({
   for (const t of txns) {
     if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
-    if (!afterISO(metrics.starOfDay, t.dateISO) && !afterISO(metrics.leaderOfMonth, t.dateISO)) continue;
     if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
@@ -962,8 +934,8 @@ function Home({
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Dashboard</div>
           <div className="grid sm:grid-cols-2 gap-4">
-            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} isAdmin={isAdmin} onReset={()=>onResetMetric("earned30d")} />
-            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} isAdmin={isAdmin} onReset={()=>onResetMetric("spent30d")} />
+            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} />
+            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
           </div>
 
           <div className="mt-4">
@@ -972,8 +944,8 @@ function Home({
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4 mt-4">
-            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} isAdmin={isAdmin} onReset={()=>onResetMetric("starOfDay")} />
-            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} isAdmin={isAdmin} onReset={()=>onResetMetric("leaderOfMonth")} />
+            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
+            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
           </div>
 
           <div className="mt-4">
@@ -1036,10 +1008,10 @@ function Home({
   );
 }
 
-function Highlight({ title, value, isAdmin, onReset }: { title: string; value: string; isAdmin?: boolean; onReset?: () => void }) {
+function Highlight({ title, value }: { title: string; value: string }) {
   return (
     <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{title}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset}>Reset</button>)}</div>
+      <div className="text-xs opacity-70 mb-1">{title}</div>
       <div>{value}</div>
     </div>
   );
@@ -1056,7 +1028,6 @@ function AgentPortal({
   goals,
   onSetGoal,
   onRedeem,
-  epochs,
 }: {
   theme: Theme;
   agentId: string;
@@ -1067,7 +1038,6 @@ function AgentPortal({
   goals: Record<string, number>;
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
-  epochs: Record<string, string>;
 }) {
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
   const balance = txns.reduce((s, t) => {
@@ -1076,12 +1046,12 @@ function AgentPortal({
     return s;
   }, 0);
 
-  const agentTxns = txns.filter((t) => (t.toId === agentId || t.fromId === agentId) && afterEpoch(epochs, agentId, t.dateISO));
+  const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
   const lifetimeEarn =
     agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
     agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
   const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !G_isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
-  const prizeCount = txns.filter((t)=> G_isRedeemTxn(t) && t.fromId===agentId && afterEpoch(epochs, agentId, t.dateISO) && G_isRedeemStillActive(t, txns)).length;
+  const prizeCount = agentTxns.filter((t) => G_isRedeemTxn(t)).length;
 
   const goal = goals[agentId] || 0;
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
@@ -1218,7 +1188,7 @@ function AdminPortal({
     );
   }
 
-  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && G_isSaleStillActive(t, txns));
+  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
 
   return (
     <div className="grid gap-4">
@@ -1358,16 +1328,6 @@ function AdminPortal({
       {adminTab === "corrections" && (
         <div className={classNames("rounded-2xl border p-4 grid gap-4", neonBox(theme))}>
           <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <div className="text-xs opacity-70 mb-1">Manual withdraw</div>
-              <div className="flex items-center gap-2">
-                <input className={inputCls(theme)} placeholder="Amount" value={xferAmt} onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g, ""))} />
-                <input className={inputCls(theme)} placeholder="Note (optional)" value={xferNote} onChange={(e)=> setXferNote(e.target.value)} />
-                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> withdrawManual(agentId, parseInt(xferAmt||"0",10), xferNote)}>
-                  Withdraw amount
-                </button>
-              </div>
-            </div>
             <div>
               <div className="text-xs opacity-70 mb-1">Choose agent to withdraw from</div>
               <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
