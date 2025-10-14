@@ -7,23 +7,6 @@ import {
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err: any }> {
-  constructor(props:any){ super(props); this.state = { err: null }; }
-  static getDerivedStateFromError(err:any){ return { err }; }
-  componentDidCatch(err:any, info:any){ console.error("[GCSD] Runtime error:", err, info); }
-  render(){
-    if (this.state.err) {
-      return (
-        <div style={{padding:16,fontFamily:"ui-sans-serif,system-ui"}}>
-          <h2 style={{fontWeight:600,marginBottom:8}}>Something went wrong.</h2>
-          <div style={{whiteSpace:"pre-wrap",fontSize:12,opacity:.8}}>{String(this.state.err)}</div>
-        </div>
-      );
-    }
-    return this.props.children as any;
-  }
-}
-
 
 /* ===========================
    Types & constants
@@ -213,6 +196,13 @@ function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
 function TileRow({ label, value, onReset, isAdmin }: { label: string; value: number; onReset?: () => void; isAdmin?: boolean }) {
   return (
     <div className="rounded-xl border p-3">
+
+      {fatalMsg && (
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 rounded-lg border bg-red-50 text-red-700 shadow">
+          <div className="text-sm font-medium">Runtime error</div>
+          <div className="text-xs opacity-80">{fatalMsg}</div>
+        </div>
+      )}
       <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{label}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset} title="Reset this metric">Reset</button>)}</div>
       <div className="text-2xl font-semibold"><NumberFlash value={value} /></div>
     </div>
@@ -439,6 +429,7 @@ export default function GCSDApp() {
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
+  const [fatalMsg, setFatalMsg] = useState<string | null>(null);
   const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
 
   // theme side effect
@@ -504,14 +495,22 @@ export default function GCSDApp() {
   }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);           }, [hydrated, metrics]);
 
-  /* clock + intro */
+  
+  // global runtime error capture (to avoid silent blank screen)
+  useEffect(()=>{
+    const onErr = (event: any) => { try { console.error("[GCS] window.onerror", event?.message || event); } catch {} ; setFatalMsg(String(event?.message || event)); };
+    const onRej = (event: any) => { try { console.error("[GCS] unhandledrejection", event?.reason || event); } catch {}; setFatalMsg(String(event?.reason || event)); };
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return ()=>{
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+  }, []);
+/* clock + intro */
   useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
-    return (
-    <ErrorBoundary>
-
-    </ErrorBoundary>
-)=> clearInterval(t);
+    return ()=> clearInterval(t);
   }, []);
   useEffect(()=> {
     if (!showIntro) return;
