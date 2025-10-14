@@ -236,7 +236,7 @@ export default function GCSDApp() {
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
+  const [theme, setTheme] = useState<Theme>("light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -255,9 +255,7 @@ export default function GCSDApp() {
   const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
 
   // theme side effect
-  useEffect(() => {
-    localStorage.setItem("gcs-v4-theme", theme);
-    const root = document.documentElement;
+  useEffect(() => { const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
   }, [theme]);
 
@@ -355,26 +353,42 @@ export default function GCSDApp() {
   // leaderboard + streaks (exclude reversal-of-redemption from earned)
   const dayBuckets = bucketByDay(txns, nonSystemIds, afterEpoch);
   const streaks = computeStreaks(dayBuckets);
-  const leaderboard = Array.from(nonSystemIds).map(id => {
-    const credited = txns.filter(t=> t.kind==="credit" && t.toId===id && t.memo!=="Mint" && !isRevRedeem(t) && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
-    const withdrawn = txns.filter(t=> G_isCorrectionDebit(t) && t.fromId===id && afterEpoch(id, t.dateISO)).reduce((a,b)=>a+b.amount,0);
-    const earned = credited - withdrawn;
-    return { id, name: accounts.find(a=>a.id===id)?.name || "—", earned, streak: streaks[id]||0 };
-  }).sort((a,b)=> b.earned - a.earned);
+  const leaderboard = Array.from(nonSystemIds)
+  .map((id) => {
+    const credits = txns
+      .filter(
+        (t) =>
+          t.kind === "credit" &&
+          t.toId === id &&
+          !G_isReversalOfRedemption(t) &&
+          afterEpoch(epochs, id, t.dateISO)
+      )
+      .reduce((a, b) => a + b.amount, 0);
+    const withdraws = txns
+      .filter(
+        (t) =>
+          G_isCorrectionDebit(t) &&
+          t.fromId === id &&
+          afterEpoch(epochs, id, t.dateISO)
+      )
+      .reduce((a, b) => a + b.amount, 0);
+    return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
+  })
+  .sort((a, b) => b.earned - a.earned);
 
   // star of the day / leader of month (exclude reversal-of-redemption)
   const todayKey = new Date().toLocaleDateString();
   const curMonth  = monthKey(new Date());
   const earnedToday: Record<string, number> = {}, earnedMonth: Record<string, number> = {};
-  for (const t of txns) {
-    if (t.kind!=="credit" || !t.toId || t.memo==="Mint" || isRevRedeem(t) || !nonSystemIds.has(t.toId)) continue;
-    if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
-    if (!afterEpoch(t.toId, t.dateISO)) continue;
-    const d = new Date(t.dateISO);
-    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId]||0) + t.amount;
-    if (monthKey(d) === curMonth)           earnedMonth[t.toId] = (earnedMonth[t.toId]||0) + t.amount;
-  }
-  const starId   = Object.entries(earnedToday).sort((a,b)=>b[1]-a[1])[0]?.[0];
+for (const t of txns) {
+  if (t.kind !== "credit" || !t.toId || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+  if (!afterEpoch(epochs, t.toId, t.dateISO)) continue;
+  const d = new Date(t.dateISO);
+  if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+  const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+}
+const starId   = Object.entries(earnedToday).sort((a,b)=>b[1]-a[1])[0]?.[0];
   const leaderId = Object.entries(earnedMonth).sort((a,b)=>b[1]-a[1])[0]?.[0];
   const starOfDay = starId ? { name: accounts.find(a=>a.id===starId)?.name || "—", amount: earnedToday[starId] } : null;
   const leaderOfMonth = leaderId ? { name: accounts.find(a=>a.id===leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
@@ -701,7 +715,6 @@ export default function GCSDApp() {
             txns={txns}
             stock={stock}
             prizes={PRIZE_ITEMS}
-            epochs={epochs}
             // leaderboard/awards are computed inside Home from txns & epochs-aware helpers
           />
         )}
@@ -715,7 +728,6 @@ export default function GCSDApp() {
             stock={stock}
             prizes={PRIZE_ITEMS}
             goals={goals}
-            epochs={epochs}
             onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
             onRedeem={(k)=>redeemPrize(currentAgentId, k)}
           />
@@ -890,12 +902,24 @@ function G_NumberFlash({ value }: { value: number }) {
 }
 
 /* ===== Misc helpers ===== */
-function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: Transaction) => boolean, epochs?: Record<string, string>) {
+function sumInRange(
+  txns: Transaction[],
+  day: Date,
+  spanDays: number,
+  pred: (t: Transaction) => boolean,
+  epochs?: Record<string, string>
+) {
   const start = new Date(day);
   const end = new Date(day);
   end.setDate(start.getDate() + spanDays);
   return txns
-    .filter((t) => pred(t) && new Date(t.dateISO) >= start && new Date(t.dateISO) < end && (!epochs || afterEpoch(epochs, t.toId || t.fromId, t.dateISO)))
+    .filter(
+      (t) =>
+        pred(t) &&
+        new Date(t.dateISO) >= start &&
+        new Date(t.dateISO) < end &&
+        (!epochs || afterEpoch(epochs, t.toId || t.fromId, t.dateISO))
+    )
     .reduce((a, b) => a + b.amount, 0);
 }
 
@@ -1098,57 +1122,50 @@ function Home({
   // Purchases list – only active redeems (not reversed)
   const purchases = txns
     .filter((t) => G_isRedeemTxn(t) && t.fromId && nonSystemIds.has(t.fromId))
-    .filter((t) => afterEpoch(epochs, t.fromId, t.dateISO))
     .filter((t) => G_isRedeemStillActive(t, txns))
     .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
-  // 30-day series
-  const days = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (29 - i));
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
-
-  const earnedSeries: number[] = days.map((d) => {
-    const credits = sumInRange(txns, d, 1, (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId), epochs) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)
-    );
-    const withdraws = sumInRange(txns, d, 1, (t) => G_isCorrectionDebit(t), epochs) && !!t.fromId && nonSystemIds.has(t.fromId));
-    // never negative on daily
-    return Math.max(0, credits - withdraws);
-  });
-
-  const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId), epochs) && !G_isCorrectionDebit(t))
+  // 30-day series (apply epoch cutoffs + exclude reversals/withdrawals)
+const earnedSeries: number[] = days.map((d) => {
+  const credits = sumInRange(
+    txns,
+    d,
+    1,
+    (t) =>
+      t.kind === "credit" &&
+      !!t.toId &&
+      nonSystemIds.has(t.toId) &&
+      !G_isReversalOfRedemption(t),
+    epochs
   );
+  const withdraws = sumInRange(
+    txns,
+    d,
+    1,
+    (t) =>
+      G_isCorrectionDebit(t) &&
+      !!t.fromId &&
+      nonSystemIds.has(t.fromId),
+    epochs
+  );
+  // never negative on daily
+  return Math.max(0, credits - withdraws);
+});
 
-  const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
-  const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
+const spentSeries: number[] = days.map((d) =>
+  sumInRange(
+    txns,
+    d,
+    1,
+    (t) =>
+      t.kind === "debit" &&
+      !!t.fromId &&
+      nonSystemIds.has(t.fromId) &&
+      !G_isCorrectionDebit(t),
+    epochs
+  )
+);
 
-  // Leaderboard: earned = credits (non-reversal) - corrections; ignore Mint
-  const leaderboard = Array.from(nonSystemIds)
-    .map((id) => {
-      const credits = txns
-        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
-        .reduce((a, b) => a + b.amount, 0);
-      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
-      return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
-    })
-    .sort((a, b) => b.earned - a.earned);
-
-  // Simple "star of day" & "leader of month" computed from raw credits (NOT counting reversals), typical for sales
-  const todayKey = new Date().toLocaleDateString();
-  const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-  const earnedToday: Record<string, number> = {};
-  const earnedMonth: Record<string, number> = {};
-  for (const t of txns) {
-    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
-    const d = new Date(t.dateISO);
-    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
-    const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
-  }
-  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
   const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
   const starOfDay = starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
   const leaderOfMonth = leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
@@ -1244,7 +1261,27 @@ function Highlight({ title, value }: { title: string; value: string }) {
 }
 
 /** AGENT PORTAL */
-function AgentPortal({ theme, agentId, accounts, txns, stock, prizes, goals, epochs, onSetGoal, onRedeem, }: { theme: Theme; agentId: string; accounts: Account[]; txns: Transaction[]; stock: Record<string, number>; prizes: PrizeItem[]; goals: Record<string, number>; epochs: Record<string, string>; onSetGoal: (n: number) => void; onRedeem: (k: string) => void; }) {
+function AgentPortal({
+  theme,
+  agentId,
+  accounts,
+  txns,
+  stock,
+  prizes,
+  goals,
+  onSetGoal,
+  onRedeem,
+}: {
+  theme: Theme;
+  agentId: string;
+  accounts: Account[];
+  txns: Transaction[];
+  stock: Record<string, number>;
+  prizes: PrizeItem[];
+  goals: Record<string, number>;
+  onSetGoal: (n: number) => void;
+  onRedeem: (k: string) => void;
+}) {
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
   // balance
   const balance = txns.reduce((s, t) => {
@@ -1253,7 +1290,7 @@ function AgentPortal({ theme, agentId, accounts, txns, stock, prizes, goals, epo
     return s;
   }, 0);
 
-  const agentTxns = txns.filter((t) => (t.toId === agentId || t.fromId === agentId) && afterEpoch(epochs, t.toId===agentId ? t.toId : t.fromId, t.dateISO));
+  const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
   const lifetimeEarn =
     agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
     agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
