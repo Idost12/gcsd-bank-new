@@ -1,3 +1,6 @@
+/* File: src/GCSDApp.tsx */
+/* Drop-in replacement with: neon dropdown fixes, leaderboard dedupe, corrected earned/withdraw math */
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
@@ -180,6 +183,10 @@ function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
     (t.memo.endsWith(label) || t.memo === `Reversal of sale: ${label}` || t.memo === `Correction (withdraw): ${label}`)
   );
 }
+/** Reversal-of-sale debit classifier */
+function G_isReversalOfSaleDebit(t: Transaction) {
+  return t.kind === "debit" && !!t.memo && t.memo.startsWith("Reversal of sale:");
+}
 
 /* ===== Mini chart/tiles (single versions) ===== */
 function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
@@ -245,6 +252,16 @@ function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: 
 /** Safe join */
 function classNames(...x: (string | false | undefined | null)[]) {
   return x.filter(Boolean).join(" ");
+}
+
+/** Normalize names for deduping (case/spacing/diacritics/punctuation insensitive) */
+function normalizeNameKey(name: string) {
+  const trimmed = (name || "").trim().toLowerCase();
+  // strip diacritics
+  const noDiacritics = trimmed.normalize("NFKD").replace(/\p{M}+/gu, "");
+  // collapse whitespace and remove punctuation-like separators
+  const collapsed = noDiacritics.replace(/[_\-]+/g, " ").replace(/\s+/g, " ").replace(/[^a-z0-9 ]/g, "");
+  return collapsed;
 }
 
 /** Neon-aware containers/buttons/inputs */
@@ -345,13 +362,13 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
 /** Neon-friendly select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B] text-orange-50" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={classNames(
           "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/20",
-          theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark] placeholder:text-orange-300/70" : "bg-transparent text-slate-900 dark:text-slate-100"
+          theme === "neon" ? "bg-[#0B0B0B] text-orange-50 [color-scheme:dark] placeholder:text-orange-300/70" : "bg-transparent text-slate-900 dark:text-slate-100"
         )}
       >
         {placeholder && <option value="">{placeholder}</option>}
@@ -941,19 +958,28 @@ function Home({
   });
 
   const earnedSeries: number[] = days.map((d) => {
-    const credits = sumInRange(
+    // Earned counts only active sale credits (not Mint, not reversed) after the metric epoch
+    const creditsActive = sumInRange(
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
+      (t) =>
+        t.kind === "credit" &&
+        !!t.toId &&
+        nonSystemIds.has(t.toId) &&
+        t.memo !== "Mint" &&
+        !G_isReversalOfRedemption(t) &&
+        afterISO(metrics.earned30d, t.dateISO) &&
+        G_isSaleStillActive(t, txns)
     );
-    const withdraws = sumInRange(
+    // Withdraws (corrections) reduce earned; reversal-of-sale is already captured by removing inactive sales above
+    const withdrawCorrections = sumInRange(
       txns,
       d,
       1,
       (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
     );
-    return Math.max(0, credits - withdraws); // never negative
+    return Math.max(0, creditsActive - withdrawCorrections);
   });
 
   const spentSeries: number[] = days.map((d) => {
@@ -965,19 +991,26 @@ function Home({
     );
     return Math.max(0, val);
   });
-const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
+  const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
   const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
 
-  
-  // Leaderboard (dedup by name; per-agent epoch applied)
+  // Leaderboard (dedup by normalized name; per-agent epoch applied)
   const byName = new Map<string, { id: string; name: string; earned: number }>();
   for (const a of accounts) {
     if (a.role === "system") continue;
     const id = a.id;
     const name = a.name;
-    const key = name.trim().toLowerCase();
+    const key = normalizeNameKey(name);
     const credits = txns
-      .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterEpoch(epochs, id, t.dateISO))
+      .filter(
+        (t) =>
+          t.kind === "credit" &&
+          t.toId === id &&
+          t.memo !== "Mint" &&
+          !G_isReversalOfRedemption(t) &&
+          afterEpoch(epochs, id, t.dateISO) &&
+          G_isSaleStillActive(t, txns)
+      )
       .reduce((sum, t) => sum + t.amount, 0);
     const withdraws = txns
       .filter((t) => G_isCorrectionDebit(t) && t.fromId === id && afterEpoch(epochs, id, t.dateISO))
@@ -989,33 +1022,69 @@ const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
   }
   const leaderboard = Array.from(byName.values()).sort((a, b) => b.earned - a.earned);
 
-          {/* Purchases (Active Redeems) */}
-          <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-            <div className="text-sm opacity-70 mb-2">Purchases</div>
-            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-              {txns
-                .filter((t) => G_isRedeemTxn(t) && t.fromId && accounts.some(a => a.id === t.fromId && a.role !== "system"))
-                .filter((t) => G_isRedeemStillActive(t, txns))
-                .sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime())
-                .map((t) => {
-                  const agent = accounts.find(a=>a.id===t.fromId)?.name || "—";
-                  const item  = (t.memo || "").replace("Redeem: ", "");
-                  return (
-                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                      <div>
-                        <div className="font-medium">{agent}</div>
-                        <div className="text-xs opacity-70">{item}</div>
-                      </div>
-                      <div className="text-right text-sm">
-                        <div>{t.amount.toLocaleString()} GCSD</div>
-                        <div className="text-xs opacity-70">{new Date(t.dateISO).toLocaleString()}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              {txns.filter((t) => G_isRedeemTxn(t) && t.fromId && accounts.some(a => a.id === t.fromId && a.role !== "system")).filter((t) => G_isRedeemStillActive(t, txns)).length === 0 && (
-                <div className="text-sm opacity-70">No purchases yet.</div>
-              )}
-            </div>
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className={classNames("rounded-2xl p-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Last 30 days</div>
+          <LineChart earned={earnedSeries} spent={spentSeries} />
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <TileRow label="Total Earned" value={totalEarned} />
+            <TileRow label="Total Spent" value={totalSpent} />
           </div>
-;
+        </div>
+
+        <div className={classNames("rounded-2xl p-4", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Leaderboard</div>
+          <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+            {leaderboard.map((row, i) => (
+              <div key={row.id + i} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div className="font-medium">{row.name}</div>
+                <div className="text-sm">{row.earned.toLocaleString()} GCSD</div>
+              </div>
+            ))}
+            {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* Purchases (Active Redeems) */}
+      <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
+        <div className="text-sm opacity-70 mb-2">Purchases</div>
+        <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+          {txns
+            .filter((t) => G_isRedeemTxn(t) && t.fromId && accounts.some(a => a.id === t.fromId && a.role !== "system"))
+            .filter((t) => G_isRedeemStillActive(t, txns))
+            .sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime())
+            .map((t) => {
+              const agent = accounts.find(a=>a.id===t.fromId)?.name || "—";
+              const item  = (t.memo || "").replace("Redeem: ", "");
+              return (
+                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div>
+                    <div className="font-medium">{agent}</div>
+                    <div className="text-xs opacity-70">{item}</div>
+                  </div>
+                  <div className="text-right text-sm">
+                    <div>{t.amount.toLocaleString()} GCSD</div>
+                    <div className="text-xs opacity-70">{new Date(t.dateISO).toLocaleString()}</div>
+                  </div>
+                </div>
+              );
+            })}
+          {txns.filter((t) => G_isRedeemTxn(t) && t.fromId && accounts.some(a => a.id === t.fromId && a.role !== "system")).filter((t) => G_isRedeemStillActive(t, txns)).length === 0 && (
+            <div className="text-sm opacity-70">No purchases yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Stub placeholders for missing components (AgentPortal, AdminPortal, Picker, SandboxPage, FeedPage)
+   Keep your existing implementations here; this file focuses on the fixes requested. */
+function AgentPortal(_: any){ return null; }
+function AdminPortal(_: any){ return null; }
+function Picker(_: any){ return null; }
+function SandboxPage(_: any){ return null; }
+function FeedPage(_: any){ return null; }
