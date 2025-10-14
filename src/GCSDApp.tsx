@@ -127,23 +127,25 @@ function afterEpoch(epochs: Record<string, string>, agentId: string | undefined,
 }
 
 /* ===== Transaction classifiers (single definitions) ===== */
+function afterISO(epochISO: string | undefined, dateISO: string) {
+  if (!epochISO) return true;
+  return new Date(dateISO).getTime() >= new Date(epochISO).getTime();
+}
+/** Sale is active if it hasn't been reversed/withdrawn later */
 function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
-  if (creditTxn.kind !== "credit" || !creditTxn.toId) return true;
-  const rid = (creditTxn as any).id;
+  if (creditTxn.kind !== "credit" || !creditTxn.toId) return false;
+  const rid = creditTxn.id;
   const after = new Date(creditTxn.dateISO).getTime();
   return !all.some(t =>
     t.kind === "debit" &&
     !!t.memo &&
     (t.memo.startsWith("Reversal of sale") || t.memo.startsWith("Correction (withdraw)")) &&
     t.fromId === creditTxn.toId &&
-    // exact match by meta if present, else fall back to label and time window
-    ((t.meta && t.meta.reversesTxnId === rid) ||
-      (t.memo.replace(/^Reversal of sale:\s*/, "") === (creditTxn.memo || "Sale") && new Date(t.dateISO).getTime() >= after))
+    (
+      (t.meta && (t.meta as any).reversesTxnId === rid) ||
+      (new Date(t.dateISO).getTime() >= after && (t.memo.replace(/^Reversal of sale:\s*/, "") === (creditTxn.memo || "Sale")))
+    )
   );
-}
-function afterISO(epochISO: string | undefined, dateISO: string) {
-  if (!epochISO) return true;
-  return new Date(dateISO).getTime() >= new Date(epochISO).getTime();
 }
 
 function G_isCorrectionDebit(t: Transaction) {
@@ -193,17 +195,10 @@ function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
     </svg>
   );
 }
-function TileRow({ label, value, onReset, isAdmin }: { label: string; value: number; onReset?: () => void; isAdmin?: boolean }) {
+function TileRow({ label, value, isAdmin, onReset }: { label: string; value: number; isAdmin?: boolean; onReset?: () => void }) {
   return (
     <div className="rounded-xl border p-3">
-
-      {fatalMsg && (
-        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 rounded-lg border bg-red-50 text-red-700 shadow">
-          <div className="text-sm font-medium">Runtime error</div>
-          <div className="text-xs opacity-80">{fatalMsg}</div>
-        </div>
-      )}
-      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{label}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset} title="Reset this metric">Reset</button>)}</div>
+      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{label}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset}>Reset</button>)}</div>
       <div className="text-2xl font-semibold"><NumberFlash value={value} /></div>
     </div>
   );
@@ -346,16 +341,16 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
 /** Neon-friendly select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-800/80 bg-black/30 text-orange-50 shadow-[0_0_0_1px_rgba(251,146,60,0.3)]" : "border bg-white dark:bg-slate-800")}>
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2", theme === "neon" ? "bg-black/10 text-orange-50 [color-scheme:dark] focus:ring-orange-500/50"  : "bg-transparent")}
+        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none", theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent")}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
       </select>
-      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-300" : "text-slate-500 dark:text-slate-300")} />
+      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300")} />
     </div>
   );
 }
@@ -411,8 +406,10 @@ export default function GCSDApp() {
   const [pins, setPins] = useState<Record<string, string>>({});
   const [goals, setGoals] = useState<Record<string, number>>({});
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [hydrated, setHydrated]
+
   const [metrics, setMetrics] = useState<MetricsEpoch>({});
-  const [hydrated, setHydrated] = useState(false);
+ = useState(false);
 
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
   const [portal, setPortal] = useState<Portal>("home");
@@ -429,7 +426,6 @@ export default function GCSDApp() {
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
-  const [fatalMsg, setFatalMsg] = useState<string | null>(null);
   const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
 
   // theme side effect
@@ -458,7 +454,7 @@ export default function GCSDApp() {
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-      } finally {
+        } finally {
         setHydrated(true);
       }
     })();
@@ -493,21 +489,9 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);
   }, [hydrated, epochs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);           }, [hydrated, metrics]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics); }, [hydrated, metrics]);
 
-  
-  // global runtime error capture (to avoid silent blank screen)
-  useEffect(()=>{
-    const onErr = (event: any) => { try { console.error("[GCS] window.onerror", event?.message || event); } catch {} ; setFatalMsg(String(event?.message || event)); };
-    const onRej = (event: any) => { try { console.error("[GCS] unhandledrejection", event?.reason || event); } catch {}; setFatalMsg(String(event?.reason || event)); };
-    window.addEventListener("error", onErr);
-    window.addEventListener("unhandledrejection", onRej);
-    return ()=>{
-      window.removeEventListener("error", onErr);
-      window.removeEventListener("unhandledrejection", onRej);
-    };
-  }, []);
-/* clock + intro */
+  /* clock + intro */
   useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
     return ()=> clearInterval(t);
@@ -549,11 +533,7 @@ export default function GCSDApp() {
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
 
   /* actions */
-  function resetMetric(kind: keyof MetricsEpoch){
-    const now = nowISO();
-    setMetrics(prev => ({ ...prev, [kind]: now }));
-    toast.success("Reset applied");
-  }
+  function resetMetric(kind: keyof MetricsEpoch){ setMetrics(prev => ({...prev, [kind]: nowISO()})); toast.success("Reset applied"); }
 
   function adminCredit(agentId:string, ruleKey:string, qty:number){
     const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
@@ -858,8 +838,8 @@ export default function GCSDApp() {
             stock={stock}
             prizes={PRIZE_ITEMS}
             isAdmin={isAdmin}
-            onResetMetric={resetMetric}
             metrics={metrics}
+            onResetMetric={resetMetric}
           />
         )}
 
@@ -874,6 +854,7 @@ export default function GCSDApp() {
             goals={goals}
             onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
             onRedeem={(k)=>redeemPrize(currentAgentId, k)}
+            epochs={epochs}
           />
         )}
 
@@ -920,8 +901,8 @@ function Home({
   stock,
   prizes,
   isAdmin,
-  onResetMetric,
   metrics,
+  onResetMetric,
 }: {
   theme: Theme;
   accounts: Account[];
@@ -929,8 +910,8 @@ function Home({
   stock: Record<string, number>;
   prizes: PrizeItem[];
   isAdmin: boolean;
-  onResetMetric: (k: keyof MetricsEpoch) => void;
   metrics: MetricsEpoch;
+  onResetMetric: (k: keyof MetricsEpoch) => void;
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
@@ -990,7 +971,6 @@ function Home({
   for (const t of txns) {
     if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
-    if (!afterISO(metrics.starOfDay, t.dateISO) && !afterISO(metrics.leaderOfMonth, t.dateISO)) continue;
     if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
@@ -1037,16 +1017,6 @@ function Home({
                 {purchases.length === 0 && <div className="text-sm opacity-70">No purchases yet.</div>}
               </div>
             </div>
-            <div>
-              <div className="text-xs opacity-70 mb-1">Manual withdraw</div>
-              <div className="flex items-center gap-2">
-                <input className={inputCls(theme)} placeholder="Amount" onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g, ""))} value={xferAmt} />
-                <input className={inputCls(theme)} placeholder="Note (optional)" onChange={(e)=> setXferNote(e.target.value)} value={xferNote} />
-                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> withdrawManual(agentId, parseInt(xferAmt||"0",10), xferNote)}>
-                  Withdraw amount
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1091,10 +1061,10 @@ function Home({
   );
 }
 
-function Highlight({ title, value, onReset, isAdmin }: { title: string; value: string; onReset?: () => void; isAdmin?: boolean }) {
+function Highlight({ title, value, isAdmin, onReset }: { title: string; value: string; isAdmin?: boolean; onReset?: () => void }) {
   return (
     <div className="rounded-xl border p-3">
-      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{title}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset} title="Reset this metric">Reset</button>)}</div>
+      <div className="text-xs opacity-70 mb-1 flex items-center justify-between"><span>{title}</span>{isAdmin && onReset && (<button className="text-[11px] px-2 py-0.5 rounded-lg border hover:opacity-80" onClick={onReset}>Reset</button>)}</div>
       <div>{value}</div>
     </div>
   );
@@ -1109,9 +1079,9 @@ function AgentPortal({
   stock,
   prizes,
   goals,
-  epochs,
   onSetGoal,
   onRedeem,
+  epochs,
 }: {
   theme: Theme;
   agentId: string;
@@ -1120,9 +1090,9 @@ function AgentPortal({
   stock: Record<string, number>;
   prizes: PrizeItem[];
   goals: Record<string, number>;
-  epochs: Record<string, string>;
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
+  epochs: Record<string, string>;
 }) {
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
   const balance = txns.reduce((s, t) => {
@@ -1131,13 +1101,12 @@ function AgentPortal({
     return s;
   }, 0);
 
-  const agentTxns = txns.filter((t) => (t.toId === agentId || t.fromId === agentId) && afterEpoch(epochs, agentId, t.dateISO))
-    .filter(t => !(t.kind==="credit" && t.toId===agentId && t.memo!=="Mint" && !G_isReversalOfRedemption(t) && !G_isSaleStillActive(t, txns)));
+  const agentTxns = txns.filter((t) => (t.toId === agentId || t.fromId === agentId) && afterEpoch(epochs, agentId, t.dateISO));
   const lifetimeEarn =
     agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
     agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
   const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !G_isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
-  const prizeCount = txns.filter((t) => G_isRedeemTxn(t) && t.fromId===agentId && afterEpoch(epochs, agentId, t.dateISO) && G_isRedeemStillActive(t, txns)).length;
+  const prizeCount = txns.filter((t)=> G_isRedeemTxn(t) && t.fromId===agentId && afterEpoch(epochs, agentId, t.dateISO) && G_isRedeemStillActive(t, txns)).length;
 
   const goal = goals[agentId] || 0;
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
@@ -1374,6 +1343,45 @@ function AdminPortal({
               <button className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onCredit(agentId, ruleKey, qty)}>
                 <Plus className="w-4 h-4 inline mr-1" /> Add Sale
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Corrections */}
+      {adminTab === "corrections" && (
+        <div className={classNames("rounded-2xl border p-4 grid gap-4", neonBox(theme))}>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div>
+              <div className="text-xs opacity-70 mb-1">Agent</div>
+              <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
+                {accounts.filter(a=>a.role!=="system").map(a=> (<option key={a.id} value={a.id}>{a.name}</option>))}
+              </FancySelect>
+            </div>
+            <div className="sm:col-span-2">
+              <div className="text-xs opacity-70 mb-1">Manual withdraw</div>
+              <div className="flex items-center gap-2">
+                <input className={inputCls(theme)} placeholder="Amount" value={xferAmt} onChange={(e)=> setXferAmt(e.target.value.replace(/[^\d]/g, ""))} />
+                <input className={inputCls(theme)} placeholder="Note (optional)" value={xferNote} onChange={(e)=> setXferNote(e.target.value)} />
+                <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> withdrawManual(agentId, parseInt(xferAmt||"0",10), xferNote)}>
+                  Withdraw amount
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Credits posted to selected agent</div>
+            <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
+              {agentId && agentCredits.length>0 ? agentCredits.map(t => (
+                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                  <div className="text-sm">{t.memo || "Credit"} • +{t.amount.toLocaleString()} GCSD</div>
+                  <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={()=> onWithdraw(agentId, t.id)}>
+                    <RotateCcw className="w-4 h-4 inline mr-1"/>
+                    Withdraw
+                  </button>
+                </div>
+              )) : <div className="text-sm opacity-70">Select an agent to see credits.</div>}
             </div>
           </div>
         </div>
