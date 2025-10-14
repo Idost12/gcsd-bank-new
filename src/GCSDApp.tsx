@@ -7,6 +7,23 @@ import {
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err: any }> {
+  constructor(props:any){ super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err:any){ return { err }; }
+  componentDidCatch(err:any, info:any){ console.error("[GCS] Runtime error:", err, info); }
+  render(){
+    if (this.state.err) {
+      return (
+        <div style={{padding:16,fontFamily:"ui-sans-serif,system-ui"}}>
+          <h2 style={{fontWeight:600,marginBottom:8}}>Something went wrong.</h2>
+          <div style={{whiteSpace:"pre-wrap",fontSize:12,opacity:.8}}>{String(this.state.err)}</div>
+        </div>
+      );
+    }
+    return this.props.children as any;
+  }
+}
+
 
 /* ===========================
    Types & constants
@@ -487,7 +504,19 @@ export default function GCSDApp() {
   }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);           }, [hydrated, metrics]);
 
-  /* clock + intro */
+  
+  // global runtime error logging
+  useEffect(()=>{
+    const onErr = (event:any)=> console.error("[GCS] window.onerror", event?.message || event);
+    const onRej = (event:any)=> console.error("[GCS] unhandledrejection", event?.reason || event);
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return ()=>{
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+  }, []);
+/* clock + intro */
   useEffect(()=> {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
     return ()=> clearInterval(t);
