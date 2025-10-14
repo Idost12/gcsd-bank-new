@@ -404,6 +404,7 @@ export default function GCSDApp() {
   const [pins, setPins] = useState<Record<string, string>>({});
   const [goals, setGoals] = useState<Record<string, number>>({});
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [metrics, setMetrics] = useState<MetricsEpoch>({});
   const [hydrated, setHydrated] = useState(false);
 
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
@@ -434,9 +435,7 @@ export default function GCSDApp() {
   useEffect(() => {
     (async () => {
       try {
-        const core = await kvGet<{ accounts: Account[];
-  const [metrics, setMetrics] = useState<MetricsEpoch>({});
- txns: Transaction[] }>("gcs-v4-core");
+        const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>("gcs-v4-core");
         if (core?.accounts && core?.txns) {
           setAccounts(core.accounts);
           setTxns(core.txns);
