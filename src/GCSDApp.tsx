@@ -39,9 +39,9 @@ type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string;
 const MAX_PRIZES_PER_AGENT = 2;
 
 const AGENT_NAMES = [
-  "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
-  "Caitlyn Stone","Rebecca Brooks","Logan Noir","Christopher O'Connor","Viktor Parks",
-  "Hope Marshall","Justin Frey","Kevin Nolan","Sofie Roy"
+  "Oliver Steele", "Maya Graves", "Viktor Parks", "Ben Mills", "Stan Harris", "Michael Wilson",
+  "Hope Marshall", "Sofie Roy", "Logan Noir", "Justin Frey", "Rebecca Brooks", "Christopher O'Connor",
+  "Caitlyn Stone", "Frank Collins", "Antonio", "Kevin Nolan", "Daniel Hill"
 ];
 
 // Updated product rules (these are “earn” credits)
@@ -410,28 +410,28 @@ function FancySelect({ value, onChange, children, theme, placeholder }: { value:
 }
 
 /* PIN modals */
-function PinModal({ open, onClose, onCheck }: { open: boolean; onClose: () => void; onCheck: (pin: string) => void }) {
+function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: () => void; onCheck: (pin: string) => void; theme: Theme }) {
   return (
-    <AnimatePresence>{open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} />}</AnimatePresence>
+    <AnimatePresence>{open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} theme={theme} />}</AnimatePresence>
   );
 }
-function PinModalGeneric({ title, onClose, onOk, maxLen }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number }) {
+function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number; theme: Theme }) {
   const [pin, setPin] = useState("");
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(440px,92vw)]">
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className={classNames("rounded-2xl p-5 w-[min(440px,92vw)]", neonBox(theme))}>
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold flex items-center gap-2">
             <Lock className="w-4 h-4" /> {title}
           </div>
-          <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}>
+          <button className={classNames("p-1 rounded", theme === "neon" ? "hover:bg-orange-500/20" : "hover:bg-slate-100 dark:hover:bg-slate-800")} onClick={onClose}>
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="space-y-3">
           <div className="text-sm opacity-70">Enter {maxLen}-digit PIN.</div>
-          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={maxLen} />
-          <button className="px-3 py-1.5 rounded-xl border bg-black text-white" onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}>
+          <input className={inputCls(theme)} placeholder="PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={maxLen} />
+          <button className={classNames("px-3 py-1.5 rounded-xl border", neonBtn(theme, true))} onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}>
             <Check className="w-4 h-4 inline mr-1" /> OK
           </button>
         </div>
@@ -505,7 +505,8 @@ export default function GCSDApp() {
         setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
-        setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
+        // Notifications start empty and are local-only
+        setNotifs([]);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
       } finally {
@@ -528,7 +529,8 @@ export default function GCSDApp() {
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
       if (key === "gcs-v4-pins")   setPins(val ?? (await kvGet("gcs-v4-pins")) ?? {});
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
-      if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
+      // Notifications are local-only to prevent sync conflicts
+      // if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
     });
@@ -540,7 +542,8 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
+  // Notifications are local-only to prevent sync conflicts
+  // useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
 
@@ -749,32 +752,37 @@ export default function GCSDApp() {
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
     
-    // Reset to original seed accounts to prevent duplication
-    const resetAccounts = seedAccounts;
-    const resetTxns = seedTxns;
-    const resetStock = INITIAL_STOCK;
-    const resetGoals = {};
-    const resetPins = {};
-    const resetEpochs = {};
-    const resetMetrics = {};
+    // Create fresh seed accounts with new IDs to prevent any duplication
+    const freshAccounts = [
+      { id: uid(), name: "Bank Vault", role: "system" as const },
+      ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
+    ];
+    const freshTxns = [
+      { id: uid(), kind: "credit" as const, amount: 8000, memo: "Mint", dateISO: nowISO(), toId: freshAccounts[0].id },
+    ];
+    const freshStock = INITIAL_STOCK;
+    const freshGoals = {};
+    const freshPins = {};
+    const freshEpochs = {};
+    const freshMetrics = {};
     
     // Update local state
-    setAccounts(resetAccounts);
-    setTxns(resetTxns);
-    setStock(resetStock);
-    setGoals(resetGoals);
-    setPins(resetPins);
-    setEpochs(resetEpochs);
-    setMetrics(resetMetrics);
+    setAccounts(freshAccounts);
+    setTxns(freshTxns);
+    setStock(freshStock);
+    setGoals(freshGoals);
+    setPins(freshPins);
+    setEpochs(freshEpochs);
+    setMetrics(freshMetrics);
     
     // Save to database to prevent duplication on reload
     try {
-      await kvSet("gcs-v4-core", { accounts: resetAccounts, txns: resetTxns });
-      await kvSet("gcs-v4-stock", resetStock);
-      await kvSet("gcs-v4-goals", resetGoals);
-      await kvSet("gcs-v4-pins", resetPins);
-      await kvSet("gcs-v4-epochs", resetEpochs);
-      await kvSet("gcs-v4-metrics", resetMetrics);
+      await kvSet("gcs-v4-core", { accounts: freshAccounts, txns: freshTxns });
+      await kvSet("gcs-v4-stock", freshStock);
+      await kvSet("gcs-v4-goals", freshGoals);
+      await kvSet("gcs-v4-pins", freshPins);
+      await kvSet("gcs-v4-epochs", freshEpochs);
+      await kvSet("gcs-v4-metrics", freshMetrics);
     } catch (error) {
       console.warn("Failed to save reset state:", error);
     }
@@ -893,6 +901,7 @@ export default function GCSDApp() {
               setIsAdmin(true);
               toast.success("Admin unlocked");
             }}
+            theme={theme}
           />
         )}
       </AnimatePresence>
@@ -907,6 +916,7 @@ export default function GCSDApp() {
           pinModal.onOK?.(!!ok);
           setPinModal({open:false});
         }}
+        theme={theme}
       />
 
       {/* Receipt */}
@@ -1027,7 +1037,7 @@ function Home({
     return d;
   });
 
-  const earnedSeries: number[] = days.map((d) => {
+  const earnedSeries: number[] = useMemo(() => days.map((d) => {
     // Only count active credits (not reversed) for stable calculation
     const activeCredits = sumInRange(
       txns,
@@ -1036,14 +1046,14 @@ function Home({
       (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO)
     );
     return Math.max(0, activeCredits); // never negative
-  });
+  }), [txns, metrics.earned30d]);
 
-  const spentSeries: number[] = days.map((d) =>
+  const spentSeries: number[] = useMemo(() => days.map((d) =>
     sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
-  );
+  ), [txns, metrics.spent30d]);
 
-  const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
-  const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
+  const totalEarned = useMemo(() => earnedSeries.reduce((a, b) => a + b, 0), [earnedSeries]);
+  const totalSpent = useMemo(() => spentSeries.reduce((a, b) => a + b, 0), [spentSeries]);
 
   // Leaderboard: use current balance (proper banking logic)
   const balances = computeBalances(accounts, txns);
@@ -1054,26 +1064,33 @@ function Home({
     })
     .sort((a, b) => b.balance - a.balance);
 
-  // Simple "star of day" & "leader of month" (apply metric epochs)
-  const todayKey = new Date().toLocaleDateString();
-  const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-  const earnedToday: Record<string, number> = {};
-  const earnedMonth: Record<string, number> = {};
-  for (const t of txns) {
-    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
-    const d = new Date(t.dateISO);
-    if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
-      earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+  // Simple "star of day" & "leader of month" (apply metric epochs) - memoized for stability
+  const { starOfDay, leaderOfMonth } = useMemo(() => {
+    const todayKey = new Date().toLocaleDateString();
+    const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const earnedToday: Record<string, number> = {};
+    const earnedMonth: Record<string, number> = {};
+    
+    for (const t of txns) {
+      if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+      const d = new Date(t.dateISO);
+      if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
+        earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+      }
+      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
+        earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+      }
     }
-    const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
-      earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
-    }
-  }
-  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const starOfDay = starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
-  const leaderOfMonth = leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
+    
+    const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
+    
+    return {
+      starOfDay: starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null,
+      leaderOfMonth: leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null
+    };
+  }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts]);
 
   return (
     <motion.div 
