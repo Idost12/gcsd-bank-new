@@ -12,7 +12,7 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
    =========================== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png"; // put high-res in /public/logo.png
+const LOGO_URL = "/Logo.png"; // put high-res in /public/Logo.png
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
