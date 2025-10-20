@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from "sonner";
@@ -6,7 +5,7 @@ import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
-import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "@/lib/db";
+import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 
 /* ===========================
    Types & constants
@@ -33,6 +32,9 @@ type Account = { id: string; name: string; role?: "system"|"agent" };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
+
+/** Metric reset epochs (admin control) */
+type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
 
 const MAX_PRIZES_PER_AGENT = 2;
 
@@ -123,6 +125,12 @@ function afterEpoch(epochs: Record<string, string>, agentId: string | undefined,
   return new Date(dateISO).getTime() >= new Date(e).getTime();
 }
 
+/** Metric epoch gate (admin resets) */
+function afterISO(epochISO: string | undefined, dateISO: string) {
+  if (!epochISO) return true;
+  return new Date(dateISO).getTime() >= new Date(epochISO).getTime();
+}
+
 /* ===== Transaction classifiers (single definitions) ===== */
 function G_isCorrectionDebit(t: Transaction) {
   return (
@@ -150,6 +158,26 @@ function G_isRedeemStillActive(redeemTxn: Transaction, all: Transaction[]) {
       t.toId === redeemTxn.fromId &&
       (t.memo || "") === `Reversal of redemption: ${label}` &&
       new Date(t.dateISO).getTime() >= after
+  );
+}
+/** A sale credit is active unless later withdrawn/reversed */
+function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
+  if (creditTxn.kind !== "credit" || !creditTxn.toId) return false;
+  if (creditTxn.memo === "Mint") return false;
+  const label = creditTxn.memo || "Credit";
+  const amt = creditTxn.amount;
+  const after = new Date(creditTxn.dateISO).getTime();
+  return !all.some(t =>
+    t.kind === "debit" &&
+    t.fromId === creditTxn.toId &&
+    !!t.memo &&
+    (
+      t.memo.startsWith("Reversal of sale:") ||
+      t.memo.startsWith("Correction (withdraw):")
+    ) &&
+    new Date(t.dateISO).getTime() >= after &&
+    t.amount === amt &&
+    (t.memo.endsWith(label) || t.memo === `Reversal of sale: ${label}` || t.memo === `Correction (withdraw): ${label}`)
   );
 }
 
@@ -401,6 +429,9 @@ export default function GCSDApp() {
   const [unread, setUnread] = useState(0);
   const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
 
+  /** metric epochs */
+  const [metrics, setMetrics] = useState<MetricsEpoch>({});
+
   // theme side effect
   useEffect(() => {
     localStorage.setItem("gcs-v4-theme", theme);
@@ -426,6 +457,7 @@ export default function GCSDApp() {
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
+        setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
       } finally {
         setHydrated(true);
       }
@@ -448,6 +480,7 @@ export default function GCSDApp() {
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
+      if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
     });
     return off;
   }, []);
@@ -459,6 +492,7 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
 
   /* clock + intro */
   useEffect(()=> {
@@ -489,7 +523,7 @@ export default function GCSDApp() {
     .reduce((a,b)=>a+b.amount,0)
     - agentTxns.filter(t=> G_isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
   const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId && !G_isCorrectionDebit(t)).reduce((a,b)=>a+b.amount,0);
-  const prizeCount = agentTxns.filter(t=> G_isRedeemTxn(t)).length;
+  const prizeCountActive = agentTxns.filter(t=> G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
 
   /* helpers bound to state */
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
@@ -522,7 +556,8 @@ export default function GCSDApp() {
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
     const bal  = balances.get(agentId)||0;
-    const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && afterEpoch(epochs, agentId, t.dateISO)).length;
+    /** count only ACTIVE redeems towards the limit */
+    const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
 
     if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
@@ -563,8 +598,20 @@ export default function GCSDApp() {
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
     const bal = balances.get(agentId)||0;
     if (bal < t.amount) return toast.error("Cannot withdraw more than current balance");
-    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Correction (withdraw): ${t.memo || "Credit"}` });
-    notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (correction)`);
+    /** Post a targeted reversal so this sale is treated as not active */
+    postTxn({ kind:"debit", amount: t.amount, fromId: agentId, memo:`Reversal of sale: ${t.memo || "Sale"}`, meta:{reversesTxnId: t.id} });
+    notify(`🧾 Withdrawn ${t.amount} GCSD from ${getName(agentId)} (reversal of sale)`);
+    toast.success("Credits withdrawn");
+  }
+
+  /** Manual withdraw (correction) */
+  function withdrawManual(agentId:string, amount:number, note?:string){
+    if (!agentId) return toast.error("Choose an agent");
+    if (!amount || amount <= 0) return toast.error("Enter a positive amount");
+    const bal = balances.get(agentId)||0;
+    if (bal < amount) return toast.error("Cannot withdraw more than current balance");
+    postTxn({ kind:"debit", amount, fromId: agentId, memo:`Correction (withdraw): ${note?.trim() || "Manual correction"}` });
+    notify(`🧾 Withdrawn ${amount} GCSD from ${getName(agentId)} (manual correction)`);
     toast.success("Credits withdrawn");
   }
 
@@ -619,30 +666,24 @@ export default function GCSDApp() {
   }
 
   // Completely wipe app (asks for extra PIN)
-  async function completeReset(){
+  function completeReset(){
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
     const acc = [seedAccounts[0], ...accounts.filter(a=>a.role==="agent")]; // keep agents
-    
-    // Update local state
     setAccounts(acc);
     setTxns([]);
     setStock(INITIAL_STOCK);
     setGoals({});
     setPins({});
     setEpochs({});
-    setNotifs([]);
-    
-    // Persist to database immediately
-    await kvSet("gcs-v4-core", { accounts: acc, txns: [] });
-    await kvSet("gcs-v4-stock", INITIAL_STOCK);
-    await kvSet("gcs-v4-goals", {});
-    await kvSet("gcs-v4-pins", {});
-    await kvSet("gcs-v4-epochs", {});
-    await kvSet("gcs-v4-notifs", []);
-    
     notify("🧨 App was reset by admin");
-    toast.success("Everything reset and persisted to database");
+    toast.success("Everything reset");
+  }
+
+  /** Admin metric resets */
+  function resetMetric(kind: keyof MetricsEpoch){
+    setMetrics(prev => ({ ...prev, [kind]: nowISO() }));
+    toast.success("Reset applied");
   }
 
   /* Sandbox (require PIN first, then stay until exit only) */
@@ -806,7 +847,7 @@ export default function GCSDApp() {
             txns={txns}
             stock={stock}
             prizes={PRIZE_ITEMS}
-            epochs={epochs}
+            metrics={metrics}
           />
         )}
 
@@ -819,7 +860,6 @@ export default function GCSDApp() {
             stock={stock}
             prizes={PRIZE_ITEMS}
             goals={goals}
-            epochs={epochs}
             onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
             onRedeem={(k)=>redeemPrize(currentAgentId, k)}
           />
@@ -840,11 +880,13 @@ export default function GCSDApp() {
             onUndoSale={undoSale}
             onUndoRedemption={undoRedemption}
             onWithdraw={withdrawAgentCredit}
+            onWithdrawManual={withdrawManual}
             onAddAgent={addAgent}
             onSetPin={setAgentPin}
             onResetPin={(id)=>resetPin(id)}
             onResetBalance={(id)=>resetAgentBalance(id)}
             onCompleteReset={completeReset}
+            onResetMetric={resetMetric}
           />
         )}
 
@@ -867,14 +909,14 @@ function Home({
   txns,
   stock,
   prizes,
-  epochs,
+  metrics,
 }: {
   theme: Theme;
   accounts: Account[];
   txns: Transaction[];
   stock: Record<string, number>;
   prizes: PrizeItem[];
-  epochs: Record<string, string>;
+  metrics: MetricsEpoch;
 }) {
   const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
@@ -897,19 +939,19 @@ function Home({
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterEpoch(epochs, t.toId, t.dateISO)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
     );
     const withdraws = sumInRange(
       txns,
       d,
       1,
-      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterEpoch(epochs, t.fromId, t.dateISO)
+      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
     );
     return Math.max(0, credits - withdraws); // never negative
   });
 
   const spentSeries: number[] = days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterEpoch(epochs, t.fromId, t.dateISO))
+    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
   );
 
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
@@ -919,24 +961,28 @@ function Home({
   const leaderboard = Array.from(nonSystemIds)
     .map((id) => {
       const credits = txns
-        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterEpoch(epochs, id, t.dateISO))
+        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
         .reduce((a, b) => a + b.amount, 0);
-      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id && afterEpoch(epochs, id, t.dateISO)).reduce((a, b) => a + b.amount, 0);
+      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
       return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
     })
     .sort((a, b) => b.earned - a.earned);
 
-  // Simple "star of day" & "leader of month"
+  // Simple "star of day" & "leader of month" (apply metric epochs)
   const todayKey = new Date().toLocaleDateString();
   const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
   const earnedToday: Record<string, number> = {};
   const earnedMonth: Record<string, number> = {};
   for (const t of txns) {
-    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId) || !afterEpoch(epochs, t.toId, t.dateISO)) continue;
+    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
     const d = new Date(t.dateISO);
-    if (d.toLocaleDateString() === todayKey) earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+    if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
+      earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+    }
     const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    if (mk === curMonth) earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+    if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
+      earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+    }
   }
   const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
   const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -1042,7 +1088,6 @@ function AgentPortal({
   stock,
   prizes,
   goals,
-  epochs,
   onSetGoal,
   onRedeem,
 }: {
@@ -1053,29 +1098,23 @@ function AgentPortal({
   stock: Record<string, number>;
   prizes: PrizeItem[];
   goals: Record<string, number>;
-  epochs: Record<string, string>;
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
 }) {
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
-  
-  // Filter transactions by epoch FIRST
-  const epochFilteredTxns = txns.filter(t => 
-    afterEpoch(epochs, agentId, t.dateISO)
-  );
-  
-  const balance = epochFilteredTxns.reduce((s, t) => {
+  const balance = txns.reduce((s, t) => {
     if (t.toId === agentId && t.kind === "credit") s += t.amount;
     if (t.fromId === agentId && t.kind === "debit") s -= t.amount;
     return s;
   }, 0);
 
-  const agentTxns = epochFilteredTxns.filter((t) => t.toId === agentId || t.fromId === agentId);
+  const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
   const lifetimeEarn =
     agentTxns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t)).reduce((a, b) => a + b.amount, 0) -
     agentTxns.filter((t) => G_isCorrectionDebit(t) && t.fromId === agentId).reduce((a, b) => a + b.amount, 0);
   const lifetimeSpend = agentTxns.filter((t) => t.kind === "debit" && t.fromId === agentId && !G_isCorrectionDebit(t)).reduce((a, b) => a + b.amount, 0);
-  const prizeCount = agentTxns.filter((t) => G_isRedeemTxn(t)).length;
+  /** only ACTIVE redeems count towards the 2-prize limit */
+  const prizeCount = agentTxns.filter((t) => G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
 
   const goal = goals[agentId] || 0;
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
@@ -1168,11 +1207,13 @@ function AdminPortal({
   onUndoSale,
   onUndoRedemption,
   onWithdraw,
+  onWithdrawManual,
   onAddAgent,
   onSetPin,
   onResetPin,
   onResetBalance,
   onCompleteReset,
+  onResetMetric,
 }: {
   theme: Theme;
   isAdmin: boolean;
@@ -1187,11 +1228,13 @@ function AdminPortal({
   onUndoSale: (txId: string) => void;
   onUndoRedemption: (txId: string) => void;
   onWithdraw: (agentId: string, txId: string) => void;
+  onWithdrawManual: (agentId: string, amount: number, note?: string) => void;
   onAddAgent: (name: string) => void;
   onSetPin: (agentId: string, pin: string) => void;
   onResetPin: (agentId: string) => void;
   onResetBalance: (agentId: string) => void;
   onCompleteReset: () => void;
+  onResetMetric: (k: keyof MetricsEpoch) => void;
 }) {
   const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
   const [agentId, setAgentId] = useState("");
@@ -1199,6 +1242,8 @@ function AdminPortal({
   const [qty, setQty] = useState(1);
   const [xferAmt, setXferAmt] = useState("");
   const [xferNote, setXferNote] = useState("");
+  const [manualAmt, setManualAmt] = useState("");
+  const [manualNote, setManualNote] = useState("");
   const [newAgent, setNewAgent] = useState("");
   const [pinAgent, setPinAgent] = useState("");
   const [pinVal, setPinVal] = useState("");
@@ -1212,7 +1257,9 @@ function AdminPortal({
     );
   }
 
-  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint");
+  /** show only ACTIVE credits (not already reversed/withdrawn) */
+  const agentCredits = txns.filter((t) => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && G_isSaleStillActive(t, txns));
+  const agentRedeems = txns.filter((t)=> G_isRedeemTxn(t) && t.fromId === agentId);
 
   return (
     <div className="grid gap-4">
@@ -1241,12 +1288,7 @@ function AdminPortal({
               {accounts
                 .filter((a) => a.role !== "system")
                 .map((a) => {
-                  // Filter by epoch first
-                  const epochFilteredTxns = txns.filter(t => 
-                    afterEpoch(epochs, a.id, t.dateISO)
-                  );
-                  
-                  const bal = epochFilteredTxns.reduce((s, t) => {
+                  const bal = txns.reduce((s, t) => {
                     if (t.toId === a.id && t.kind === "credit") s += t.amount;
                     if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
                     return s;
@@ -1271,14 +1313,15 @@ function AdminPortal({
               ))}
             </div>
           </div>
+          {/* Reset metrics panel */}
           <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
-            <div className="text-sm opacity-70 mb-2">Quick Tips</div>
-            <ul className="text-sm list-disc pl-5 space-y-1 opacity-80">
-              <li>“Add Sale” posts credits by product rule.</li>
-              <li>“Corrections” lets you reverse or withdraw credits by agent.</li>
-              <li>Withdrawals are not redeems and do not affect prize count.</li>
-              <li>Use “Reset Balance” to zero an agent and hide previous history.</li>
-            </ul>
+            <div className="text-sm opacity-70 mb-2">Reset metrics</div>
+            <div className="grid gap-2">
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("earned30d")}>Reset “Total GCSD Earned (30d)”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("spent30d")}>Reset “Total GCSD Spent (30d)”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("starOfDay")}>Reset “Star of the Day”</button>
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onResetMetric("leaderOfMonth")}>Reset “Leader of the Month”</button>
+            </div>
           </div>
         </div>
       )}
@@ -1396,6 +1439,52 @@ function AdminPortal({
               </div>
             </div>
           )}
+
+          {/* Manual withdraw */}
+          <div className="rounded-xl border p-3">
+            <div className="text-sm opacity-70 mb-2">Manual withdraw</div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div>
+                <div className="text-xs opacity-70 mb-1">Agent</div>
+                <FancySelect value={agentId} onChange={setAgentId} theme={theme} placeholder="Choose agent…">
+                  {accounts
+                    .filter((a) => a.role !== "system")
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                </FancySelect>
+              </div>
+              <div>
+                <div className="text-xs opacity-70 mb-1">Amount</div>
+                <input className={inputCls(theme)} value={manualAmt} onChange={(e)=> setManualAmt(e.target.value.replace(/[^\d]/g,""))} placeholder="Amount" />
+              </div>
+              <div>
+                <div className="text-xs opacity-70 mb-1">Note (optional)</div>
+                <input className={inputCls(theme)} value={manualNote} onChange={(e)=> setManualNote(e.target.value)} placeholder="Manual correction" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <button className={classNames("px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={()=> onWithdrawManual(agentId, parseInt(manualAmt||"0",10), manualNote)}>
+                Withdraw amount
+              </button>
+            </div>
+
+            <div className="mt-6">
+              <div className="text-sm opacity-70 mb-2">Undo redemptions</div>
+              <div className="space-y-2 max-h-[200px] overflow-auto pr-2">
+                {agentId && agentRedeems.length>0 ? agentRedeems.map(t => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
+                    <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={()=> onUndoRedemption(agentId, t.id)}>
+                      <RotateCcw className="w-4 h-4 inline mr-1" />Undo
+                    </button>
+                  </motion.div>
+                )) : <div className="opacity-60 text-sm">No redeems.</div>}
+              </div>
+            </div>
+          </div>
 
           <div className="rounded-xl border p-3">
             <div className="text-sm opacity-70 mb-2">Quick reversals</div>
