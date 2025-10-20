@@ -237,31 +237,27 @@ function TileRow({ label, value }: { label: string; value: number }) {
 function NumberFlash({ value }:{ value:number }) {
   const prev = useRef(value);
   const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
+  
   useEffect(()=>{
-    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 600); }
-    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 600); }
+    if (value > prev.current) { 
+      setPulse("up"); 
+      setTimeout(()=>setPulse("none"), 300); 
+    }
+    else if (value < prev.current) { 
+      setPulse("down"); 
+      setTimeout(()=>setPulse("none"), 300); 
+    }
     prev.current = value;
   }, [value]);
+  
   return (
-    <motion.span
-      key={value}
-      initial={{ y: 8, opacity: 0, scale: 0.8 }}
-      animate={{ 
-        y: 0, 
-        opacity: 1, 
-        scale: 1,
-        color: pulse==="up" ? "#10b981" : pulse==="down" ? "#ef4444" : undefined
-      }}
-      transition={{ 
-        duration: 0.3, 
-        type: "spring", 
-        stiffness: 200, 
-        damping: 15 
-      }}
-      className={pulse==="up" ? "font-semibold" : pulse==="down" ? "font-semibold" : undefined}
-    >
+    <span className={`transition-colors duration-200 ${
+      pulse === "up" ? "text-emerald-500 font-semibold" : 
+      pulse === "down" ? "text-rose-500 font-semibold" : 
+      ""
+    }`}>
       {value.toLocaleString()} GCSD
-    </motion.span>
+    </span>
   );
 }
 
@@ -462,7 +458,7 @@ export default function GCSDApp() {
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
+  const [theme, setTheme] = useState<Theme>("light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -484,10 +480,10 @@ export default function GCSDApp() {
 
   // theme side effect
   useEffect(() => {
-    localStorage.setItem("gcs-v4-theme", theme);
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
-  }, [theme]);
+    if (hydrated) kvSet("gcs-v4-theme", theme);
+  }, [theme, hydrated]);
 
   /* hydrate from KV once on mount */
   useEffect(() => {
@@ -505,10 +501,12 @@ export default function GCSDApp() {
         setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
-        // Notifications start empty and are local-only
-        setNotifs([]);
+        // Load notifications from KV storage instead of starting empty
+        setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
+        // Load theme from KV storage
+        setTheme((await kvGet<Theme>("gcs-v4-theme")) ?? "light");
       } finally {
         setHydrated(true);
       }
@@ -529,10 +527,11 @@ export default function GCSDApp() {
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
       if (key === "gcs-v4-pins")   setPins(val ?? (await kvGet("gcs-v4-pins")) ?? {});
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
-      // Notifications are local-only to prevent sync conflicts
-      // if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
+      // Notifications now sync live
+      if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
+      if (key === "gcs-v4-theme") setTheme(val ?? (await kvGet("gcs-v4-theme")) ?? "light");
     });
     return off;
   }, []);
@@ -542,8 +541,8 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
-  // Notifications are local-only to prevent sync conflicts
-  // useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
+  // Notifications now persist to KV storage
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
 
@@ -752,21 +751,17 @@ export default function GCSDApp() {
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
     
-    // Create fresh seed accounts with new IDs to prevent any duplication
-    const freshAccounts = [
-      { id: uid(), name: "Bank Vault", role: "system" as const },
-      ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
-    ];
-    const freshTxns = [
-      { id: uid(), kind: "credit" as const, amount: 8000, memo: "Mint", dateISO: nowISO(), toId: freshAccounts[0].id },
-    ];
+    // Use the same seed accounts structure as initial load to prevent duplication
+    const freshAccounts = seedAccounts;
+    const freshTxns = seedTxns;
     const freshStock = INITIAL_STOCK;
     const freshGoals = {};
     const freshPins = {};
     const freshEpochs = {};
     const freshMetrics = {};
+    const freshNotifs = [];
     
-    // Update local state
+    // Update local state first
     setAccounts(freshAccounts);
     setTxns(freshTxns);
     setStock(freshStock);
@@ -774,8 +769,9 @@ export default function GCSDApp() {
     setPins(freshPins);
     setEpochs(freshEpochs);
     setMetrics(freshMetrics);
+    setNotifs(freshNotifs);
     
-    // Save to database to prevent duplication on reload
+    // Save to database - this will overwrite everything completely
     try {
       await kvSet("gcs-v4-core", { accounts: freshAccounts, txns: freshTxns });
       await kvSet("gcs-v4-stock", freshStock);
@@ -783,6 +779,7 @@ export default function GCSDApp() {
       await kvSet("gcs-v4-pins", freshPins);
       await kvSet("gcs-v4-epochs", freshEpochs);
       await kvSet("gcs-v4-metrics", freshMetrics);
+      await kvSet("gcs-v4-notifs", freshNotifs);
     } catch (error) {
       console.warn("Failed to save reset state:", error);
     }
@@ -1021,21 +1018,21 @@ function Home({
   prizes: PrizeItem[];
   metrics: MetricsEpoch;
 }) {
-  const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
+  const nonSystemIds = useMemo(() => new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id)), [accounts]);
 
   // Purchases list – only active redeems (not reversed)
-  const purchases = txns
+  const purchases = useMemo(() => txns
     .filter((t) => G_isRedeemTxn(t) && t.fromId && nonSystemIds.has(t.fromId))
     .filter((t) => G_isRedeemStillActive(t, txns))
-    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
+    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount })), [txns, nonSystemIds]);
 
-  // 30-day series
-  const days = Array.from({ length: 30 }, (_, i) => {
+  // 30-day series - memoized to prevent recalculation
+  const days = useMemo(() => Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (29 - i));
     d.setHours(0, 0, 0, 0);
     return d;
-  });
+  }), []); // Empty dependency array since we want consistent 30-day period
 
   const earnedSeries: number[] = useMemo(() => days.map((d) => {
     // Only count active credits (not reversed) for stable calculation
@@ -1046,23 +1043,23 @@ function Home({
       (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO)
     );
     return Math.max(0, activeCredits); // never negative
-  }), [txns, metrics.earned30d]);
+  }), [txns, metrics.earned30d, days, nonSystemIds]);
 
   const spentSeries: number[] = useMemo(() => days.map((d) =>
     sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
-  ), [txns, metrics.spent30d]);
+  ), [txns, metrics.spent30d, days, nonSystemIds]);
 
   const totalEarned = useMemo(() => earnedSeries.reduce((a, b) => a + b, 0), [earnedSeries]);
   const totalSpent = useMemo(() => spentSeries.reduce((a, b) => a + b, 0), [spentSeries]);
 
-  // Leaderboard: use current balance (proper banking logic)
-  const balances = computeBalances(accounts, txns);
-  const leaderboard = Array.from(nonSystemIds)
+  // Leaderboard: use current balance (proper banking logic) - memoized for stability
+  const balances = useMemo(() => computeBalances(accounts, txns), [accounts, txns]);
+  const leaderboard = useMemo(() => Array.from(nonSystemIds)
     .map((id) => {
       const balance = balances.get(id) || 0;
       return { id, name: accounts.find((a) => a.id === id)?.name || "—", balance };
     })
-    .sort((a, b) => b.balance - a.balance);
+    .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
   // Simple "star of day" & "leader of month" (apply metric epochs) - memoized for stability
   const { starOfDay, leaderOfMonth } = useMemo(() => {
@@ -1090,7 +1087,7 @@ function Home({
       starOfDay: starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null,
       leaderOfMonth: leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null
     };
-  }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts]);
+  }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
     <motion.div 
