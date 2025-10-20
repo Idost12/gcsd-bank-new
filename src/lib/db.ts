@@ -32,6 +32,20 @@ export async function kvGet<T = KVValue>(key: string): Promise<T | null> {
   return (data?.val ?? null) as T | null;
 }
 
+export async function kvDelete(key: string): Promise<void> {
+  if (!supabase) { 
+    kvMemory.delete(key); 
+    return; 
+  }
+  const { error } = await supabase.from(TABLE).delete().eq("key", key);
+  if (error) { 
+    console.warn("[GCS] kvDelete failed; memory fallback:", error); 
+    kvMemory.delete(key); 
+  } else { 
+    lastWriteJson.delete(key); 
+  }
+}
+
 export function onKVChange(
   handler: (payload: { event: "INSERT" | "UPDATE" | "DELETE"; key?: string; val?: any }) => void
 ){
