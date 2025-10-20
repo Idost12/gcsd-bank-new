@@ -110,7 +110,7 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   return Array.from(map.values());
 }
 
-/** Compute balances map for all accounts - properly handles reversals */
+/** Compute balances map for all accounts - properly handles reversals and prevents negative balances */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>();
   for (const a of accounts) map.set(a.id, 0);
@@ -123,7 +123,10 @@ function computeBalances(accounts: Account[], txns: Transaction[]) {
       map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
     }
     if (t.kind === "debit" && t.fromId) {
-      map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
+      const currentBalance = map.get(t.fromId) || 0;
+      const newBalance = currentBalance - t.amount;
+      // Prevent negative balances - minimum balance is 0
+      map.set(t.fromId, Math.max(0, newBalance));
     }
   }
   return map;
@@ -235,17 +238,27 @@ function NumberFlash({ value }:{ value:number }) {
   const prev = useRef(value);
   const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
   useEffect(()=>{
-    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 500); }
-    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 500); }
+    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 600); }
+    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 600); }
     prev.current = value;
   }, [value]);
   return (
     <motion.span
       key={value}
-      initial={{ y: 4, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: .15 }}
-      className={pulse==="up" ? "text-emerald-500" : pulse==="down" ? "text-rose-500" : undefined}
+      initial={{ y: 8, opacity: 0, scale: 0.8 }}
+      animate={{ 
+        y: 0, 
+        opacity: 1, 
+        scale: 1,
+        color: pulse==="up" ? "#10b981" : pulse==="down" ? "#ef4444" : undefined
+      }}
+      transition={{ 
+        duration: 0.3, 
+        type: "spring", 
+        stiffness: 200, 
+        damping: 15 
+      }}
+      className={pulse==="up" ? "font-semibold" : pulse==="down" ? "font-semibold" : undefined}
     >
       {value.toLocaleString()} GCSD
     </motion.span>
@@ -274,21 +287,21 @@ function classNames(...x: (string | false | undefined | null)[]) {
 /** Neon-aware containers/buttons/inputs */
 const neonBox = (theme: Theme) =>
   theme === "neon"
-    ? "bg-[#14110B] border border-orange-800 text-orange-50"
+    ? "bg-[#1a1a1a] border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
     : "bg-white dark:bg-slate-800";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
     ? solid
-      ? "bg-orange-700 text-black border border-orange-600"
-      : "bg-[#0B0B0B] border border-orange-800 text-orange-50"
+      ? "bg-orange-500 text-black border border-orange-400 hover:bg-orange-400 shadow-lg shadow-orange-500/30"
+      : "bg-[#2a2a2a] border border-orange-500 text-orange-100 hover:bg-[#3a3a3a] shadow-lg shadow-orange-500/20"
     : solid
       ? "bg-black text-white"
       : "bg-white dark:bg-slate-800";
 
 const inputCls = (theme: Theme) =>
   theme === "neon"
-    ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60 [color-scheme:dark]"
+    ? "border border-orange-500 bg-[#2a2a2a] text-orange-100 rounded-xl px-3 py-2 w-full placeholder-orange-300 focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20 [color-scheme:dark]"
     : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
 
 function TypeLabel({ text }: { text: string }) {
@@ -360,7 +373,20 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
 
 function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   return (
-    <motion.button initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} whileHover={{ y: -3, boxShadow: "0 10px 22px rgba(0,0,0,.10)" }} whileTap={{ scale: 0.98 }} onClick={onClick} className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}>
+    <motion.button 
+      initial={{ opacity: 0, y: 6, scale: 0.95 }} 
+      animate={{ opacity: 1, y: 0, scale: 1 }} 
+      transition={{ delay, type: "spring", stiffness: 200, damping: 20 }} 
+      whileHover={{ 
+        y: -4, 
+        scale: 1.02,
+        boxShadow: theme === "neon" ? "0 15px 35px rgba(251, 146, 60, 0.3)" : "0 15px 35px rgba(0,0,0,0.15)",
+        transition: { duration: 0.2 }
+      }} 
+      whileTap={{ scale: 0.98 }} 
+      onClick={onClick} 
+      className={classNames("border rounded-2xl px-3 py-3 text-left transition-all duration-200", neonBox(theme))}
+    >
       {children}
     </motion.button>
   );
@@ -369,16 +395,16 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
 /** Neon-friendly select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-500 bg-[#2a2a2a] text-orange-100 shadow-lg shadow-orange-500/20" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none", theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent")}
+        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20", theme === "neon" ? "bg-transparent text-orange-100 [color-scheme:dark]" : "bg-transparent")}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
       </select>
-      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300")} />
+      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-300" : "text-slate-500 dark:text-slate-300")} />
     </div>
   );
 }
@@ -719,24 +745,56 @@ export default function GCSDApp() {
   }
 
   // Completely wipe app (asks for extra PIN)
-  function completeReset(){
+  async function completeReset(){
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
+    
     // Reset to original seed accounts to prevent duplication
-    setAccounts(seedAccounts);
-    setTxns(seedTxns);
-    setStock(INITIAL_STOCK);
-    setGoals({});
-    setPins({});
-    setEpochs({});
-    setMetrics({});
+    const resetAccounts = seedAccounts;
+    const resetTxns = seedTxns;
+    const resetStock = INITIAL_STOCK;
+    const resetGoals = {};
+    const resetPins = {};
+    const resetEpochs = {};
+    const resetMetrics = {};
+    
+    // Update local state
+    setAccounts(resetAccounts);
+    setTxns(resetTxns);
+    setStock(resetStock);
+    setGoals(resetGoals);
+    setPins(resetPins);
+    setEpochs(resetEpochs);
+    setMetrics(resetMetrics);
+    
+    // Save to database to prevent duplication on reload
+    try {
+      await kvSet("gcs-v4-core", { accounts: resetAccounts, txns: resetTxns });
+      await kvSet("gcs-v4-stock", resetStock);
+      await kvSet("gcs-v4-goals", resetGoals);
+      await kvSet("gcs-v4-pins", resetPins);
+      await kvSet("gcs-v4-epochs", resetEpochs);
+      await kvSet("gcs-v4-metrics", resetMetrics);
+    } catch (error) {
+      console.warn("Failed to save reset state:", error);
+    }
+    
     notify("🧨 App was reset by admin");
     toast.success("Everything reset");
   }
 
   /** Admin metric resets */
-  function resetMetric(kind: keyof MetricsEpoch){
-    setMetrics(prev => ({ ...prev, [kind]: nowISO() }));
+  async function resetMetric(kind: keyof MetricsEpoch){
+    const newMetrics = { ...metrics, [kind]: nowISO() };
+    setMetrics(newMetrics);
+    
+    // Save to database
+    try {
+      await kvSet("gcs-v4-metrics", newMetrics);
+    } catch (error) {
+      console.warn("Failed to save metric reset:", error);
+    }
+    
     toast.success("Reset applied");
   }
 
@@ -970,19 +1028,14 @@ function Home({
   });
 
   const earnedSeries: number[] = days.map((d) => {
-    const credits = sumInRange(
+    // Only count active credits (not reversed) for stable calculation
+    const activeCredits = sumInRange(
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO)
     );
-    const withdraws = sumInRange(
-      txns,
-      d,
-      1,
-      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
-    );
-    return Math.max(0, credits - withdraws); // never negative
+    return Math.max(0, activeCredits); // never negative
   });
 
   const spentSeries: number[] = days.map((d) =>
@@ -1023,7 +1076,12 @@ function Home({
   const leaderOfMonth = leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+    <motion.div 
+      layout 
+      initial={{ opacity: 0, y: 20, scale: 0.95 }} 
+      animate={{ opacity: 1, y: 0, scale: 1 }} 
+      transition={{ type: "spring", stiffness: 200, damping: 20, duration: 0.6 }}
+    >
       <div className="grid md:grid-cols-3 gap-4">
         {/* Dashboard */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
