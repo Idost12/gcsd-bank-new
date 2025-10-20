@@ -12,7 +12,7 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
    =========================== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/logo.png"; // put high-res in /public/logo.png
+const LOGO_URL = "/Logo.png"; // put high-res in /public/Logo.png
 
 type Theme  = "light" | "dark" | "neon";
 type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
@@ -106,13 +106,21 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   return Array.from(map.values());
 }
 
-/** Compute balances map for all accounts */
+/** Compute balances map for all accounts - properly handles reversals */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>();
   for (const a of accounts) map.set(a.id, 0);
-  for (const t of txns) {
-    if (t.kind === "credit" && t.toId) map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
-    if (t.kind === "debit"  && t.fromId) map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
+  
+  // Process transactions in chronological order to handle reversals correctly
+  const sortedTxns = [...txns].sort((a, b) => new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime());
+  
+  for (const t of sortedTxns) {
+    if (t.kind === "credit" && t.toId) {
+      map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
+    }
+    if (t.kind === "debit" && t.fromId) {
+      map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
+    }
   }
   return map;
 }
@@ -179,6 +187,18 @@ function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
     t.amount === amt &&
     (t.memo.endsWith(label) || t.memo === `Reversal of sale: ${label}` || t.memo === `Correction (withdraw): ${label}`)
   );
+}
+
+/** Check if a transaction has already been undone */
+function G_isTransactionUndone(txn: Transaction, all: Transaction[]): boolean {
+  if (txn.kind === "credit") {
+    // Check if this credit has been reversed
+    return !G_isSaleStillActive(txn, all);
+  } else if (txn.kind === "debit" && txn.memo?.startsWith("Redeem:")) {
+    // Check if this redemption has been reversed
+    return !G_isRedeemStillActive(txn, all);
+  }
+  return false;
 }
 
 /* ===== Mini chart/tiles (single versions) ===== */
@@ -577,17 +597,33 @@ export default function GCSDApp() {
   }
 
   function undoSale(txId:string){
-    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
-    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo ?? "Sale"}` });
+    const t = txns.find(x=>x.id===txId); 
+    if (!t || t.kind!=="credit" || !t.toId) return;
+    
+    // Check if already undone
+    if (G_isTransactionUndone(t, txns)) {
+      toast.error("This transaction has already been undone");
+      return;
+    }
+    
+    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo ?? "Sale"}`, meta:{reversesTxnId: t.id} });
     notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
     toast.success("Sale reversed");
   }
 
   function undoRedemption(txId:string){
-    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="debit" || !t.fromId) return;
+    const t = txns.find(x=>x.id===txId); 
+    if (!t || t.kind!=="debit" || !t.fromId) return;
+    
+    // Check if already undone
+    if (G_isTransactionUndone(t, txns)) {
+      toast.error("This redemption has already been undone");
+      return;
+    }
+    
     const label = (t.memo||"").replace("Redeem: ","");
     const prize = PRIZE_ITEMS.find(p=>p.label===label);
-    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}` });
+    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}`, meta:{reversesTxnId: t.id} });
     if (prize) setStock(s=> ({...s, [prize.key]: (s[prize.key]??0)+1}));
     notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
     toast.success("Redemption reversed & stock restored");
@@ -596,6 +632,13 @@ export default function GCSDApp() {
   function withdrawAgentCredit(agentId:string, txId:string){
     const t = txns.find(x=>x.id===txId);
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
+    
+    // Check if already withdrawn/undone
+    if (G_isTransactionUndone(t, txns)) {
+      toast.error("This credit has already been withdrawn");
+      return;
+    }
+    
     const bal = balances.get(agentId)||0;
     if (bal < t.amount) return toast.error("Cannot withdraw more than current balance");
     /** Post a targeted reversal so this sale is treated as not active */
@@ -1419,23 +1462,28 @@ function AdminPortal({
               <div className="text-sm opacity-70 mb-2">Credits posted to {accounts.find((a) => a.id === agentId)?.name}</div>
               <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
                 {agentCredits.length === 0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
-                {agentCredits.map((t) => (
-                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                    <div className="text-sm">
-                      <div className="font-medium">{t.memo || "Credit"}</div>
-                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
-                      <button
-                        className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
-                        onClick={() => onWithdraw(agentId, t.id)}
-                      >
-                        Withdraw
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
+                {agentCredits.map((t) => {
+                  const isUndone = G_isTransactionUndone(t, txns);
+                  return (
+                    <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                      <div className="text-sm">
+                        <div className="font-medium">{t.memo || "Credit"}</div>
+                        <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                        {isUndone && <div className="text-xs text-rose-500 mt-1">Already withdrawn</div>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
+                        <button
+                          className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))}
+                          onClick={() => !isUndone && onWithdraw(agentId, t.id)}
+                          disabled={isUndone}
+                        >
+                          {isUndone ? "Withdrawn" : "Withdraw"}
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1474,14 +1522,25 @@ function AdminPortal({
             <div className="mt-6">
               <div className="text-sm opacity-70 mb-2">Undo redemptions</div>
               <div className="space-y-2 max-h-[200px] overflow-auto pr-2">
-                {agentId && agentRedeems.length>0 ? agentRedeems.map(t => (
-                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                    <div className="text-sm">{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
-                    <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={()=> onUndoRedemption(agentId, t.id)}>
-                      <RotateCcw className="w-4 h-4 inline mr-1" />Undo
-                    </button>
-                  </motion.div>
-                )) : <div className="opacity-60 text-sm">No redeems.</div>}
+                {agentId && agentRedeems.length>0 ? agentRedeems.map(t => {
+                  const isUndone = G_isTransactionUndone(t, txns);
+                  return (
+                    <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                      <div className="text-sm">
+                        <div>{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
+                        {isUndone && <div className="text-xs text-rose-500 mt-1">Already undone</div>}
+                      </div>
+                      <button 
+                        className={classNames("px-3 py-1.5 rounded-xl", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme, true))} 
+                        onClick={()=> !isUndone && onUndoRedemption(agentId, t.id)}
+                        disabled={isUndone}
+                      >
+                        <RotateCcw className="w-4 h-4 inline mr-1" />
+                        {isUndone ? "Undone" : "Undo"}
+                      </button>
+                    </motion.div>
+                  );
+                }) : <div className="opacity-60 text-sm">No redeems.</div>}
               </div>
             </div>
           </div>
@@ -1491,26 +1550,40 @@ function AdminPortal({
             <div className="space-y-2 max-h-[320px] overflow-auto pr-2">
               {txns
                 .filter((t) => t.memo && t.memo !== "Mint")
-                .map((t) => (
-                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                    <div className="text-sm">
-                      <div className="font-medium">{t.memo}</div>
-                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
-                      {t.kind === "credit" ? (
-                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoSale(t.id)}>
-                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo sale
-                        </button>
-                      ) : (
-                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoRedemption(t.id)}>
-                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo redeem
-                        </button>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
+                .map((t) => {
+                  const isUndone = G_isTransactionUndone(t, txns);
+                  return (
+                    <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                      <div className="text-sm">
+                        <div className="font-medium">{t.memo}</div>
+                        <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
+                        {isUndone && <div className="text-xs text-rose-500 mt-1">Already undone</div>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
+                        {t.kind === "credit" ? (
+                          <button 
+                            className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))} 
+                            onClick={() => !isUndone && onUndoSale(t.id)}
+                            disabled={isUndone}
+                          >
+                            <RotateCcw className="w-4 h-4 inline mr-1" /> 
+                            {isUndone ? "Undone" : "Undo sale"}
+                          </button>
+                        ) : (
+                          <button 
+                            className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))} 
+                            onClick={() => !isUndone && onUndoRedemption(t.id)}
+                            disabled={isUndone}
+                          >
+                            <RotateCcw className="w-4 h-4 inline mr-1" /> 
+                            {isUndone ? "Undone" : "Undo redeem"}
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
             </div>
           </div>
         </div>
