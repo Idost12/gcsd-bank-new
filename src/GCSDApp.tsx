@@ -110,6 +110,14 @@ function mergeAccounts(local: Account[], remote: Account[]) {
   return Array.from(map.values());
 }
 
+// Helper to check if accounts are the same (by name and role)
+function accountsAreEqual(a1: Account[], a2: Account[]): boolean {
+  if (a1.length !== a2.length) return false;
+  const names1 = a1.map(a => `${a.name}-${a.role}`).sort();
+  const names2 = a2.map(a => `${a.name}-${a.role}`).sort();
+  return names1.join(',') === names2.join(',');
+}
+
 /** Compute balances map for all accounts - properly handles reversals and prevents negative balances */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>();
@@ -235,27 +243,9 @@ function TileRow({ label, value }: { label: string; value: number }) {
   );
 }
 function NumberFlash({ value }:{ value:number }) {
-  const prev = useRef(value);
-  const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
-  
-  useEffect(()=>{
-    if (value > prev.current) { 
-      setPulse("up"); 
-      setTimeout(()=>setPulse("none"), 300); 
-    }
-    else if (value < prev.current) { 
-      setPulse("down"); 
-      setTimeout(()=>setPulse("none"), 300); 
-    }
-    prev.current = value;
-  }, [value]);
-  
+  // Simplified - no animations to prevent jumping
   return (
-    <span className={`transition-colors duration-200 ${
-      pulse === "up" ? "text-emerald-500 font-semibold" : 
-      pulse === "down" ? "text-rose-500 font-semibold" : 
-      ""
-    }`}>
+    <span>
       {value.toLocaleString()} GCSD
     </span>
   );
@@ -431,8 +421,8 @@ function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: strin
             <Check className="w-4 h-4 inline mr-1" /> OK
           </button>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }
 
@@ -520,7 +510,16 @@ export default function GCSDApp() {
       if (key === "gcs-v4-core") {
         const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
         if (!remote) return;
-        setAccounts(prev => mergeAccounts(prev, remote.accounts || []));
+        
+        // Check if this is a complete reset by comparing account names
+        setAccounts(prev => {
+          const merged = mergeAccounts(prev, remote.accounts || []);
+          // If remote has significantly different accounts (like after reset), use remote completely
+          if (remote.accounts && remote.accounts.length > 0 && !accountsAreEqual(prev, remote.accounts)) {
+            return remote.accounts;
+          }
+          return merged;
+        });
         setTxns(prev => mergeTxns(prev, remote.txns || []));
         return;
       }
@@ -751,9 +750,14 @@ export default function GCSDApp() {
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
     
-    // Use the same seed accounts structure as initial load to prevent duplication
-    const freshAccounts = seedAccounts;
-    const freshTxns = seedTxns;
+    // Create completely fresh seed data with new IDs to avoid any conflicts
+    const freshAccounts = [
+      { id: uid(), name: "Bank Vault", role: "system" as const },
+      ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
+    ];
+    const freshTxns = [
+      { id: uid(), kind: "credit" as const, amount: 8000, memo: "Mint", dateISO: nowISO(), toId: freshAccounts[0].id },
+    ];
     const freshStock = INITIAL_STOCK;
     const freshGoals = {};
     const freshPins = {};
@@ -761,17 +765,7 @@ export default function GCSDApp() {
     const freshMetrics = {};
     const freshNotifs = [];
     
-    // Update local state first
-    setAccounts(freshAccounts);
-    setTxns(freshTxns);
-    setStock(freshStock);
-    setGoals(freshGoals);
-    setPins(freshPins);
-    setEpochs(freshEpochs);
-    setMetrics(freshMetrics);
-    setNotifs(freshNotifs);
-    
-    // Save to database - this will overwrite everything completely
+    // Save to database FIRST to prevent merge conflicts
     try {
       await kvSet("gcs-v4-core", { accounts: freshAccounts, txns: freshTxns });
       await kvSet("gcs-v4-stock", freshStock);
@@ -783,6 +777,16 @@ export default function GCSDApp() {
     } catch (error) {
       console.warn("Failed to save reset state:", error);
     }
+    
+    // Then update local state - this will trigger realtime sync but with fresh data
+    setAccounts(freshAccounts);
+    setTxns(freshTxns);
+    setStock(freshStock);
+    setGoals(freshGoals);
+    setPins(freshPins);
+    setEpochs(freshEpochs);
+    setMetrics(freshMetrics);
+    setNotifs(freshNotifs);
     
     notify("🧨 App was reset by admin");
     toast.success("Everything reset");
@@ -832,8 +836,8 @@ export default function GCSDApp() {
                 onClick={()=> setShowIntro(false)}>
                 Skip
               </motion.button>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -933,8 +937,8 @@ export default function GCSDApp() {
                 <div><b>Amount:</b> {receipt.amount.toLocaleString()} GCSD</div>
               </div>
               <div className="mt-4 text-xs opacity-70">Tip: screenshot or print this popup for records.</div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -1090,12 +1094,7 @@ function Home({
   }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
-    <motion.div 
-      layout 
-      initial={{ opacity: 0, y: 20, scale: 0.95 }} 
-      animate={{ opacity: 1, y: 0, scale: 1 }} 
-      transition={{ type: "spring", stiffness: 200, damping: 20, duration: 0.6 }}
-    >
+    <div>
       <div className="grid md:grid-cols-3 gap-4">
         {/* Dashboard */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
@@ -1139,7 +1138,7 @@ function Home({
           <div className="text-sm opacity-70 mb-2">Leaderboard</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {leaderboard.map((row, i) => (
-              <motion.div key={row.id} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+              <div key={row.id} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 text-right">{i + 1}.</span>
                   <span className="font-medium">{row.name}</span>
@@ -1147,7 +1146,7 @@ function Home({
                 <div className="text-sm">
                   <NumberFlash value={row.balance} />
                 </div>
-              </motion.div>
+              </div>
             ))}
             {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
           </div>
@@ -1158,7 +1157,7 @@ function Home({
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {prizes.map((p) => (
-              <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+              <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
@@ -1166,12 +1165,12 @@ function Home({
                     Stock: {stock[p.key] ?? 0}
                   </span>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -1226,7 +1225,7 @@ function AgentPortal({
   const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+    <div>
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Summary */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
@@ -1258,10 +1257,10 @@ function AgentPortal({
             <div className="text-sm opacity-70 mb-2">Recent activity</div>
             <div className="space-y-2 max-h-56 overflow-auto pr-2">
               {agentTxns.slice(0, 60).map((t) => (
-                <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
                   <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
-                </motion.div>
+                </div>
               ))}
               {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
             </div>
@@ -1279,7 +1278,7 @@ function AgentPortal({
               const left = stock[p.key] ?? 0;
               const can = left > 0 && balance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
               return (
-                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                   <div>
                     <div className="font-medium">{p.label}</div>
                     <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
@@ -1287,13 +1286,13 @@ function AgentPortal({
                   <button disabled={!can} className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} onClick={() => onRedeem(p.key)}>
                     <Gift className="w-4 h-4 inline mr-1" /> Redeem
                   </button>
-                </motion.div>
+                </div>
               );
             })}
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -1402,7 +1401,7 @@ function AdminPortal({
                     <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                       <div className="font-medium">{a.name}</div>
                       <div className="text-sm">{bal.toLocaleString()} GCSD</div>
-                    </motion.div>
+                    </div>
                   );
                 })}
             </div>
@@ -1414,7 +1413,7 @@ function AdminPortal({
                 <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div>{p.label}</div>
                   <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
-                </motion.div>
+                </div>
               ))}
             </div>
           </div>
@@ -1527,7 +1526,7 @@ function AdminPortal({
                 {agentCredits.map((t) => {
                   const isUndone = G_isTransactionUndone(t, txns);
                   return (
-                    <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                       <div className="text-sm">
                         <div className="font-medium">{t.memo || "Credit"}</div>
                         <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
@@ -1543,7 +1542,7 @@ function AdminPortal({
                           {isUndone ? "Withdrawn" : "Withdraw"}
                         </button>
                       </div>
-                    </motion.div>
+                    </div>
                   );
                 })}
               </div>
@@ -1587,7 +1586,7 @@ function AdminPortal({
                 {agentId && agentRedeems.length>0 ? agentRedeems.map(t => {
                   const isUndone = G_isTransactionUndone(t, txns);
                   return (
-                    <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                       <div className="text-sm">
                         <div>{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
                         {isUndone && <div className="text-xs text-rose-500 mt-1">Already undone</div>}
@@ -1600,7 +1599,7 @@ function AdminPortal({
                         <RotateCcw className="w-4 h-4 inline mr-1" />
                         {isUndone ? "Undone" : "Undo"}
                       </button>
-                    </motion.div>
+                    </div>
                   );
                 }) : <div className="opacity-60 text-sm">No redeems.</div>}
               </div>
@@ -1615,7 +1614,7 @@ function AdminPortal({
                 .map((t) => {
                   const isUndone = G_isTransactionUndone(t, txns);
                   return (
-                    <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                       <div className="text-sm">
                         <div className="font-medium">{t.memo}</div>
                         <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
@@ -1632,7 +1631,7 @@ function AdminPortal({
                           {isUndone ? "Undone" : "Undo sale"}
                         </button>
                       </div>
-                    </motion.div>
+                    </div>
                   );
                 })}
             </div>
@@ -1646,13 +1645,13 @@ function AdminPortal({
           <div className="text-sm opacity-70 mb-2">All activity</div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
             {txns.map((t) => (
-              <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+              <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                 <div className="text-sm">
                   <div className="font-medium">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
                   <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                 </div>
                 <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
-              </motion.div>
+              </div>
             ))}
             {txns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
           </div>
@@ -1758,8 +1757,8 @@ function Picker({
               </HoverCard>
             ))}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }
 
@@ -1782,7 +1781,7 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
           ))}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
