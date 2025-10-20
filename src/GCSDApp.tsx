@@ -15,7 +15,7 @@ const APP_NAME = "GCS Bank";
 const LOGO_URL = "/Logo.png"; // put high-res in /public/Logo.png
 
 type Theme  = "light" | "dark" | "neon";
-type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
+type Portal = "home" | "agent" | "admin" | "feed";
 
 type TxnKind = "credit" | "debit";
 type Transaction = {
@@ -101,8 +101,12 @@ function mergeTxns(local: Transaction[], remote: Transaction[]) {
 }
 function mergeAccounts(local: Account[], remote: Account[]) {
   const map = new Map<string, Account>();
+  // Remote takes precedence to avoid duplication
   for (const a of remote) map.set(a.id, a);
-  for (const a of local) map.set(a.id, a);
+  // Only add local accounts that don't exist remotely
+  for (const a of local) {
+    if (!map.has(a.id)) map.set(a.id, a);
+  }
   return Array.from(map.values());
 }
 
@@ -443,7 +447,7 @@ export default function GCSDApp() {
   const [clock, setClock] = useState(fmtTime(new Date()));
   const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
-  const [sandboxActive, setSandboxActive] = useState(false);
+  // Sandbox state removed
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
@@ -557,8 +561,11 @@ export default function GCSDApp() {
 
   /* actions */
   function adminCredit(agentId:string, ruleKey:string, qty:number){
-    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
+    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); 
+    if (!rule) return toast.error("Invalid product rule");
     if (!agentId) return toast.error("Choose agent");
+    if (!qty || qty <= 0) return toast.error("Quantity must be positive");
+    
     const amount = rule.gcsd * Math.max(1, qty||1);
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
@@ -566,7 +573,10 @@ export default function GCSDApp() {
   }
 
   function manualTransfer(agentId:string, amount:number, note:string){
-    if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
+    if (!agentId) return toast.error("Choose an agent");
+    if (!amount || amount <= 0) return toast.error("Enter a positive amount");
+    if (amount > 100000) return toast.error("Amount too large (max 100,000 GCSD)");
+    
     postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
     toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
@@ -712,13 +722,14 @@ export default function GCSDApp() {
   function completeReset(){
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
-    const acc = [seedAccounts[0], ...accounts.filter(a=>a.role==="agent")]; // keep agents
-    setAccounts(acc);
-    setTxns([]);
+    // Reset to original seed accounts to prevent duplication
+    setAccounts(seedAccounts);
+    setTxns(seedTxns);
     setStock(INITIAL_STOCK);
     setGoals({});
     setPins({});
     setEpochs({});
+    setMetrics({});
     notify("🧨 App was reset by admin");
     toast.success("Everything reset");
   }
@@ -729,20 +740,7 @@ export default function GCSDApp() {
     toast.success("Reset applied");
   }
 
-  /* Sandbox (require PIN first, then stay until exit only) */
-  function enterSandbox() {
-    const pin = prompt("Admin PIN to enter Sandbox:");
-    if (!pin || !/^\d{5,8}$/.test(pin)) return toast.error("Enter a valid PIN");
-    setAdminPin(pin);
-    setSandboxActive(true);
-    setPortal("sandbox");
-    toast.success("Sandbox started");
-  }
-  function exitSandbox() {
-    setSandboxActive(false);
-    setPortal("home");
-    toast.success("Sandbox cleared");
-  }
+  // Sandbox mode removed - not needed for banking app
 
   /* ============================ render ============================ */
   return (
@@ -790,18 +788,12 @@ export default function GCSDApp() {
             <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={()=> setPortal("home")} // note: does NOT exit sandbox; that is explicit
+              onClick={()=> setPortal("home")}
               title="Go Home"
             >
               <HomeIcon className="w-4 h-4"/> Home
             </button>
-            <button
-              className={classNames("ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={()=> portal==="sandbox" ? exitSandbox() : enterSandbox()}
-              title={portal==="sandbox" ? "Exit Sandbox" : "Enter Sandbox"}
-            >
-              <Shield className="w-4 h-4"/> {portal==="sandbox" ? "Exit Sandbox" : "Sandbox"}
-            </button>
+            {/* Sandbox button removed */}
           </div>
           <div className="flex items-center gap-3">
             <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
@@ -933,7 +925,7 @@ export default function GCSDApp() {
           />
         )}
 
-        {portal==="sandbox" && <SandboxPage onExit={exitSandbox} theme={theme}/>}
+        {/* Sandbox portal removed */}
 
         {portal==="feed" && <FeedPage theme={theme} notifs={notifs} />}
       </div>
@@ -1000,16 +992,14 @@ function Home({
   const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
   const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
 
-  // Leaderboard: earned = credits (non-reversal) - corrections; ignore Mint
+  // Leaderboard: use current balance (proper banking logic)
+  const balances = computeBalances(accounts, txns);
   const leaderboard = Array.from(nonSystemIds)
     .map((id) => {
-      const credits = txns
-        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
-        .reduce((a, b) => a + b.amount, 0);
-      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
-      return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
+      const balance = balances.get(id) || 0;
+      return { id, name: accounts.find((a) => a.id === id)?.name || "—", balance };
     })
-    .sort((a, b) => b.earned - a.earned);
+    .sort((a, b) => b.balance - a.balance);
 
   // Simple "star of day" & "leader of month" (apply metric epochs)
   const todayKey = new Date().toLocaleDateString();
@@ -1083,7 +1073,7 @@ function Home({
                   <span className="font-medium">{row.name}</span>
                 </div>
                 <div className="text-sm">
-                  <NumberFlash value={row.earned} />
+                  <NumberFlash value={row.balance} />
                 </div>
               </motion.div>
             ))}
@@ -1546,10 +1536,10 @@ function AdminPortal({
           </div>
 
           <div className="rounded-xl border p-3">
-            <div className="text-sm opacity-70 mb-2">Quick reversals</div>
+            <div className="text-sm opacity-70 mb-2">Quick reversals (credits only)</div>
             <div className="space-y-2 max-h-[320px] overflow-auto pr-2">
               {txns
-                .filter((t) => t.memo && t.memo !== "Mint")
+                .filter((t) => t.kind === "credit" && t.memo && t.memo !== "Mint")
                 .map((t) => {
                   const isUndone = G_isTransactionUndone(t, txns);
                   return (
@@ -1560,26 +1550,15 @@ function AdminPortal({
                         {isUndone && <div className="text-xs text-rose-500 mt-1">Already undone</div>}
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
-                        {t.kind === "credit" ? (
-                          <button 
-                            className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))} 
-                            onClick={() => !isUndone && onUndoSale(t.id)}
-                            disabled={isUndone}
-                          >
-                            <RotateCcw className="w-4 h-4 inline mr-1" /> 
-                            {isUndone ? "Undone" : "Undo sale"}
-                          </button>
-                        ) : (
-                          <button 
-                            className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))} 
-                            onClick={() => !isUndone && onUndoRedemption(t.id)}
-                            disabled={isUndone}
-                          >
-                            <RotateCcw className="w-4 h-4 inline mr-1" /> 
-                            {isUndone ? "Undone" : "Undo redeem"}
-                          </button>
-                        )}
+                        <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
+                        <button 
+                          className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))} 
+                          onClick={() => !isUndone && onUndoSale(t.id)}
+                          disabled={isUndone}
+                        >
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> 
+                          {isUndone ? "Undone" : "Undo sale"}
+                        </button>
                       </div>
                     </motion.div>
                   );
@@ -1713,19 +1692,7 @@ function Picker({
 }
 
 /** Sandbox */
-function SandboxPage({ onExit, theme }: { onExit: () => void; theme: Theme }) {
-  return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
-      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
-        <div className="text-xl font-semibold mb-2">Sandbox</div>
-        <div className="opacity-80 text-sm">Use this area to experiment. Data here is temporary and resets when you exit.</div>
-        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={onExit}>
-          Exit Sandbox
-        </button>
-      </div>
-    </motion.div>
-  );
-}
+// SandboxPage component removed - not needed for banking app
 
 /** Feed */
 function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
