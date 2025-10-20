@@ -294,7 +294,7 @@ function TypeLabel({ text }: { text: string }) {
   return (
     <div aria-label={text} className="text-2xl font-semibold">
       {text.split("").map((ch, i) => (
-        <motion.span key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.08, delay: i * 0.015 }}>
+        <span key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.08, delay: i * 0.015 }}>
           {ch}
         </motion.span>
       ))}
@@ -315,11 +315,11 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
       >
         <AnimatePresence initial={false} mode="wait">
           {isDark ? (
-            <motion.span key="moon" initial={{ rotate: -20, scale: 0.7, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 20, scale: 0.7, opacity: 0 }} transition={{ duration: 0.12 }}>
+            <span key="moon">
               <Moon className="w-4 h-4" />
             </motion.span>
           ) : (
-            <motion.span key="sun" initial={{ rotate: 20, scale: 0.7, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: -20, scale: 0.7, opacity: 0 }} transition={{ duration: 0.12 }}>
+            <span key="sun">
               <Sun className="w-4 h-4" />
             </motion.span>
           )}
@@ -359,17 +359,10 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
 
 function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   return (
-    <motion.button 
+    <button 
       initial={{ opacity: 0, y: 6, scale: 0.95 }} 
       animate={{ opacity: 1, y: 0, scale: 1 }} 
       transition={{ delay, type: "spring", stiffness: 200, damping: 20 }} 
-      whileHover={{ 
-        y: -4, 
-        scale: 1.02,
-        boxShadow: theme === "neon" ? "0 15px 35px rgba(251, 146, 60, 0.3)" : "0 15px 35px rgba(0,0,0,0.15)",
-        transition: { duration: 0.2 }
-      }} 
-      whileTap={{ scale: 0.98 }} 
       onClick={onClick} 
       className={classNames("border rounded-2xl px-3 py-3 text-left transition-all duration-200", neonBox(theme))}
     >
@@ -404,8 +397,8 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
 function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number; theme: Theme }) {
   const [pin, setPin] = useState("");
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className={classNames("rounded-2xl p-5 w-[min(440px,92vw)]", neonBox(theme))}>
+    <div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+      <div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className={classNames("rounded-2xl p-5 w-[min(440px,92vw)]", neonBox(theme))}>
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold flex items-center gap-2">
             <Lock className="w-4 h-4" /> {title}
@@ -823,16 +816,14 @@ export default function GCSDApp() {
       {/* Intro */}
       <AnimatePresence>
         {showIntro && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
-            <motion.div initial={{scale:0.96}} animate={{scale:1}} className="text-center p-8">
+          <div            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
+            <div className="text-center p-8">
               <div className="mx-auto mb-6 w-48 h-48 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
                 <img src={LOGO_URL} alt="GCS Bank logo" className="w-40 h-40 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]"/>
               </div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <div className="text-white/70 mt-2 mb-6">Press Enter to continue</div>
-              <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.97}}
-                className="px-4 py-2 rounded-xl bg-white text-black"
+              <button                className="px-4 py-2 rounded-xl bg-white text-black"
                 onClick={()=> setShowIntro(false)}>
                 Skip
               </motion.button>
@@ -866,7 +857,7 @@ export default function GCSDApp() {
             <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
             <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
-            <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
+            <button whileTap={{scale:0.98}}
               className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
               onClick={()=> setPickerOpen(true)}>
               <Users className="w-4 h-4"/> Switch User
@@ -923,8 +914,8 @@ export default function GCSDApp() {
       {/* Receipt */}
       <AnimatePresence>
         {receipt && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
+          <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+            <div className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
               <div className="flex items-center justify-between mb-3">
                 <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4"/> Receipt</div>
                 <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={()=>setReceipt(null)}><X className="w-4 h-4"/></button>
@@ -1398,7 +1389,7 @@ function AdminPortal({
                     return s;
                   }, 0);
                   return (
-                    <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div key={a.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                       <div className="font-medium">{a.name}</div>
                       <div className="text-sm">{bal.toLocaleString()} GCSD</div>
                     </div>
@@ -1410,7 +1401,7 @@ function AdminPortal({
             <div className="text-sm opacity-70 mb-2">Prize Stock</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {PRIZE_ITEMS.map((p) => (
-                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <div key={p.key} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div>{p.label}</div>
                   <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
                 </div>
@@ -1728,8 +1719,8 @@ function Picker({
   onChooseAgent: (id: string) => void;
 }) {
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
-      <motion.div initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 18 }} className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
+    <div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
+      <div className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" />
@@ -1768,7 +1759,7 @@ function Picker({
 /** Feed */
 function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
   return (
-    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+    <div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
         <div className="text-sm opacity-70 mb-2">Notifications</div>
         <div className="space-y-2 max-h-[70vh] overflow-auto pr-2">
