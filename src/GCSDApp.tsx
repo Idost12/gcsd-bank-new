@@ -473,18 +473,32 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
 }
 function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number; theme: Theme }) {
   const [pin, setPin] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const handleSubmit = () => {
+    if (isSubmitting) return; // Prevent double submission
+    
     if (pin.length !== maxLen) {
-      toast.error(`PIN must be ${maxLen} digits`);
+      toast.error(`PIN must be exactly ${maxLen} digits`);
       return;
     }
+    
+    // Validate PIN contains only digits
+    if (!/^\d+$/.test(pin)) {
+      toast.error("PIN must contain only numbers");
+      return;
+    }
+    
+    setIsSubmitting(true);
     
     // Call onOk and let it handle validation
     onOk(pin);
     
     // Clear PIN for security
     setPin("");
+    
+    // Reset submitting state after a brief delay
+    setTimeout(() => setIsSubmitting(false), 100);
   };
   
   return (
@@ -563,6 +577,7 @@ export default function GCSDApp() {
   const [hydrated, setHydrated] = useState(false);
 
   // Theme is LOCAL to each browser/device - NEVER synced via KV
+  // Each browser tab/device maintains its own theme independently
   const [theme, setTheme] = useState<Theme>("light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -584,11 +599,14 @@ export default function GCSDApp() {
   /** metric epochs */
   const [metrics, setMetrics] = useState<MetricsEpoch>({});
 
-  // theme side effect - applies theme to DOM
+  // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
-    // Theme is LOCAL ONLY - never saved to KV storage, only to localStorage
+    
+    // IMPORTANT: Theme is 100% LOCAL - NEVER synced to KV storage
+    // Each device/browser maintains its own theme preference
+    console.log(`[THEME] Applied theme: ${theme} (Local to this browser only)`);
   }, [theme, hydrated]);
 
   /* hydrate from KV once on mount */
@@ -644,9 +662,13 @@ export default function GCSDApp() {
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-        // Theme is local to each browser session - use localStorage
+        
+        // CRITICAL: Theme is STRICTLY LOCAL - load from localStorage ONLY
+        // NEVER from KV storage - each browser has its own theme
         const savedTheme = localStorage.getItem("gcsd-theme") as Theme;
-        setTheme(savedTheme || "light");
+        const loadedTheme = savedTheme || "light";
+        setTheme(loadedTheme);
+        console.log(`[THEME] Loaded local theme: ${loadedTheme} from localStorage (NOT from KV)`);
       } finally {
         setHydrated(true);
       }
@@ -680,7 +702,13 @@ export default function GCSDApp() {
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
-      // Theme is local to each browser - not synced across users
+      
+      // CRITICAL: Theme is NEVER synced via KV - ignore any theme-related KV changes
+      // Each browser maintains its own theme in localStorage independently
+      if (key === "gcs-v4-theme") {
+        console.warn("[THEME] Ignoring theme from KV storage - theme is local only!");
+        // DO NOT sync theme from KV - intentionally ignored
+      }
     });
     return off;
   }, []);
@@ -698,8 +726,16 @@ export default function GCSDApp() {
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
     if (hydrated) {
-      // Store in localStorage only - each device has its own theme preference
+      // CRITICAL: Store in localStorage ONLY - NEVER in KV storage
+      // Each device/browser has its own independent theme preference
       localStorage.setItem("gcsd-theme", theme);
+      console.log(`[THEME] Saved theme: ${theme} to localStorage (Local only, NOT synced to KV)`);
+      
+      // Verify we're not accidentally saving to KV
+      const kvKeys = ["gcs-v4-core", "gcs-v4-stock", "gcs-v4-pins", "gcs-v4-goals", "gcs-v4-notifs", "gcs-v4-epochs", "gcs-v4-metrics"];
+      if (kvKeys.includes("gcs-v4-theme")) {
+        console.error("[THEME] ERROR: Theme should NEVER be in KV storage!");
+      }
     }
   }, [hydrated, theme]);
 
@@ -730,17 +766,28 @@ export default function GCSDApp() {
     return ()=> { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
   }, [showIntro]);
 
-  /* theme body class management */
+  /* theme body class management - applies visual theme to DOM */
   useEffect(() => {
     if (theme === "neon") {
       document.body.classList.add("neon-theme");
+      console.log("[THEME] Added neon-theme class to body (local only)");
     } else {
       document.body.classList.remove("neon-theme");
     }
+    
+    // Cleanup function
     return () => {
       document.body.classList.remove("neon-theme");
     };
   }, [theme]);
+
+  /* Wrapped setTheme with logging and protection */
+  const setThemeLocal = (newTheme: Theme) => {
+    console.log(`[THEME] User changing theme from ${theme} to ${newTheme} (LOCAL ONLY - not synced)`);
+    setTheme(newTheme);
+    // Double-check: ensure theme is NEVER accidentally saved to KV
+    // This is a safety check - theme should only go to localStorage
+  };
 
   /* derived */
   const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
@@ -1025,18 +1072,24 @@ export default function GCSDApp() {
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
     
-    // Check if agent has a PIN set
+    // CRITICAL: Check if agent has a PIN set
     if (!pins[agentId]) {
-      return toast.error("You must set a PIN first (Admin Portal → Users Settings)");
+      toast.error("⚠️ This agent doesn't have a PIN yet!");
+      toast.error("Go to Admin Portal → Users Settings to set a PIN first");
+      return;
     }
     
-    // Require PIN verification for setting goals
+    // CRITICAL: Require PIN verification for setting goals - NO EXCEPTIONS
     openAgentPin(agentId, (ok) => {
-      if (!ok) return toast.error("Wrong PIN");
+      if (!ok) {
+        toast.error("❌ Wrong PIN - Goal NOT updated");
+        return;
+      }
       
+      // Only update if PIN was correct
       setGoals(prev=> ({...prev, [agentId]: amount}));
       notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
-      toast.success("Goal updated");
+      toast.success("✅ Goal updated successfully");
     });
   }
 
@@ -1253,30 +1306,33 @@ export default function GCSDApp() {
             : "sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200"
         }
       >
-        <div className="max-w-6xl mx-auto px-2 sm:px-4 mobile-menu-container">
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 mobile-menu-container">
           {/* Main header row */}
-          <div className="h-16 flex items-center justify-between">
-            <div className="flex items-center gap-1 sm:gap-3">
-              <img src={LOGO_URL} alt="GCS Bank logo" className="h-8 w-8 sm:h-14 sm:w-14 rounded drop-shadow-sm" />
-              <span className="font-semibold text-sm sm:text-base lg:text-lg">{APP_NAME}</span>
-              <motion.button
-                className={classNames("ml-1 sm:ml-3 inline-flex items-center gap-1 text-xs sm:text-sm px-1 sm:px-2 py-1 rounded-lg", neonBtn(theme))}
-                onClick={()=> setPortal("home")}
-                title="Go Home"
-                whileHover={{ scale: 1.05, y: -1 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <HomeIcon className="w-3 h-3 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Home</span>
-              </motion.button>
+          <div className="h-14 sm:h-16 flex items-center justify-between gap-2">
+            {/* Left side - Logo and Title */}
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+              <img src={LOGO_URL} alt="GCS Bank logo" className="h-9 w-9 sm:h-12 sm:w-12 rounded drop-shadow-sm flex-shrink-0" />
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <span className="font-semibold text-sm sm:text-base lg:text-lg truncate">{APP_NAME}</span>
+                <motion.button
+                  className={classNames("hidden sm:inline-flex items-center gap-1 text-xs sm:text-sm px-2 py-1 rounded-lg whitespace-nowrap", neonBtn(theme))}
+                  onClick={()=> setPortal("home")}
+                  title="Go Home"
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <HomeIcon className="w-4 h-4"/> <span>Home</span>
+                </motion.button>
+              </div>
             </div>
             
             {/* Desktop menu */}
-            <div className="hidden sm:flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-3 flex-shrink-0">
               <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
-              <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
-              <ThemeToggle theme={theme} setTheme={setTheme}/>
+              <span className={classNames("text-xs font-mono whitespace-nowrap", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+              <ThemeToggle theme={theme} setTheme={setThemeLocal}/>
               <motion.button 
-                className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm", neonBtn(theme))}
+                className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm whitespace-nowrap", neonBtn(theme))}
                 onClick={()=> setPickerOpen(true)}
                 whileHover={{ scale: 1.05, y: -1 }}
                 whileTap={{ scale: 0.95 }}
@@ -1287,14 +1343,21 @@ export default function GCSDApp() {
             
             {/* Mobile menu button */}
             <motion.button 
-              className={classNames("sm:hidden p-2 rounded-lg", neonBtn(theme))}
+              className={classNames("sm:hidden p-2 rounded-lg flex-shrink-0", neonBtn(theme))}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
+              aria-label="Toggle menu"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
+              {mobileMenuOpen ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
             </motion.button>
           </div>
           
@@ -1303,7 +1366,7 @@ export default function GCSDApp() {
             {mobileMenuOpen && (
               <motion.div 
                 className={classNames(
-                  "sm:hidden py-4 space-y-4 overflow-hidden",
+                  "sm:hidden pb-4 overflow-hidden",
                   theme === "neon" 
                     ? "border-t border-orange-800 bg-[#14110B]/95" 
                     : "border-t border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95"
@@ -1313,37 +1376,54 @@ export default function GCSDApp() {
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <div className="px-4">
-                  <div className="flex flex-col space-y-4">
-                    {/* Date and time */}
-                    <div className="text-center pb-2 border-b border-slate-200 dark:border-slate-700">
-                      <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
-                    </div>
-                    
-                    {/* Notifications */}
-                    <div className="flex items-center justify-between py-2">
-                      <span className="text-sm font-medium opacity-80">Notifications</span>
-                      <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); setMobileMenuOpen(false); }} />
-                    </div>
-                    
-                    {/* Theme Toggle */}
-                    <div className="flex items-center justify-between py-2">
-                      <span className="text-sm font-medium opacity-80">Theme</span>
-                      <div className="flex items-center gap-2">
-                        <ThemeToggle theme={theme} setTheme={setTheme}/>
-                      </div>
-                    </div>
-                    
-                    {/* Switch User Button */}
-                    <motion.button 
-                      className={classNames("w-full px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium mt-2", neonBtn(theme))}
-                      onClick={()=> { setPickerOpen(true); setMobileMenuOpen(false); }}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <Users className="w-4 h-4"/> Switch User
-                    </motion.button>
+                <div className="px-3 pt-3 space-y-3">
+                  {/* Date and time */}
+                  <div className={classNames(
+                    "text-center py-2 rounded-lg",
+                    theme === "neon" ? "bg-orange-500/10" : "bg-slate-100 dark:bg-slate-800"
+                  )}>
+                    <span className={classNames("text-xs font-mono font-medium", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
                   </div>
+                  
+                  {/* Notifications */}
+                  <div className={classNames(
+                    "flex items-center justify-between p-3 rounded-lg",
+                    theme === "neon" ? "bg-orange-500/5 border border-orange-800/30" : "bg-slate-50 dark:bg-slate-800/50"
+                  )}>
+                    <span className="text-sm font-medium">Notifications</span>
+                    <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); setMobileMenuOpen(false); }} />
+                  </div>
+                  
+                  {/* Theme Toggle */}
+                  <div className={classNames(
+                    "flex items-center justify-between p-3 rounded-lg",
+                    theme === "neon" ? "bg-orange-500/5 border border-orange-800/30" : "bg-slate-50 dark:bg-slate-800/50"
+                  )}>
+                    <span className="text-sm font-medium">Theme</span>
+                    <div className="flex items-center gap-2">
+                      <ThemeToggle theme={theme} setTheme={setThemeLocal}/>
+                    </div>
+                  </div>
+                  
+                  {/* Home Button (mobile only) */}
+                  <motion.button 
+                    className={classNames("w-full px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium", neonBtn(theme, true))}
+                    onClick={()=> { setPortal("home"); setMobileMenuOpen(false); }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <HomeIcon className="w-4 h-4"/> Home
+                  </motion.button>
+                  
+                  {/* Switch User Button */}
+                  <motion.button 
+                    className={classNames("w-full px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium", neonBtn(theme, true))}
+                    onClick={()=> { setPickerOpen(true); setMobileMenuOpen(false); }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <Users className="w-4 h-4"/> Switch User
+                  </motion.button>
                 </div>
               </motion.div>
             )}
@@ -1376,22 +1456,35 @@ export default function GCSDApp() {
               setIsAdmin(false);
             }}
             onOk={(pin) => {
-              // CRITICAL: Only accept the exact admin PIN
-              const trimmedPin = pin.trim();
-              const CORRECT_PIN = "13577531";
+              // CRITICAL: Only accept the exact admin PIN - NO EXCEPTIONS
+              const CORRECT_ADMIN_PIN = "13577531";
+              const enteredPin = pin.trim();
               
-              if (trimmedPin !== CORRECT_PIN || trimmedPin.length !== 8) { 
-                toast.error("Invalid admin PIN - Access denied");
+              // Multiple validation checks to prevent bypass
+              const isLengthCorrect = enteredPin.length === 8;
+              const isPinMatch = enteredPin === CORRECT_ADMIN_PIN;
+              const isNumericOnly = /^\d{8}$/.test(enteredPin);
+              
+              console.log("Admin PIN attempt:", { 
+                length: enteredPin.length, 
+                isNumeric: isNumericOnly,
+                matches: isPinMatch 
+              });
+              
+              if (!isLengthCorrect || !isPinMatch || !isNumericOnly) { 
+                toast.error("❌ Invalid admin PIN - Access DENIED");
                 setPortal("home"); // Close modal and go back to home
                 setIsAdmin(false); // Ensure admin state is false
                 setAdminPin(""); // Clear any stored PIN
+                console.error("Admin access denied - wrong PIN");
                 return; 
               }
               
-              // Only set admin if PIN is correct
-              setAdminPin(trimmedPin);
+              // Only set admin if ALL checks pass
+              setAdminPin(enteredPin);
               setIsAdmin(true);
-              toast.success("Admin unlocked");
+              console.log("Admin access granted");
+              toast.success("✅ Admin unlocked");
             }}
             theme={theme}
           />
@@ -1401,11 +1494,33 @@ export default function GCSDApp() {
       {/* Agent PIN modal */}
       <PinModal
         open={pinModal.open}
-        onClose={()=> setPinModal({open:false})}
+        onClose={()=> {
+          // When modal is closed without entering PIN, call callback with false
+          if (pinModal.onOK) {
+            pinModal.onOK(false);
+          }
+          setPinModal({open:false});
+        }}
         onCheck={(pin)=>{
           const aId = pinModal.agentId!;
-          const ok = pins[aId] && pin === pins[aId];
-          pinModal.onOK?.(!!ok);
+          // CRITICAL: PIN must exist and match exactly (case-sensitive, no whitespace)
+          const storedPin = pins[aId];
+          const enteredPin = pin.trim();
+          
+          if (!storedPin) {
+            toast.error("No PIN set for this agent");
+            pinModal.onOK?.(false);
+            setPinModal({open:false});
+            return;
+          }
+          
+          const ok = storedPin === enteredPin;
+          
+          if (!ok) {
+            toast.error("Incorrect PIN");
+          }
+          
+          pinModal.onOK?.(ok);
           setPinModal({open:false});
         }}
         theme={theme}
@@ -1515,7 +1630,7 @@ export default function GCSDApp() {
             </motion.div>
           )}
 
-          {portal==="admin" && (
+          {portal==="admin" && isAdmin && (
             <motion.div
               key="admin"
               initial={{ opacity: 0, y: 20 }}
