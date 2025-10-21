@@ -28,10 +28,12 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system"|"agent" };
+type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
+type AdminNotification = { id: string; when: string; type: "credit"|"debit"|"redeem_request"|"redeem_approved"|"system"; text: string; agentName?: string; amount?: number };
+type RedeemRequest = { id: string; agentId: string; agentName: string; prizeKey: string; prizeLabel: string; price: number; when: string; agentPinVerified: boolean };
 
 /** Metric reset epochs (admin control) */
 type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
@@ -1012,11 +1014,11 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
   );
 }
 
-function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
+function HoverCard({ children, onClick, delay = 0, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   const handleClick = () => {
     // Haptic feedback for mobile
     if ('vibrate' in navigator) {
-      navigator.vibrate(50);
+      navigator.vibrate(30);
     }
     onClick();
   };
@@ -1024,12 +1026,12 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
   return (
     <motion.button 
       onClick={handleClick} 
-      className={classNames("border rounded-2xl px-3 py-3 text-left haptic-feedback hover-lift", neonBox(theme))}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      transition={{ delay, duration: 0.3 }}
-      whileHover={{ scale: 1.02, y: -2 }}
+      className={classNames("border rounded-2xl px-3 py-3 text-left haptic-feedback", neonBox(theme))}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
     >
       {children}
@@ -1164,6 +1166,9 @@ export default function GCSDApp() {
   const [pins, setPins] = useState<Record<string, string>>({});
   const [goals, setGoals] = useState<Record<string, number>>({});
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [adminNotifs, setAdminNotifs] = useState<AdminNotification[]>([]);
+  const [redeemRequests, setRedeemRequests] = useState<RedeemRequest[]>([]);
+  const [activeUsers, setActiveUsers] = useState<Set<string>>(new Set());
   const [hydrated, setHydrated] = useState(false);
 
   // Theme is LOCAL to each browser/device - NEVER synced via KV
@@ -1249,6 +1254,8 @@ export default function GCSDApp() {
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         // Load notifications from KV storage instead of starting empty
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
+        setAdminNotifs((await kvGet<AdminNotification[]>("gcs-v4-admin-notifs")) ?? []);
+        setRedeemRequests((await kvGet<RedeemRequest[]>("gcs-v4-redeem-requests")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
         
@@ -1288,6 +1295,8 @@ export default function GCSDApp() {
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
       // Notifications now sync live
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
+      if (key === "gcs-v4-admin-notifs") setAdminNotifs(val ?? (await kvGet("gcs-v4-admin-notifs")) ?? []);
+      if (key === "gcs-v4-redeem-requests") setRedeemRequests(val ?? (await kvGet("gcs-v4-redeem-requests")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
       
@@ -1307,6 +1316,8 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
   // Notifications now persist to KV storage
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-admin-notifs", adminNotifs); }, [hydrated, adminNotifs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-redeem-requests", redeemRequests); }, [hydrated, redeemRequests]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
   
@@ -1416,8 +1427,38 @@ export default function GCSDApp() {
   }).length;
 
   /* helpers bound to state */
-  const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
-    setTxns(prev => [{ id: uid(), dateISO: nowISO(), memo: "", ...partial }, ...prev ]);
+  const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) => {
+    const txn = { id: uid(), dateISO: nowISO(), memo: "", ...partial };
+    setTxns(prev => [txn, ...prev ]);
+    
+    // Create admin notification for significant transactions
+    if (txn.kind === "credit" && txn.toId && txn.memo !== "Mint") {
+      const agentName = getName(txn.toId);
+      const adminNotif: AdminNotification = {
+        id: uid(),
+        when: nowISO(),
+        type: "credit",
+        text: `Credit: ${agentName} +${txn.amount} GCSD${txn.memo ? ` (${txn.memo})` : ''}`,
+        agentName,
+        amount: txn.amount
+      };
+      setAdminNotifs(prev => [...prev, adminNotif].slice(0, 200));
+    }
+    
+    if (txn.kind === "debit" && txn.fromId && !txn.memo?.startsWith("Redeem:")) {
+      const agentName = getName(txn.fromId);
+      const adminNotif: AdminNotification = {
+        id: uid(),
+        when: nowISO(),
+        type: "debit",
+        text: `Debit: ${agentName} -${txn.amount} GCSD${txn.memo ? ` (${txn.memo})` : ''}`,
+        agentName,
+        amount: txn.amount
+      };
+      setAdminNotifs(prev => [...prev, adminNotif].slice(0, 200));
+    }
+  };
+  
   const notify = (text:string) => {
     setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
     setUnread(c => c + 1);
@@ -1462,36 +1503,157 @@ export default function GCSDApp() {
     }));
   }
 
+  // Two-step redemption: Agent PIN → Admin Approval
   function redeemPrize(agentId:string, prizeKey:string){
+    const agent = accounts.find(a => a.id === agentId);
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
     const bal  = balances.get(agentId)||0;
     /** count only ACTIVE redeems towards the limit */
     const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
 
+    if (agent?.frozen) return toast.error("Account is frozen. Contact admin.");
     if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
     if (bal  < prize.price) return toast.error("Insufficient balance");
 
+    // Step 1: Verify agent PIN
     openAgentPin(agentId, (ok)=>{
       if (!ok) return toast.error("Wrong PIN");
-      postTxn({ kind:"debit", amount: prize.price, fromId: agentId, memo:`Redeem: ${prize.label}` });
-      setStock(s=> ({...s, [prizeKey]: left-1}));
-      notify(`🎁 ${getName(agentId)} redeemed ${prize.label} (−${prize.price} GCSD)`);
-      setReceipt({
-        id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
-        when: new Date().toLocaleString(), buyer: getName(agentId), item: prize.label, amount: prize.price
-      });
-      toast.success(`Redeemed ${prize.label}`);
       
-      // Update metrics when prize is redeemed
-      setMetrics(prev => ({
-        ...prev,
-        starOfDay: nowISO(), // Reset star of the day
-        leaderOfMonth: nowISO() // Reset leader of the month
-      }));
+      // Step 2: Create redeem request for admin approval
+      const request: RedeemRequest = {
+        id: uid(),
+        agentId,
+        agentName: getName(agentId),
+        prizeKey,
+        prizeLabel: prize.label,
+        price: prize.price,
+        when: nowISO(),
+        agentPinVerified: true
+      };
+      
+      setRedeemRequests(prev => [...prev, request]);
+      
+      // Create admin notification
+      const adminNotif: AdminNotification = {
+        id: uid(),
+        when: nowISO(),
+        type: "redeem_request",
+        text: `${getName(agentId)} requesting ${prize.label}`,
+        agentName: getName(agentId),
+        amount: prize.price
+      };
+      setAdminNotifs(prev => [...prev, adminNotif]);
+      
+      toast.success("Request sent to admin for approval!");
+      notify(`⏳ ${getName(agentId)} requesting ${prize.label} (${prize.price.toLocaleString()} GCSD)`);
     });
   }
+
+  // Approve redeem request (admin only)
+  function approveRedeem(requestId: string) {
+    const request = redeemRequests.find(r => r.id === requestId);
+    if (!request) return;
+    
+    const agent = accounts.find(a => a.id === request.agentId);
+    if (agent?.frozen) {
+      toast.error("Cannot approve - account is frozen");
+      return;
+    }
+    
+    const bal = balances.get(request.agentId) || 0;
+    if (bal < request.price) {
+      toast.error("Insufficient balance");
+      return;
+    }
+    
+    // Process the redemption
+    postTxn({ kind:"debit", amount: request.price, fromId: request.agentId, memo:`Redeem: ${request.prizeLabel}` });
+    setStock(s=> ({...s, [request.prizeKey]: (s[request.prizeKey] ?? 0) - 1}));
+    notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
+    setReceipt({
+      id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
+      when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price
+    });
+    
+    // Create admin notification
+    const adminNotif: AdminNotification = {
+      id: uid(),
+      when: nowISO(),
+      type: "redeem_approved",
+      text: `Approved: ${request.agentName} → ${request.prizeLabel}`,
+      agentName: request.agentName,
+      amount: request.price
+    };
+    setAdminNotifs(prev => [...prev, adminNotif]);
+    
+    // Remove from requests
+    setRedeemRequests(prev => prev.filter(r => r.id !== requestId));
+    
+    toast.success(`Redemption approved for ${request.agentName}!`);
+    confettiBurst();
+  }
+
+  // Reject redeem request
+  function rejectRedeem(requestId: string) {
+    const request = redeemRequests.find(r => r.id === requestId);
+    if (!request) return;
+    
+    setRedeemRequests(prev => prev.filter(r => r.id !== requestId));
+    toast.success("Request rejected");
+    notify(`❌ Rejected redemption request from ${request.agentName}`);
+  }
+
+  // Freeze agent account
+  function freezeAgent(agentId: string) {
+    setAccounts(prev => prev.map(a => a.id === agentId ? {...a, frozen: true} : a));
+    toast.success(`${getName(agentId)} account frozen`);
+    notify(`❄️ ${getName(agentId)} account frozen by admin`);
+    
+    const adminNotif: AdminNotification = {
+      id: uid(),
+      when: nowISO(),
+      type: "system",
+      text: `Frozen account: ${getName(agentId)}`,
+      agentName: getName(agentId)
+    };
+    setAdminNotifs(prev => [...prev, adminNotif]);
+  }
+
+  // Unfreeze agent account
+  function unfreezeAgent(agentId: string) {
+    setAccounts(prev => prev.map(a => a.id === agentId ? {...a, frozen: false} : a));
+    toast.success(`${getName(agentId)} account unfrozen`);
+    notify(`✓ ${getName(agentId)} account unfrozen by admin`);
+    
+    const adminNotif: AdminNotification = {
+      id: uid(),
+      when: nowISO(),
+      type: "system",
+      text: `Unfrozen account: ${getName(agentId)}`,
+      agentName: getName(agentId)
+    };
+    setAdminNotifs(prev => [...prev, adminNotif]);
+  }
+
+  // Track active users (when they switch to agent portal)
+  useEffect(() => {
+    if (portal === "agent" && currentAgentId) {
+      setActiveUsers(prev => new Set(prev).add(currentAgentId));
+      
+      // Remove from active after 5 minutes of inactivity
+      const timeout = setTimeout(() => {
+        setActiveUsers(prev => {
+          const next = new Set(prev);
+          next.delete(currentAgentId);
+          return next;
+        });
+      }, 5 * 60 * 1000);
+      
+      return () => clearTimeout(timeout);
+    }
+  }, [portal, currentAgentId]);
 
   function undoSale(txId:string){
     const t = txns.find(x=>x.id===txId); 
@@ -2232,6 +2394,10 @@ export default function GCSDApp() {
                 rules={PRODUCT_RULES}
                 pins={pins}
                 epochs={epochs}
+                goals={goals}
+                adminNotifs={adminNotifs}
+                redeemRequests={redeemRequests}
+                activeUsers={activeUsers}
                 onCredit={adminCredit}
                 onManualTransfer={manualTransfer}
                 onUndoSale={undoSale}
@@ -2245,6 +2411,10 @@ export default function GCSDApp() {
                 onDeleteAgent={(id)=>deleteAgent(id)}
                 onCompleteReset={completeReset}
                 onResetMetric={resetMetric}
+                onFreezeAgent={freezeAgent}
+                onUnfreezeAgent={unfreezeAgent}
+                onApproveRedeem={approveRedeem}
+                onRejectRedeem={rejectRedeem}
               />
             </motion.div>
           )}
@@ -2358,77 +2528,6 @@ function Home({
     })
     .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
-  // Star of day & leader of month - highest accumulated credits (minus withdrawals)
-  const { starOfDay, leaderOfMonth } = useMemo(() => {
-    const todayKey = new Date().toLocaleDateString();
-    const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-    const earnedToday: Record<string, number> = {};
-    const earnedMonth: Record<string, number> = {};
-    
-    // Process all transactions - accumulate earnings per agent
-    for (const t of txns) {
-      const d = new Date(t.dateISO);
-      const isToday = d.toLocaleDateString() === todayKey;
-      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const isThisMonth = monthKey === curMonth;
-      
-      // Add credits (earnings) - exclude Mint and redemption reversals
-      if (t.kind === "credit" && t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)) {
-        // Star of the Day - only count credits from today
-        if (afterISO(metrics.starOfDay, t.dateISO) && isToday) {
-          earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
-        }
-        // Leader of the Month - count all credits from this month
-        if (afterISO(metrics.leaderOfMonth, t.dateISO) && isThisMonth) {
-          earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
-        }
-      }
-      
-      // Subtract withdrawals/corrections (admin removing money)
-      if (t.kind === "debit" && t.fromId && nonSystemIds.has(t.fromId) && G_isCorrectionDebit(t)) {
-        if (afterISO(metrics.starOfDay, t.dateISO) && isToday) {
-          earnedToday[t.fromId] = (earnedToday[t.fromId] || 0) - t.amount;
-        }
-        if (afterISO(metrics.leaderOfMonth, t.dateISO) && isThisMonth) {
-          earnedMonth[t.fromId] = (earnedMonth[t.fromId] || 0) - t.amount;
-        }
-      }
-    }
-    
-    // Sort and find top earners with stable sorting
-    const todaySorted = Object.entries(earnedToday)
-      .map(([id, amount]) => ({
-        id,
-        name: accounts.find((a) => a.id === id)?.name || "—",
-        amount
-      }))
-      .filter(entry => entry.amount > 0)
-      .sort((a, b) => {
-        // Primary sort: by amount (descending)
-        if (b.amount !== a.amount) return b.amount - a.amount;
-        // Secondary sort: by name (alphabetical) for stability
-        return a.name.localeCompare(b.name);
-      });
-    
-    const monthSorted = Object.entries(earnedMonth)
-      .map(([id, amount]) => ({
-        id,
-        name: accounts.find((a) => a.id === id)?.name || "—",
-        amount
-      }))
-      .filter(entry => entry.amount > 0)
-      .sort((a, b) => {
-        // Primary sort: by amount (descending)
-        if (b.amount !== a.amount) return b.amount - a.amount;
-        // Secondary sort: by name (alphabetical) for stability
-        return a.name.localeCompare(b.name);
-      });
-    
-    return {
-      starOfDay: todaySorted[0] || null,
-      leaderOfMonth: monthSorted[0] || null
-    };
-  }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
     <div className="space-y-6">
@@ -2460,14 +2559,33 @@ function Home({
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.1 }}
           >
-            <div className="text-lg font-semibold mb-4">📊 Dashboard</div>
-            <div className="grid sm:grid-cols-2 gap-4 mb-6">
-              <TileRow label="Total Active Balance" value={totalActiveBalance} />
-              <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
-              <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
+            <div className="text-lg font-semibold mb-6">📊 Dashboard</div>
+            <div className="grid gap-6">
+              <motion.div 
+                className="rounded-xl border p-4 text-center"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="text-sm opacity-70 mb-2">Total Active Balance</div>
+                <div className="text-4xl font-bold text-emerald-500">
+                  {totalActiveBalance.toLocaleString()}
+                </div>
+                <div className="text-xs opacity-60 mt-1">GCSD</div>
+              </motion.div>
+              
+              <motion.div 
+                className="rounded-xl border p-4 text-center"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+              >
+                <div className="text-sm opacity-70 mb-2">Total GCSD Spent (30d)</div>
+                <div className="text-4xl font-bold text-rose-500">
+                  {totalSpent.toLocaleString()}
+                </div>
+                <div className="text-xs opacity-60 mt-1">GCSD</div>
+              </motion.div>
             </div>
           </motion.div>
 
@@ -2506,23 +2624,18 @@ function Home({
               <motion.div 
                 key={row.id} 
                 className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.2 }}
                 whileHover={{ scale: 1.02, x: 4 }}
               >
                 <div className="flex items-center gap-2">
-                  <motion.span 
-                    className="w-5 text-right"
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ delay: i * 0.05 + 0.1, type: "spring", stiffness: 200 }}
-                  >
+                  <span className="w-5 text-right font-semibold opacity-70">
                     {i + 1}.
-                  </motion.span>
+                  </span>
                   <span className="font-medium">{row.name}</span>
                 </div>
-                <div className="text-sm">
+                <div className="text-sm font-semibold">
                   <NumberFlash value={row.balance} />
                 </div>
               </motion.div>
@@ -2835,6 +2948,10 @@ function AdminPortal({
   rules,
   pins,
   epochs,
+  goals,
+  adminNotifs,
+  redeemRequests,
+  activeUsers,
   onCredit,
   onManualTransfer,
   onUndoSale,
@@ -2848,6 +2965,10 @@ function AdminPortal({
   onDeleteAgent,
   onCompleteReset,
   onResetMetric,
+  onFreezeAgent,
+  onUnfreezeAgent,
+  onApproveRedeem,
+  onRejectRedeem,
 }: {
   theme: Theme;
   isAdmin: boolean;
@@ -2857,6 +2978,10 @@ function AdminPortal({
   rules: ProductRule[];
   pins: Record<string, string>;
   epochs: Record<string, string>;
+  goals: Record<string, number>;
+  adminNotifs: AdminNotification[];
+  redeemRequests: RedeemRequest[];
+  activeUsers: Set<string>;
   onCredit: (agentId: string, ruleKey: string, qty: number) => void;
   onManualTransfer: (agentId: string, amount: number, note: string) => void;
   onUndoSale: (txId: string) => void;
@@ -2870,8 +2995,12 @@ function AdminPortal({
   onDeleteAgent: (agentId: string) => void;
   onCompleteReset: () => void;
   onResetMetric: (k: keyof MetricsEpoch) => void;
+  onFreezeAgent: (agentId: string) => void;
+  onUnfreezeAgent: (agentId: string) => void;
+  onApproveRedeem: (requestId: string) => void;
+  onRejectRedeem: (requestId: string) => void;
 }) {
-  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
+  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests">("dashboard");
   const [agentId, setAgentId] = useState("");
   const [ruleKey, setRuleKey] = useState(rules[0]?.key || "full_evaluation");
   const [qty, setQty] = useState(1);
@@ -2947,6 +3076,9 @@ function AdminPortal({
           ["corrections", "Corrections"],
           ["history", "History"],
           ["users", "Users"],
+          ["notifications", "🔔 Notifications"],
+          ["goals", "🎯 Goals"],
+          ["requests", "⏳ Requests"],
         ].map(([k, lab]) => (
           <motion.button 
             key={k} 
@@ -2966,48 +3098,122 @@ function AdminPortal({
       {/* Dashboard */}
       {adminTab === "dashboard" && (
         <motion.div 
-          className="grid md:grid-cols-3 gap-4"
+          className="grid gap-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
         >
-          <motion.div 
-            className={classNames("rounded-2xl border p-4", neonBox(theme))}
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <div className="text-sm opacity-70 mb-2">Balances</div>
-            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-              {accounts
-                .filter((a) => a.role !== "system")
-                .map((a) => {
-                  const bal = txns.reduce((s, t) => {
-                    if (t.toId === a.id && t.kind === "credit") s += t.amount;
-                    if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
-                    return s;
-                  }, 0);
-                  return (
-                    <motion.div 
-                      key={a.id} 
-                      className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      whileHover={{ scale: 1.01, x: 2 }}
-                    >
-                      <div className="font-medium">{a.name}</div>
-                      <div className="text-sm font-semibold">{bal.toLocaleString()} GCSD</div>
-                    </motion.div>
-                  );
-                })}
-            </div>
-          </motion.div>
-          <motion.div 
-            className={classNames("rounded-2xl border p-4", neonBox(theme))}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-          >
+          {/* Real-Time Stats */}
+          <div className="grid md:grid-cols-4 gap-4">
+            <motion.div 
+              className={classNames("rounded-xl border p-4 text-center", neonBox(theme))}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="text-3xl font-bold text-emerald-500">{activeUsers.size}</div>
+              <div className="text-xs opacity-70 mt-1">Active Users</div>
+            </motion.div>
+            
+            <motion.div 
+              className={classNames("rounded-xl border p-4 text-center", neonBox(theme))}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+            >
+              <div className="text-3xl font-bold text-blue-500">{redeemRequests.length}</div>
+              <div className="text-xs opacity-70 mt-1">Pending Requests</div>
+            </motion.div>
+            
+            <motion.div 
+              className={classNames("rounded-xl border p-4 text-center", neonBox(theme))}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <div className="text-3xl font-bold text-orange-500">{accounts.filter(a => a.frozen).length}</div>
+              <div className="text-xs opacity-70 mt-1">Frozen Accounts</div>
+            </motion.div>
+            
+            <motion.div 
+              className={classNames("rounded-xl border p-4 text-center", neonBox(theme))}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+            >
+              <div className="text-3xl font-bold text-purple-500">{txns.filter(t => {
+                const today = new Date();
+                const txDate = new Date(t.dateISO);
+                return txDate.toDateString() === today.toDateString();
+              }).length}</div>
+              <div className="text-xs opacity-70 mt-1">Transactions Today</div>
+            </motion.div>
+          </div>
+
+          {/* Agent Balances with Freeze Controls */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <motion.div 
+              className={classNames("rounded-2xl border p-4", neonBox(theme))}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <div className="text-sm opacity-70 mb-2">Agent Status & Balances</div>
+              <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+                {accounts
+                  .filter((a) => a.role !== "system")
+                  .map((a) => {
+                    const bal = txns.reduce((s, t) => {
+                      if (t.toId === a.id && t.kind === "credit") s += t.amount;
+                      if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
+                      return s;
+                    }, 0);
+                    return (
+                      <motion.div 
+                        key={a.id} 
+                        className={classNames(
+                          "border rounded-xl px-3 py-2",
+                          a.frozen ? "bg-red-500/10 border-red-500/30" : neonBox(theme)
+                        )}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        whileHover={{ scale: 1.01, x: 2 }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            {a.frozen && <span className="text-xs px-1.5 py-0.5 rounded bg-red-500 text-white">🔒 FROZEN</span>}
+                            <div className="font-medium">{a.name}</div>
+                          </div>
+                          <div className="text-sm font-semibold">{bal.toLocaleString()} GCSD</div>
+                        </div>
+                        <div className="flex gap-1 mt-2">
+                          {a.frozen ? (
+                            <button
+                              className="text-xs px-2 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600"
+                              onClick={() => onUnfreezeAgent(a.id)}
+                            >
+                              ✓ Unfreeze
+                            </button>
+                          ) : (
+                            <button
+                              className="text-xs px-2 py-1 rounded bg-orange-500 text-white hover:bg-orange-600"
+                              onClick={() => onFreezeAgent(a.id)}
+                            >
+                              ❄️ Freeze
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+              </div>
+            </motion.div>
+            
+            <motion.div 
+              className={classNames("rounded-2xl border p-4", neonBox(theme))}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+            >
             <div className="text-sm opacity-70 mb-2">Prize Stock</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {PRIZE_ITEMS.map((p, i) => (
@@ -3068,6 +3274,7 @@ function AdminPortal({
               </motion.button>
             </div>
           </motion.div>
+          </div>
         </motion.div>
       )}
 
@@ -3573,6 +3780,202 @@ function AdminPortal({
           </motion.div>
         </motion.div>
       )}
+
+      {/* Notifications Tab */}
+      {adminTab === "notifications" && (
+        <motion.div
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Admin Notifications</h3>
+            <div className="text-sm opacity-70">{adminNotifs.length} total</div>
+          </div>
+          
+          <div className="space-y-2 max-h-[600px] overflow-auto pr-2">
+            {adminNotifs.slice(0, 50).reverse().map((notif, i) => (
+              <motion.div
+                key={notif.id}
+                className={classNames(
+                  "p-3 rounded-xl border",
+                  notif.type === "redeem_request" ? "bg-yellow-500/10 border-yellow-500/30" :
+                  notif.type === "credit" ? "bg-emerald-500/10 border-emerald-500/30" :
+                  notif.type === "debit" ? "bg-rose-500/10 border-rose-500/30" :
+                  "bg-blue-500/10 border-blue-500/30"
+                )}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.02 }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">{notif.text}</div>
+                    <div className="text-xs opacity-70 mt-1">{new Date(notif.when).toLocaleString()}</div>
+                  </div>
+                  {notif.amount && (
+                    <div className={classNames("text-sm font-bold", notif.type === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                      {notif.type === "credit" ? "+" : "-"}{notif.amount.toLocaleString()} GCSD
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+            {adminNotifs.length === 0 && (
+              <div className="text-center py-8 opacity-70">No notifications yet</div>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Goals Dashboard Tab */}
+      {adminTab === "goals" && (
+        <motion.div
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <h3 className="text-lg font-semibold mb-4">Agent Goals Dashboard</h3>
+          
+          <div className="space-y-3">
+            {accounts
+              .filter(a => a.role === "agent")
+              .map((agent, i) => {
+                const balance = txns.reduce((s, t) => {
+                  if (t.toId === agent.id && t.kind === "credit") s += t.amount;
+                  if (t.fromId === agent.id && t.kind === "debit") s -= t.amount;
+                  return s;
+                }, 0);
+                const goal = goals[agent.id] || 0;
+                const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
+                
+                return (
+                  <motion.div
+                    key={agent.id}
+                    className="glass-card rounded-xl p-4"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={agent.name} size="sm" theme={theme} />
+                        <div className="font-medium">{agent.name}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
+                        {goal > 0 && <div className="text-xs opacity-60">Goal: {goal.toLocaleString()} GCSD</div>}
+                      </div>
+                    </div>
+                    
+                    {goal > 0 ? (
+                      <>
+                        <div className="h-3 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden mb-2">
+                          <div
+                            className={classNames(
+                              "h-3 rounded-full transition-all",
+                              progress >= 100 ? "bg-emerald-500" : progress >= 75 ? "bg-yellow-500" : "bg-blue-500"
+                            )}
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={progress >= 100 ? "text-emerald-500 font-medium" : "opacity-70"}>
+                            {progress >= 100 ? "✓ Goal Achieved!" : `${progress}% Complete`}
+                          </span>
+                          {progress < 100 && (
+                            <span className="opacity-60">
+                              {Math.ceil((goal - balance) / 500)} Full Evals needed
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm opacity-60 text-center py-2">No goal set</div>
+                    )}
+                  </motion.div>
+                );
+              })}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Redeem Requests Tab */}
+      {adminTab === "requests" && (
+        <motion.div
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Pending Redeem Requests</h3>
+            <div className={classNames(
+              "text-sm font-medium px-3 py-1 rounded-lg",
+              redeemRequests.length > 0 ? "bg-yellow-500/20 text-yellow-500" : "bg-gray-500/20"
+            )}>
+              {redeemRequests.length} pending
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            {redeemRequests.map((req, i) => (
+              <motion.div
+                key={req.id}
+                className="glass-card rounded-xl p-4"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Avatar name={req.agentName} size="sm" theme={theme} />
+                    <div>
+                      <div className="font-semibold">{req.agentName}</div>
+                      <div className="text-xs opacity-70">{new Date(req.when).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div className="text-xs px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-500">
+                    ✓ PIN Verified
+                  </div>
+                </div>
+                
+                <div className="mb-3">
+                  <div className="text-lg font-semibold">{req.prizeLabel}</div>
+                  <div className="text-sm opacity-70">{req.price.toLocaleString()} GCSD</div>
+                </div>
+                
+                <div className="flex gap-2">
+                  <motion.button
+                    className={classNames("flex-1 px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700")}
+                    onClick={() => onApproveRedeem(req.id)}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    ✓ Approve & Complete
+                  </motion.button>
+                  <motion.button
+                    className={classNames("flex-1 px-4 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700")}
+                    onClick={() => onRejectRedeem(req.id)}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    ✗ Reject
+                  </motion.button>
+                </div>
+              </motion.div>
+            ))}
+            {redeemRequests.length === 0 && (
+              <div className="text-center py-12 opacity-70">
+                <div className="text-4xl mb-2">✅</div>
+                <div className="text-sm">No pending requests</div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
     </div>
   );
   } catch (error) {
@@ -3606,32 +4009,30 @@ function Picker({
   return (
     <motion.div 
       className="fixed inset-0 z-40 glass grid place-items-center"
-      style={{ backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}
+      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.15 }}
     >
       <motion.div 
         className={classNames("glass-card rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        transition={{ duration: 0.3 }}
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
       >
         <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" />
             <h2 className="text-lg sm:text-xl font-semibold">Switch User</h2>
           </div>
-          <motion.button 
-            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" 
+          <button 
+            className={classNames("p-2 rounded-lg glass-btn")}
             onClick={onClose}
-            whileHover={{ scale: 1.1, rotate: 90 }}
-            whileTap={{ scale: 0.9 }}
           >
             <X className="w-4 h-4" />
-          </motion.button>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-1 sm:pr-2">
@@ -3644,8 +4045,8 @@ function Picker({
 
           {accounts
             .filter((a) => a.role !== "system")
-            .map((a, i) => (
-              <HoverCard key={a.id} theme={theme} delay={0.03 + i * 0.02} onClick={() => onChooseAgent(a.id)}>
+            .map((a) => (
+              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)}>
                 <div className="flex items-center gap-2 mb-1">
                   <Avatar name={a.name} size="sm" theme={theme} />
                   <div className="font-medium flex-1 truncate">{a.name}</div>
