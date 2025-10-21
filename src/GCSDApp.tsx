@@ -41,7 +41,7 @@ const MAX_PRIZES_PER_AGENT = 2;
 const AGENT_NAMES = [
   "Oliver Steele", "Maya Graves", "Viktor Parks", "Ben Mills", "Stan Harris", "Michael Wilson",
   "Hope Marshall", "Sofie Roy", "Logan Noir", "Justin Frey", "Rebecca Brooks", "Christopher O'Connor",
-  "Caitlyn Stone", "Frank Collins", "Antonio", "Kevin Nolan", "Daniel Hill"
+  "Caitlyn Stone", "Frank Collins", "Antonio Cortes", "Kevin Nolan", "Daniel Hill"
 ];
 
 // Updated product rules (these are “earn” credits)
@@ -1785,7 +1785,7 @@ function Home({
     })
     .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
-  // Simple "star of day" & "leader of month" (apply metric epochs) - memoized for stability
+  // Star of day & leader of month - highest accumulated credits (minus withdrawals)
   const { starOfDay, leaderOfMonth } = useMemo(() => {
     console.log("Recalculating star of day and leader of month");
     console.log("Current metrics:", metrics);
@@ -1797,35 +1797,54 @@ function Home({
     const earnedToday: Record<string, number> = {};
     const earnedMonth: Record<string, number> = {};
     
+    // Process all transactions
     for (const t of txns) {
-      if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
       const d = new Date(t.dateISO);
+      const isToday = d.toLocaleDateString() === todayKey;
+      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const isThisMonth = monthKey === curMonth;
       
-      // Debug: Log transactions being counted
-      if (t.toId && nonSystemIds.has(t.toId)) {
-        console.log(`Transaction for ${t.toId}:`, t.memo, t.amount, t.dateISO);
+      // Add credits (earnings) - exclude Mint and redemption reversals
+      if (t.kind === "credit" && t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)) {
+        if (afterISO(metrics.starOfDay, t.dateISO) && isToday) {
+          earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+          console.log(`[Today] Added credit for ${t.toId}: +${t.amount} (total: ${earnedToday[t.toId]})`);
+        }
+        if (afterISO(metrics.leaderOfMonth, t.dateISO) && isThisMonth) {
+          earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+          console.log(`[Month] Added credit for ${t.toId}: +${t.amount} (total: ${earnedMonth[t.toId]})`);
+        }
       }
       
-      if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
-        earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
-        console.log(`Added to today's earnings for ${t.toId}: ${t.amount} (total: ${earnedToday[t.toId]})`);
-      }
-      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
-        earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
-        console.log(`Added to month's earnings for ${t.toId}: ${t.amount} (total: ${earnedMonth[t.toId]})`);
+      // Subtract withdrawals/corrections (admin removing money)
+      if (t.kind === "debit" && t.fromId && nonSystemIds.has(t.fromId) && G_isCorrectionDebit(t)) {
+        if (afterISO(metrics.starOfDay, t.dateISO) && isToday) {
+          earnedToday[t.fromId] = (earnedToday[t.fromId] || 0) - t.amount;
+          console.log(`[Today] Subtracted withdrawal for ${t.fromId}: -${t.amount} (total: ${earnedToday[t.fromId]})`);
+        }
+        if (afterISO(metrics.leaderOfMonth, t.dateISO) && isThisMonth) {
+          earnedMonth[t.fromId] = (earnedMonth[t.fromId] || 0) - t.amount;
+          console.log(`[Month] Subtracted withdrawal for ${t.fromId}: -${t.amount} (total: ${earnedMonth[t.fromId]})`);
+        }
       }
     }
     
-    console.log("earnedToday:", earnedToday);
-    console.log("earnedMonth:", earnedMonth);
+    console.log("earnedToday (after withdrawals):", earnedToday);
+    console.log("earnedMonth (after withdrawals):", earnedMonth);
     
-    const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
-    const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
+    // Find the person with the HIGHEST accumulated credits
+    const starId = Object.entries(earnedToday)
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
+    const leaderId = Object.entries(earnedMonth)
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
     
     const result = {
-      starOfDay: starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null,
-      leaderOfMonth: leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null
+      starOfDay: starId && earnedToday[starId] > 0 
+        ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } 
+        : null,
+      leaderOfMonth: leaderId && earnedMonth[leaderId] > 0
+        ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } 
+        : null
     };
     
     console.log("Result:", result);
