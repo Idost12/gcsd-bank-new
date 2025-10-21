@@ -77,9 +77,9 @@ const PRIZE_ITEMS: PrizeItem[] = [
   { key: "flight_madrid",  label: "Madrid Flights",         price: 11350 },
   { key: "flight_london",  label: "London Flights",         price: 11350 },
   { key: "flight_milan",   label: "Milan Flights",          price: 11350 },
-  { key: "meme_generator", label: "Custom Meme Generator",  price: 100   },
+  { key: "meme_generator", label: "Custom Meme Generator",  price: 35    },
   { key: "vip_entrance",   label: "VIP Entrance (Applause)", price: 400  },
-  { key: "office_dj",      label: "Office DJ (2 Hours)",    price: 700   },
+  { key: "office_dj",      label: "Office DJ (2 Hours)",    price: 200   },
   { key: "shorts_day",     label: "Shorts Privilege (1 Day)", price: 1000  },
 ];
 
@@ -777,21 +777,21 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
             {/* Avatar with Medal Badge */}
             <div className="relative mb-2">
               <Avatar name={agent.name} size={position === 1 ? "lg" : "md"} theme={theme} />
-              <motion.div 
+            <motion.div 
                 className="absolute -top-1 -right-1 text-2xl"
-                animate={position === 1 ? { 
-                  rotate: [0, -10, 10, -10, 0],
-                  scale: [1, 1.1, 1]
-                } : {}}
-                transition={{ 
-                  duration: 2, 
-                  repeat: Infinity, 
-                  repeatDelay: 3,
-                  ease: "easeInOut"
-                }}
-              >
-                {medal}
-              </motion.div>
+              animate={position === 1 ? { 
+                rotate: [0, -10, 10, -10, 0],
+                scale: [1, 1.1, 1]
+              } : {}}
+              transition={{ 
+                duration: 2, 
+                repeat: Infinity, 
+                repeatDelay: 3,
+                ease: "easeInOut"
+              }}
+            >
+              {medal}
+            </motion.div>
             </div>
             
             {/* Agent Info */}
@@ -1104,7 +1104,8 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
 function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentName: string; onClose: () => void; theme: Theme }) {
   const [topText, setTopText] = useState("");
   const [bottomText, setBottomText] = useState("");
-  const [memeTemplate, setMemeTemplate] = useState("success");
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   
   const templates = [
     { key: "success", label: "Success Kid", emoji: "😎" },
@@ -1114,8 +1115,94 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
     { key: "celebration", label: "Celebration", emoji: "🎉" }
   ];
 
-  const downloadMeme = () => {
-    toast.success(`Meme saved! "${topText || 'Top Text'}" / "${bottomText || 'Bottom Text'}"`);
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        toast.error("Image too large! Please choose an image under 5MB.");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setUploadedImage(e.target?.result as string);
+        setImageFile(file);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const downloadMemeAsJPEG = () => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size
+    canvas.width = 600;
+    canvas.height = 600;
+
+    // Create gradient background
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#8B5CF6');
+    gradient.addColorStop(1, '#EC4899');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // If custom image uploaded, draw it
+    if (uploadedImage) {
+      const img = new Image();
+      img.onload = () => {
+        // Draw image to fill canvas
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Add semi-transparent overlay for text readability
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Add text
+        addTextToCanvas(ctx, canvas);
+        
+        // Download
+        downloadCanvas(canvas);
+      };
+      img.src = uploadedImage;
+    } else {
+      // No custom image, just add text to gradient background
+      addTextToCanvas(ctx, canvas);
+      downloadCanvas(canvas);
+    }
+  };
+
+  const addTextToCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+    // Configure text style
+    ctx.fillStyle = 'white';
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 4;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Top text
+    if (topText) {
+      ctx.font = 'bold 48px Arial';
+      ctx.strokeText(topText.toUpperCase(), canvas.width / 2, 100);
+      ctx.fillText(topText.toUpperCase(), canvas.width / 2, 100);
+    }
+
+    // Bottom text
+    if (bottomText) {
+      ctx.font = 'bold 48px Arial';
+      ctx.strokeText(bottomText.toUpperCase(), canvas.width / 2, canvas.height - 100);
+      ctx.fillText(bottomText.toUpperCase(), canvas.width / 2, canvas.height - 100);
+    }
+  };
+
+  const downloadCanvas = (canvas: HTMLCanvasElement) => {
+    const link = document.createElement('a');
+    link.download = `meme-${agentName}-${Date.now()}.jpg`;
+    link.href = canvas.toDataURL('image/jpeg', 0.9);
+    link.click();
+    
+    toast.success(`🎉 Meme downloaded! "${topText || 'Top Text'}" / "${bottomText || 'Bottom Text'}"`);
     onClose();
   };
 
@@ -1147,35 +1234,65 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
             Congrats {agentName}! Create your custom meme! 🎉
           </div>
 
-          {/* Meme Preview */}
-          <div className="relative bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl aspect-square mb-4 flex flex-col justify-between p-6 text-white font-bold text-center shadow-xl">
-            <div className="text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
-              {topText || "TOP TEXT"}
-            </div>
-            <div className="text-6xl">
-              {templates.find(t => t.key === memeTemplate)?.emoji || "😎"}
-            </div>
-            <div className="text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
-              {bottomText || "BOTTOM TEXT"}
+          {/* Image Upload */}
+          <div className="mb-4">
+            <label className="text-sm font-semibold mb-2 block">Upload Image (Optional):</label>
+            <div className="relative">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+                id="image-upload"
+              />
+              <label
+                htmlFor="image-upload"
+                className={classNames(
+                  "block w-full px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all hover:scale-105",
+                  uploadedImage ? "border-emerald-500 bg-emerald-500/10" : "border-gray-400 hover:border-purple-500"
+                )}
+              >
+                <div className="text-center">
+                  {uploadedImage ? (
+                    <div>
+                      <div className="text-emerald-500 font-semibold">✅ Image Uploaded!</div>
+                      <div className="text-xs opacity-70 mt-1">Click to change image</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="text-2xl mb-2">📸</div>
+                      <div className="font-semibold">Click to upload image</div>
+                      <div className="text-xs opacity-70 mt-1">Max 5MB • JPG, PNG, GIF</div>
+                    </div>
+                  )}
+                </div>
+              </label>
             </div>
           </div>
 
-          {/* Template Selector */}
-          <div className="mb-4">
-            <label className="text-sm font-semibold mb-2 block">Choose Template:</label>
-            <div className="flex flex-wrap gap-2">
-              {templates.map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => setMemeTemplate(t.key)}
-                  className={classNames(
-                    "px-3 py-2 rounded-xl transition-all",
-                    memeTemplate === t.key ? neonBtn(theme, true) : "glass-btn opacity-60 hover:opacity-100"
-                  )}
-                >
-                  {t.emoji} {t.label}
-                </button>
-              ))}
+          {/* Meme Preview */}
+          <div className="relative rounded-xl aspect-square mb-4 flex flex-col justify-between p-6 text-white font-bold text-center shadow-xl overflow-hidden">
+            {uploadedImage ? (
+              <div className="absolute inset-0">
+                <img 
+                  src={uploadedImage} 
+                  alt="Uploaded" 
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black bg-opacity-30"></div>
+              </div>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-purple-500 to-pink-500"></div>
+            )}
+            
+            <div className="relative z-10 text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
+              {topText || "TOP TEXT"}
+            </div>
+            <div className="relative z-10 text-6xl">
+              {uploadedImage ? "🎨" : (templates.find(t => t.key === "success")?.emoji || "😎")}
+            </div>
+            <div className="relative z-10 text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
+              {bottomText || "BOTTOM TEXT"}
             </div>
           </div>
 
@@ -1209,11 +1326,11 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
           <div className="flex gap-3">
             <motion.button
               className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
-              onClick={downloadMeme}
+              onClick={downloadMemeAsJPEG}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              📥 Save Meme
+              📥 Download as JPEG
             </motion.button>
             <motion.button
               className="px-4 py-3 rounded-xl opacity-60 hover:opacity-100"
@@ -1706,8 +1823,12 @@ export default function GCSDApp() {
     /** count only ACTIVE redeems towards the limit */
     const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
 
+    // Special prizes that bypass the 2-prize limit
+    const unlimitedPrizes = ["meme_generator", "office_dj"];
+    const isUnlimitedPrize = unlimitedPrizes.includes(prizeKey);
+
     if (agent?.frozen) return toast.error("Account is frozen. Contact admin.");
-    if (count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
+    if (!isUnlimitedPrize && count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
     if (bal  < prize.price) return toast.error("Insufficient balance");
 
@@ -1766,8 +1887,8 @@ export default function GCSDApp() {
     postTxn({ kind:"debit", amount: request.price, fromId: request.agentId, memo:`Redeem: ${request.prizeLabel}` });
     setStock(s=> ({...s, [request.prizeKey]: (s[request.prizeKey] ?? 0) - 1}));
     notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
-    setReceipt({
-      id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
+      setReceipt({
+        id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
       when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price
     });
     
@@ -2153,6 +2274,66 @@ export default function GCSDApp() {
   }
 
 
+  // Backup all live data
+  async function backupAllData(){
+    console.log("backupAllData called");
+    
+    // First verify admin PIN
+    const adminPin = prompt("Enter admin PIN to proceed:");
+    if (adminPin !== "13577531") {
+      return toast.error("Invalid admin PIN");
+    }
+    
+    try {
+      // Create comprehensive backup object
+      const backupData = {
+        timestamp: nowISO(),
+        version: "v4",
+        accounts: accounts,
+        transactions: txns,
+        stock: stock,
+        pins: pins,
+        goals: goals,
+        notifications: notifs,
+        adminNotifications: adminNotifs,
+        redeemRequests: redeemRequests,
+        auditLogs: auditLogs,
+        wishlist: wishlist,
+        epochs: epochs,
+        metrics: metrics,
+        activeUsers: Array.from(activeUsers), // Convert Set to Array for JSON
+      };
+      
+      // Convert to JSON string
+      const backupJson = JSON.stringify(backupData, null, 2);
+      
+      // Create filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const filename = `gcsd-backup-${timestamp}.json`;
+      
+      // Create and download file
+      const blob = new Blob([backupJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      // Log the backup
+      logAudit("Data Backup", `Complete system backup created: ${filename}`);
+      
+      toast.success(`✅ Backup saved as ${filename}`);
+      console.log("Backup completed:", backupData);
+      
+    } catch (error) {
+      console.error("Backup failed:", error);
+      toast.error("❌ Backup failed - check console for details");
+    }
+  }
+
   /** Admin metric resets */
   async function resetMetric(kind: keyof MetricsEpoch){
     console.log("resetMetric called with:", kind);
@@ -2195,10 +2376,10 @@ export default function GCSDApp() {
           >
             <div className="text-center w-full max-w-md">
               {/* Logo */}
-              <motion.div 
+            <motion.div 
                 className="mx-auto mb-6 w-36 h-36 sm:w-40 sm:h-40 rounded-3xl glass-card grid place-items-center"
                 initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
+              animate={{ scale: 1, opacity: 1 }}
                 transition={{ 
                   type: "spring",
                   stiffness: 180,
@@ -2217,7 +2398,7 @@ export default function GCSDApp() {
               </motion.div>
 
               {/* Title */}
-              <motion.div
+              <motion.div 
                 className="text-white text-2xl sm:text-3xl font-bold mb-3"
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
@@ -2257,7 +2438,7 @@ export default function GCSDApp() {
                 transition={{ delay: 1.7, duration: 0.4 }}
               >
                 Press Enter to continue
-              </motion.div>
+            </motion.div>
             </div>
           </motion.div>
         )}
@@ -2649,6 +2830,7 @@ export default function GCSDApp() {
                 onResetBalance={(id)=>resetAgentBalance(id)}
                 onDeleteAgent={(id)=>deleteAgent(id)}
                 onCompleteReset={completeReset}
+                onBackupData={backupAllData}
                 onResetMetric={resetMetric}
                 onFreezeAgent={freezeAgent}
                 onUnfreezeAgent={unfreezeAgent}
@@ -2809,7 +2991,7 @@ function Home({
                 <div className="text-sm opacity-70 mb-2">Total Active Balance</div>
                 <div className="text-4xl font-bold text-emerald-500">
                   {totalActiveBalance.toLocaleString()}
-                </div>
+            </div>
                 <div className="text-xs opacity-60 mt-1">GCSD</div>
               </motion.div>
               
@@ -2862,29 +3044,29 @@ function Home({
             {leaderboard.map((row, i) => {
               const badge = getBadge(i + 1, row.balance);
               return (
-                <motion.div 
-                  key={row.id} 
-                  className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
+              <motion.div 
+                key={row.id} 
+                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.2 }}
-                  whileHover={{ scale: 1.02, x: 4 }}
-                >
-                  <div className="flex items-center gap-2">
+                whileHover={{ scale: 1.02, x: 4 }}
+              >
+                <div className="flex items-center gap-2">
                     <span className="w-5 text-right font-semibold opacity-70">
-                      {i + 1}.
+                    {i + 1}.
                     </span>
-                    <span className="font-medium">{row.name}</span>
+                  <span className="font-medium">{row.name}</span>
                     {badge && (
                       <span className={classNames("text-xs px-1.5 py-0.5 rounded", badge.color, "bg-black/5 dark:bg-white/5")}>
                         {badge.emoji} {badge.title}
                       </span>
                     )}
-                  </div>
+                </div>
                   <div className="text-sm font-semibold">
-                    <NumberFlash value={row.balance} />
-                  </div>
-                </motion.div>
+                  <NumberFlash value={row.balance} />
+                </div>
+              </motion.div>
               );
             })}
             {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
@@ -3145,7 +3327,10 @@ function AgentPortal({
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
             {prizes.map((p, i) => {
               const left = stock[p.key] ?? 0;
-              const can = left > 0 && balance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
+              // Special prizes that bypass the 2-prize limit
+              const unlimitedPrizes = ["meme_generator", "office_dj"];
+              const isUnlimitedPrize = unlimitedPrizes.includes(p.key);
+              const can = left > 0 && balance >= p.price && (isUnlimitedPrize || prizeCount < MAX_PRIZES_PER_AGENT);
               return (
                 <motion.div 
                   key={p.key} 
@@ -3157,7 +3342,12 @@ function AgentPortal({
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <div className="font-medium">{p.label}</div>
+                    <div className="font-medium">{p.label}</div>
+                      {isUnlimitedPrize && (
+                        <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
+                          ∞ UNLIMITED
+                        </span>
+                      )}
                       <motion.button
                         className="text-xl"
                         onClick={(e) => {
@@ -3236,6 +3426,7 @@ function AdminPortal({
   onResetBalance,
   onDeleteAgent,
   onCompleteReset,
+  onBackupData,
   onResetMetric,
   onFreezeAgent,
   onUnfreezeAgent,
@@ -3269,6 +3460,7 @@ function AdminPortal({
   onResetBalance: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onCompleteReset: () => void;
+  onBackupData: () => void;
   onResetMetric: (k: keyof MetricsEpoch) => void;
   onFreezeAgent: (agentId: string) => void;
   onUnfreezeAgent: (agentId: string) => void;
@@ -3428,39 +3620,39 @@ function AdminPortal({
 
           {/* Agent Balances with Freeze Controls */}
           <div className="grid md:grid-cols-3 gap-4">
-            <motion.div 
-              className={classNames("rounded-2xl border p-4", neonBox(theme))}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.1 }}
-            >
+          <motion.div 
+            className={classNames("rounded-2xl border p-4", neonBox(theme))}
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+          >
               <div className="text-sm opacity-70 mb-2">Agent Status & Balances</div>
-              <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
-                {accounts
-                  .filter((a) => a.role !== "system")
-                  .map((a) => {
-                    const bal = txns.reduce((s, t) => {
-                      if (t.toId === a.id && t.kind === "credit") s += t.amount;
-                      if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
-                      return s;
-                    }, 0);
-                    return (
-                      <motion.div 
-                        key={a.id} 
+            <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
+              {accounts
+                .filter((a) => a.role !== "system")
+                .map((a) => {
+                  const bal = txns.reduce((s, t) => {
+                    if (t.toId === a.id && t.kind === "credit") s += t.amount;
+                    if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
+                    return s;
+                  }, 0);
+                  return (
+                    <motion.div 
+                      key={a.id} 
                         className={classNames(
                           "border rounded-xl px-3 py-2",
                           a.frozen ? "bg-red-500/10 border-red-500/30" : neonBox(theme)
                         )}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        whileHover={{ scale: 1.01, x: 2 }}
-                      >
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      whileHover={{ scale: 1.01, x: 2 }}
+                    >
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
                             {a.frozen && <span className="text-xs px-1.5 py-0.5 rounded bg-red-500 text-white">🔒 FROZEN</span>}
-                            <div className="font-medium">{a.name}</div>
+                      <div className="font-medium">{a.name}</div>
                           </div>
-                          <div className="text-sm font-semibold">{bal.toLocaleString()} GCSD</div>
+                      <div className="text-sm font-semibold">{bal.toLocaleString()} GCSD</div>
                         </div>
                         <div className="flex gap-1 mt-2">
                           {a.frozen ? (
@@ -3479,18 +3671,18 @@ function AdminPortal({
                             </button>
                           )}
                         </div>
-                      </motion.div>
-                    );
-                  })}
-              </div>
-            </motion.div>
+                    </motion.div>
+                  );
+                })}
+            </div>
+          </motion.div>
             
-            <motion.div 
-              className={classNames("rounded-2xl border p-4", neonBox(theme))}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-            >
+          <motion.div 
+            className={classNames("rounded-2xl border p-4", neonBox(theme))}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+          >
             <div className="text-sm opacity-70 mb-2">Prize Stock</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {PRIZE_ITEMS.map((p, i) => (
@@ -4324,6 +4516,25 @@ function AdminPortal({
           transition={{ duration: 0.3 }}
         >
           <h3 className="text-lg font-semibold mb-4">📥 Export Data</h3>
+          
+          {/* Complete System Backup */}
+          <motion.div 
+            className="glass-card rounded-xl p-4 mb-6 border-2 border-emerald-500/50 bg-emerald-500/5"
+            whileHover={{ scale: 1.02 }}
+          >
+            <h4 className="font-semibold mb-2 text-emerald-500">💾 Complete System Backup</h4>
+            <p className="text-sm opacity-70 mb-3">Download ALL data: accounts, transactions, pins, goals, notifications, audit logs, and more</p>
+            <motion.button
+              className="w-full px-4 py-3 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 font-semibold"
+              onClick={onBackupData}
+              whileTap={{ scale: 0.95 }}
+            >
+              💾 Download Complete Backup
+            </motion.button>
+            <div className="text-xs opacity-60 mt-2 text-center">
+              This creates a JSON file with everything - use for disaster recovery
+            </div>
+          </motion.div>
           
           <div className="grid md:grid-cols-2 gap-4">
             <motion.div 
