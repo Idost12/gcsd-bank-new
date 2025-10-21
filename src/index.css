@@ -33,25 +33,31 @@ body::before {
   right: 0;
   bottom: 0;
   background: 
-    radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.3), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.3), transparent 50%),
-    radial-gradient(circle at 40% 90%, rgba(59, 130, 246, 0.3), transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.1), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.1), transparent 50%),
+    radial-gradient(circle at 40% 90%, rgba(59, 130, 246, 0.1), transparent 50%);
   background-size: 200% 200%;
   animation: gradientShift 15s ease infinite;
   pointer-events: none;
-  z-index: -1;
+  z-index: -2;
 }
 
 .dark body::before {
   background: 
-    radial-gradient(circle at 20% 50%, rgba(51, 65, 85, 0.4), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(71, 85, 105, 0.4), transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(51, 65, 85, 0.2), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(71, 85, 105, 0.2), transparent 50%);
 }
 
 .neon-theme::before {
   background: 
-    radial-gradient(circle at 20% 50%, rgba(249, 115, 22, 0.15), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(234, 88, 12, 0.15), transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(249, 115, 22, 0.08), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(234, 88, 12, 0.08), transparent 50%);
+}
+
+/* Ensure main content is above background */
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 /* small helpers */
