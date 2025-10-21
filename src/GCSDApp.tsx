@@ -308,8 +308,8 @@ function classNames(...x: (string | false | undefined | null)[]) {
 /** Neon-aware containers/buttons/inputs */
 const neonBox = (theme: Theme) =>
   theme === "neon"
-    ? "bg-[#1a1a1a]/80 backdrop-blur-xl border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
-    : "bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl dark:text-slate-100 border border-slate-200/50 dark:border-slate-700/50 shadow-xl";
+    ? "bg-[#1a1a1a] border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
+    : "bg-white dark:bg-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 shadow-lg";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
@@ -512,10 +512,10 @@ function TransactionFeed({ txns, accounts, theme }: { txns: Transaction[]; accou
           <motion.div
             key={txn.id}
             className={classNames(
-              "relative overflow-hidden rounded-xl p-4 backdrop-blur-md border",
+              "relative overflow-hidden rounded-xl p-4 border",
               theme === "neon"
-                ? "bg-orange-500/5 border-orange-800/30 hover:bg-orange-500/10"
-                : "bg-white/40 dark:bg-slate-800/40 border-slate-200/50 dark:border-slate-700/50 hover:bg-white/60 dark:hover:bg-slate-800/60"
+                ? "bg-[#1a1a1a] border-orange-800 hover:bg-[#2a2a2a]"
+                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700"
             )}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
