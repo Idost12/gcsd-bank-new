@@ -967,19 +967,19 @@ export default function GCSDApp() {
     };
   }, [theme]);
 
-  /* iOS-style scroll edge indicators and glass shimmer effects */
+  /* iOS-style scroll edge indicators */
   useEffect(() => {
     let lastScrollY = window.scrollY;
     let ticking = false;
 
-    const updateScrollEffects = () => {
+    const updateScrollEdges = () => {
       const scrollY = window.scrollY;
       const scrollHeight = document.documentElement.scrollHeight;
       const clientHeight = document.documentElement.clientHeight;
       const atTop = scrollY <= 10;
       const atBottom = scrollY + clientHeight >= scrollHeight - 10;
 
-      // Update edge indicator classes
+      // Update classes
       if (atTop) {
         document.body.classList.add('at-top');
         document.body.classList.remove('scrolling-up');
@@ -1004,25 +1004,19 @@ export default function GCSDApp() {
         }
       }
 
-      // Update glass shimmer effect based on scroll position
-      // Creates a wave effect that moves with scroll
-      const scrollPercent = (scrollY / (scrollHeight - clientHeight)) * 100;
-      const shimmerValue = (scrollPercent % 100) - 50; // Oscillates between -50% and 50%
-      document.documentElement.style.setProperty('--scroll-shimmer', `${shimmerValue}%`);
-
       lastScrollY = scrollY;
       ticking = false;
     };
 
     const onScroll = () => {
       if (!ticking) {
-        window.requestAnimationFrame(updateScrollEffects);
+        window.requestAnimationFrame(updateScrollEdges);
         ticking = true;
       }
     };
 
     // Initial check
-    updateScrollEffects();
+    updateScrollEdges();
 
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => {
