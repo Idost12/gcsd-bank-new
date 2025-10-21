@@ -12,6 +12,43 @@
   scroll-behavior: smooth;
 }
 
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  /* Ensure proper viewport handling */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+  }
+  
+  /* Better touch targets */
+  button, input, select, textarea {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Prevent zoom on input focus */
+  input, select, textarea {
+    font-size: 16px;
+  }
+  
+  /* Better spacing for mobile */
+  .mobile-padding {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Stack elements vertically on mobile */
+  .mobile-stack {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  /* Full width on mobile */
+  .mobile-full {
+    width: 100%;
+  }
+}
+
 /* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
@@ -39,10 +76,20 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* Fix dropdown/select visibility in dark mode and neon mode */
+/* Fix dropdown/select visibility in all modes */
+select {
+  background-color: white;
+  color: black;
+}
+
 select option {
   background-color: white;
   color: black;
+}
+
+.dark select {
+  background-color: #1e293b;
+  color: #f1f5f9;
 }
 
 .dark select option {
@@ -50,11 +97,61 @@ select option {
   color: #f1f5f9;
 }
 
-/* Neon mode select options - force dark background */
-select[style*="colorScheme: dark"] option,
-select[style*="color-scheme: dark"] option {
+/* Neon mode - force dark styling for all selects */
+body:has(.neon-theme) select,
+.neon-theme select {
   background-color: #2a2a2a !important;
   color: #fed7aa !important;
+  border-color: #f97316 !important;
+}
+
+body:has(.neon-theme) select option,
+.neon-theme select option {
+  background-color: #2a2a2a !important;
+  color: #fed7aa !important;
+}
+
+/* Additional neon theme fixes */
+body:has(.neon-theme) input,
+.neon-theme input {
+  background-color: #2a2a2a !important;
+  color: #fed7aa !important;
+  border-color: #f97316 !important;
+}
+
+body:has(.neon-theme) input::placeholder,
+.neon-theme input::placeholder {
+  color: #fed7aa !important;
+  opacity: 0.6;
+}
+
+/* Neon theme button fixes */
+body:has(.neon-theme) button,
+.neon-theme button {
+  border-color: #f97316 !important;
+}
+
+body:has(.neon-theme) button:hover,
+.neon-theme button:hover {
+  background-color: #3a3a3a !important;
+  border-color: #fb923c !important;
+}
+
+/* Neon theme text visibility */
+body:has(.neon-theme) .text-slate-600,
+.neon-theme .text-slate-600 {
+  color: #fed7aa !important;
+}
+
+body:has(.neon-theme) .text-slate-500,
+.neon-theme .text-slate-500 {
+  color: #fed7aa !important;
+  opacity: 0.8;
+}
+
+body:has(.neon-theme) .opacity-70,
+.neon-theme .opacity-70 {
+  opacity: 0.9 !important;
 }
 
 /* Ensure inputs are visible in all modes */
