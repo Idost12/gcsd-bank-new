@@ -543,6 +543,7 @@ export default function GCSDApp() {
   const [theme, setTheme] = useState<Theme>("light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPin, setAdminPin] = useState<string>("");
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
@@ -564,7 +565,7 @@ export default function GCSDApp() {
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
-    if (hydrated) kvSet("gcs-v4-theme", theme);
+    // Theme is local to each browser - not saved to KV storage
   }, [theme, hydrated]);
 
   /* hydrate from KV once on mount */
@@ -683,6 +684,20 @@ export default function GCSDApp() {
     const t = setInterval(()=> { const d=new Date(); setClock(fmtTime(d)); setDateStr(fmtDate(d)); }, 1000);
     return ()=> clearInterval(t);
   }, []);
+
+  /* close mobile menu on outside click */
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (mobileMenuOpen && !(event.target as Element).closest('.mobile-menu-container')) {
+        setMobileMenuOpen(false);
+      }
+    };
+    
+    if (mobileMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [mobileMenuOpen]);
   useEffect(()=> {
     if (!showIntro) return;
     const timer = setTimeout(()=> setShowIntro(false), 1500);
@@ -1055,6 +1070,13 @@ export default function GCSDApp() {
   // Reset all transactions (keep agents, clear all sales/redeems/history)
   async function completeReset(){
     console.log("completeReset called");
+    
+    // First verify admin PIN
+    const adminPin = prompt("Enter admin PIN to proceed:");
+    if (adminPin !== "13577531") {
+      return toast.error("Invalid admin PIN");
+    }
+    
     const extra = prompt("⚠️ WARNING: This will clear ALL transactions!\n\nType 'RESET' to confirm:");
     console.log("User input:", extra);
     if (!extra || extra.trim().toUpperCase() !== "RESET") {
@@ -1202,33 +1224,95 @@ export default function GCSDApp() {
             : "sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200"
         }
       >
-        <div className="max-w-6xl mx-auto px-2 sm:px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-1 sm:gap-3">
-            <img src={LOGO_URL} alt="GCS Bank logo" className="h-8 w-8 sm:h-14 sm:w-14 rounded drop-shadow-sm" />
-            <span className="font-semibold text-sm sm:text-base lg:text-lg">{APP_NAME}</span>
-            <motion.button
-              className={classNames("ml-1 sm:ml-3 inline-flex items-center gap-1 text-xs sm:text-sm px-1 sm:px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={()=> setPortal("home")}
-              title="Go Home"
-              whileHover={{ scale: 1.05, y: -1 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <HomeIcon className="w-3 h-3 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Home</span>
-            </motion.button>
-          </div>
-          <div className="flex items-center gap-1 sm:gap-3">
-            <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
-            <span className={classNames("text-xs font-mono hidden sm:inline", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
-            <ThemeToggle theme={theme} setTheme={setTheme}/>
+        <div className="max-w-6xl mx-auto px-2 sm:px-4 mobile-menu-container">
+          {/* Main header row */}
+          <div className="h-16 flex items-center justify-between">
+            <div className="flex items-center gap-1 sm:gap-3">
+              <img src={LOGO_URL} alt="GCS Bank logo" className="h-8 w-8 sm:h-14 sm:w-14 rounded drop-shadow-sm" />
+              <span className="font-semibold text-sm sm:text-base lg:text-lg">{APP_NAME}</span>
+              <motion.button
+                className={classNames("ml-1 sm:ml-3 inline-flex items-center gap-1 text-xs sm:text-sm px-1 sm:px-2 py-1 rounded-lg", neonBtn(theme))}
+                onClick={()=> setPortal("home")}
+                title="Go Home"
+                whileHover={{ scale: 1.05, y: -1 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <HomeIcon className="w-3 h-3 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Home</span>
+              </motion.button>
+            </div>
+            
+            {/* Desktop menu */}
+            <div className="hidden sm:flex items-center gap-3">
+              <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
+              <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+              <ThemeToggle theme={theme} setTheme={setTheme}/>
+              <motion.button 
+                className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm", neonBtn(theme))}
+                onClick={()=> setPickerOpen(true)}
+                whileHover={{ scale: 1.05, y: -1 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Users className="w-4 h-4"/> Switch User
+              </motion.button>
+            </div>
+            
+            {/* Mobile menu button */}
             <motion.button 
-              className={classNames("px-1 sm:px-3 py-1 sm:py-1.5 rounded-xl flex items-center gap-1 sm:gap-2 text-xs sm:text-sm", neonBtn(theme))}
-              onClick={()=> setPickerOpen(true)}
-              whileHover={{ scale: 1.05, y: -1 }}
+              className={classNames("sm:hidden p-2 rounded-lg", neonBtn(theme))}
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Users className="w-3 h-3 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Switch User</span>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
             </motion.button>
           </div>
+          
+          {/* Mobile menu */}
+          <AnimatePresence>
+            {mobileMenuOpen && (
+              <motion.div 
+                className={classNames(
+                  "sm:hidden py-3 space-y-3",
+                  theme === "neon" 
+                    ? "border-t border-orange-800 bg-[#14110B]/50" 
+                    : "border-t border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50"
+                )}
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <div className="px-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium opacity-80">Notifications</span>
+                      <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); setMobileMenuOpen(false); }} />
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium opacity-80">Theme</span>
+                      <ThemeToggle theme={theme} setTheme={setTheme}/>
+                    </div>
+                    
+                    <motion.button 
+                      className={classNames("w-full px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium", neonBtn(theme))}
+                      onClick={()=> { setPickerOpen(true); setMobileMenuOpen(false); }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Users className="w-4 h-4"/> Switch User
+                    </motion.button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
