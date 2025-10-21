@@ -305,25 +305,17 @@ function classNames(...x: (string | false | undefined | null)[]) {
   return x.filter(Boolean).join(" ");
 }
 
-/** Neon-aware containers/buttons/inputs */
+/** Liquid Glass containers/buttons/inputs with theme awareness */
 const neonBox = (theme: Theme) =>
-  theme === "neon"
-    ? "bg-[#1a1a1a] border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
-    : "bg-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700";
+  "glass-card rounded-xl text-slate-800 dark:text-slate-100";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
-  theme === "neon"
-    ? solid
-      ? "bg-orange-500 text-black border border-orange-400 hover:bg-orange-400 shadow-lg shadow-orange-500/30"
-      : "bg-[#2a2a2a] border border-orange-500 text-orange-100 hover:bg-[#3a3a3a] shadow-lg shadow-orange-500/20"
-    : solid
-      ? "bg-black text-white hover:bg-gray-800 dark:bg-slate-700 dark:hover:bg-slate-600"
-      : "bg-white dark:bg-slate-700 dark:text-slate-100 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600";
+  solid
+    ? "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all"
+    : "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all";
 
 const inputCls = (theme: Theme) =>
-  theme === "neon"
-    ? "border border-orange-500 bg-[#2a2a2a] text-orange-100 rounded-xl px-3 py-2 w-full placeholder-orange-300 focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20 [color-scheme:dark]"
-    : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-600 focus:ring-2 focus:ring-blue-500/20";
+  "glass border-none rounded-xl px-4 py-2.5 w-full text-slate-900 dark:text-white placeholder-slate-600 dark:placeholder-slate-300 focus:ring-2 focus:ring-blue-400/50 dark:focus:ring-purple-500/50 transition-all";
 
 function TypeLabel({ text }: { text: string }) {
   return (
@@ -555,7 +547,7 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
     <div className="flex items-center gap-2">
       <motion.button
         onClick={() => setTheme(isDark ? "light" : "dark")}
-        className={theme === "neon" ? "h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60" : "h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"}
+        className="h-8 w-8 grid place-items-center rounded-full glass"
         aria-label={isDark ? "Switch to light" : "Switch to dark"}
         title={isDark ? "Light" : "Dark"}
         whileHover={{ scale: 1.1, rotate: 15 }}
@@ -587,7 +579,7 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
       </motion.button>
       <motion.button
         onClick={() => setTheme(isNeon ? "light" : "neon")}
-        className={isNeon ? "h-8 px-2 rounded-full border border-orange-700 bg-orange-700 text-black inline-flex items-center gap-1" : "h-8 px-2 rounded-full border inline-flex items-center gap-1 bg-white dark:bg-slate-800"}
+        className={isNeon ? "h-8 px-2 rounded-full glass-btn text-orange-600 dark:text-orange-400 inline-flex items-center gap-1 border-orange-500/50" : "h-8 px-2 rounded-full glass inline-flex items-center gap-1"}
         title="Neon mode"
         whileHover={{ scale: 1.05, y: -1 }}
         whileTap={{ scale: 0.95 }}
@@ -601,11 +593,7 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
 function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread: number; onOpenFeed: () => void }) {
   return (
     <motion.button
-      className={
-        theme === "neon"
-          ? "relative h-8 w-8 grid place-items-center rounded-full border border-orange-700 bg-[#0B0B0B]/60"
-          : "relative h-8 w-8 grid place-items-center rounded-full border bg-white dark:bg-slate-800"
-      }
+      className="relative h-8 w-8 grid place-items-center rounded-full glass"
       onClick={onOpenFeed}
       title="Notifications"
       whileHover={{ scale: 1.1, rotate: 15 }}
@@ -656,25 +644,20 @@ function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React
   );
 }
 
-/** Neon-friendly select */
+/** Glass-style select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-500 bg-[#2a2a2a] text-orange-100 shadow-lg shadow-orange-500/20" : "border bg-white dark:bg-slate-800 dark:text-slate-100")}>
+    <div className="relative rounded-xl glass">
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames(
-          "appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2",
-          theme === "neon" 
-            ? "bg-[#2a2a2a] text-orange-100 [color-scheme:dark] focus:ring-orange-500/20" 
-            : "bg-white dark:bg-slate-800 dark:text-slate-100 focus:ring-blue-500/20"
-        )}
+        className="appearance-none w-full px-3 py-2.5 pr-8 rounded-xl focus:outline-none focus:ring-2 bg-transparent text-slate-900 dark:text-white focus:ring-blue-400/50 dark:focus:ring-purple-500/50"
         style={theme === "neon" || document.documentElement.classList.contains("dark") ? { colorScheme: "dark" } : {}}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
       </select>
-      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-300" : "text-slate-500 dark:text-slate-300")} />
+      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 opacity-60" />
     </div>
   );
 }
@@ -1434,11 +1417,7 @@ export default function GCSDApp() {
   /* ============================ render ============================ */
   return (
     <div
-      className={
-        theme === "neon"
-          ? "min-h-screen overflow-x-hidden bg-[#0B0B0B] text-orange-50 transition-colors duration-200 swipe-container"
-          : "min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200 swipe-container"
-      }
+      className="min-h-screen overflow-x-hidden text-slate-900 dark:text-slate-100 transition-colors duration-200 swipe-container"
     >
       <Toaster position="top-center" richColors />
 
@@ -1446,7 +1425,7 @@ export default function GCSDApp() {
       <AnimatePresence>
         {showIntro && (
           <motion.div 
-            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}
+            className="fixed inset-0 z-50 grid place-items-center backdrop-blur-xl bg-black/30 text-white"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -1460,7 +1439,7 @@ export default function GCSDApp() {
               transition={{ duration: 0.5, delay: 0.1 }}
             >
               <motion.div 
-                className="mx-auto mb-6 w-48 h-48 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]"
+                className="mx-auto mb-6 w-48 h-48 rounded-[28px] glass grid place-items-center shadow-[0_0_90px_rgba(99,102,241,.4)]"
                 initial={{ y: -20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ duration: 0.6, delay: 0.2 }}
@@ -1468,7 +1447,7 @@ export default function GCSDApp() {
                 <motion.img 
                   src={LOGO_URL} 
                   alt="GCS Bank logo" 
-                  className="w-40 h-40 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]"
+                  className="w-40 h-40 rounded drop-shadow-[0_6px_24px_rgba(99,102,241,.5)]"
                   initial={{ scale: 0.5, rotate: -10 }}
                   animate={{ scale: 1, rotate: 0 }}
                   transition={{ duration: 0.7, delay: 0.3 }}
@@ -1476,7 +1455,7 @@ export default function GCSDApp() {
               </motion.div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <motion.div 
-                className="text-white/70 mt-2 mb-6"
+                className="text-white/90 mt-2 mb-6"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5, delay: 1.2 }}
@@ -1484,7 +1463,7 @@ export default function GCSDApp() {
                 Press Enter to continue
               </motion.div>
               <motion.button 
-                className="px-4 py-2 rounded-xl bg-white text-black"
+                className="glass-btn text-white px-6 py-3 rounded-xl"
                 onClick={()=> setShowIntro(false)}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1501,11 +1480,7 @@ export default function GCSDApp() {
 
       {/* Header */}
       <div
-        className={
-          theme === "neon"
-            ? "sticky top-0 z-20 backdrop-blur bg-[#14110B]/85 border-b border-orange-800 transition-colors duration-200"
-            : "sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200"
-        }
+        className="sticky top-0 z-20 glass border-b border-white/20 dark:border-white/10 transition-colors duration-200"
       >
         <div className="max-w-6xl mx-auto px-3 sm:px-4 mobile-menu-container">
           {/* Main header row */}
