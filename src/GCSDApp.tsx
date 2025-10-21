@@ -34,6 +34,8 @@ type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
 type AdminNotification = { id: string; when: string; type: "credit"|"debit"|"redeem_request"|"redeem_approved"|"system"; text: string; agentName?: string; amount?: number };
 type RedeemRequest = { id: string; agentId: string; agentName: string; prizeKey: string; prizeLabel: string; price: number; when: string; agentPinVerified: boolean };
+type AuditLog = { id: string; when: string; adminName: string; action: string; details: string; agentName?: string; amount?: number };
+type Wishlist = Record<string, string[]>; // agentId -> array of prizeKeys
 
 /** Metric reset epochs (admin control) */
 type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
@@ -75,12 +77,15 @@ const PRIZE_ITEMS: PrizeItem[] = [
   { key: "flight_madrid",  label: "Madrid Flights",         price: 11350 },
   { key: "flight_london",  label: "London Flights",         price: 11350 },
   { key: "flight_milan",   label: "Milan Flights",          price: 11350 },
+  { key: "meme_generator", label: "Custom Meme Generator",  price: 100   },
+  { key: "vip_entrance",   label: "VIP Entrance (Applause)", price: 400  },
 ];
 
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
   soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
   flight_madrid: 1, flight_london: 1, flight_milan: 1,
+  meme_generator: 99, vip_entrance: 99, // Fun prizes with high stock
 };
 
 /* ===========================
@@ -728,6 +733,20 @@ function RaceToRedeemBoard({
 }
 
 /* Enhanced Podium Component with Animated Medals */
+// Badge calculation helper
+function getBadge(position: number, balance: number): { emoji: string; title: string; color: string } | null {
+  if (position === 1 && balance >= 10000) return { emoji: "👑", title: "Royalty", color: "text-yellow-400" };
+  if (position === 1) return { emoji: "🥇", title: "Champion", color: "text-yellow-500" };
+  if (position === 2) return { emoji: "🥈", title: "Runner-Up", color: "text-gray-400" };
+  if (position === 3) return { emoji: "🥉", title: "Bronze Star", color: "text-amber-600" };
+  if (balance >= 10000) return { emoji: "💎", title: "Diamond Tier", color: "text-cyan-400" };
+  if (balance >= 7500) return { emoji: "💰", title: "Platinum", color: "text-purple-400" };
+  if (balance >= 5000) return { emoji: "🔥", title: "On Fire", color: "text-orange-500" };
+  if (balance >= 2500) return { emoji: "⭐", title: "Rising Star", color: "text-yellow-300" };
+  if (balance >= 1000) return { emoji: "🚀", title: "Ascending", color: "text-blue-400" };
+  return null;
+}
+
 function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number }>; theme: Theme }) {
   if (leaderboard.length === 0) return <div className="text-center text-sm opacity-60">No data yet</div>;
 
@@ -775,6 +794,19 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
             <div className="text-center mb-2">
               <div className="font-bold text-lg">{agent.name}</div>
               <div className="text-sm opacity-70">{agent.balance.toLocaleString()} GCSD</div>
+              {(() => {
+                const badge = getBadge(position, agent.balance);
+                return badge ? (
+                  <motion.div 
+                    className={classNames("text-xs font-semibold mt-1", badge.color)}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: delay + 0.3, type: "spring" }}
+                  >
+                    {badge.emoji} {badge.title}
+                  </motion.div>
+                ) : null;
+              })()}
             </div>
             
             {/* Animated Podium */}
@@ -1063,6 +1095,136 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
     <AnimatePresence>{open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} theme={theme} />}</AnimatePresence>
   );
 }
+
+/* Meme Generator Modal */
+function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentName: string; onClose: () => void; theme: Theme }) {
+  const [topText, setTopText] = useState("");
+  const [bottomText, setBottomText] = useState("");
+  const [memeTemplate, setMemeTemplate] = useState("success");
+  
+  const templates = [
+    { key: "success", label: "Success Kid", emoji: "😎" },
+    { key: "drake", label: "Drake Meme", emoji: "🦆" },
+    { key: "thinking", label: "Thinking", emoji: "🤔" },
+    { key: "stonks", label: "Stonks", emoji: "📈" },
+    { key: "celebration", label: "Celebration", emoji: "🎉" }
+  ];
+
+  const downloadMeme = () => {
+    toast.success(`Meme saved! "${topText || 'Top Text'}" / "${bottomText || 'Bottom Text'}"`);
+    onClose();
+  };
+
+  if (!open) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div 
+        className="fixed inset-0 z-50 glass grid place-items-center"
+        style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      >
+        <motion.div 
+          className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-[min(600px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold">🎨 Meme Generator</h2>
+            <button onClick={onClose} className="text-2xl opacity-60 hover:opacity-100">×</button>
+          </div>
+          
+          <div className="text-sm opacity-70 mb-4">
+            Congrats {agentName}! Create your custom meme! 🎉
+          </div>
+
+          {/* Meme Preview */}
+          <div className="relative bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl aspect-square mb-4 flex flex-col justify-between p-6 text-white font-bold text-center shadow-xl">
+            <div className="text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
+              {topText || "TOP TEXT"}
+            </div>
+            <div className="text-6xl">
+              {templates.find(t => t.key === memeTemplate)?.emoji || "😎"}
+            </div>
+            <div className="text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
+              {bottomText || "BOTTOM TEXT"}
+            </div>
+          </div>
+
+          {/* Template Selector */}
+          <div className="mb-4">
+            <label className="text-sm font-semibold mb-2 block">Choose Template:</label>
+            <div className="flex flex-wrap gap-2">
+              {templates.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setMemeTemplate(t.key)}
+                  className={classNames(
+                    "px-3 py-2 rounded-xl transition-all",
+                    memeTemplate === t.key ? neonBtn(theme, true) : "glass-btn opacity-60 hover:opacity-100"
+                  )}
+                >
+                  {t.emoji} {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Text Inputs */}
+          <div className="space-y-3 mb-4">
+            <div>
+              <label className="text-sm font-semibold mb-1 block">Top Text:</label>
+              <input 
+                type="text"
+                value={topText}
+                onChange={(e) => setTopText(e.target.value.toUpperCase())}
+                placeholder="ENTER TOP TEXT"
+                className={inputCls(theme)}
+                maxLength={40}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold mb-1 block">Bottom Text:</label>
+              <input 
+                type="text"
+                value={bottomText}
+                onChange={(e) => setBottomText(e.target.value.toUpperCase())}
+                placeholder="ENTER BOTTOM TEXT"
+                className={inputCls(theme)}
+                maxLength={40}
+              />
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <motion.button
+              className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
+              onClick={downloadMeme}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              📥 Save Meme
+            </motion.button>
+            <motion.button
+              className="px-4 py-3 rounded-xl opacity-60 hover:opacity-100"
+              onClick={onClose}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              Cancel
+            </motion.button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
 function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number; theme: Theme }) {
   const [pin, setPin] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1169,6 +1331,8 @@ export default function GCSDApp() {
   const [adminNotifs, setAdminNotifs] = useState<AdminNotification[]>([]);
   const [redeemRequests, setRedeemRequests] = useState<RedeemRequest[]>([]);
   const [activeUsers, setActiveUsers] = useState<Set<string>>(new Set());
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [wishlist, setWishlist] = useState<Wishlist>({});
   const [hydrated, setHydrated] = useState(false);
 
   // Theme is LOCAL to each browser/device - NEVER synced via KV
@@ -1187,6 +1351,7 @@ export default function GCSDApp() {
 
   // Sandbox state removed
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
+  const [memeModal, setMemeModal] = useState<{open: boolean; agentName: string} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
   const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
@@ -1256,6 +1421,8 @@ export default function GCSDApp() {
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setAdminNotifs((await kvGet<AdminNotification[]>("gcs-v4-admin-notifs")) ?? []);
         setRedeemRequests((await kvGet<RedeemRequest[]>("gcs-v4-redeem-requests")) ?? []);
+        setAuditLogs((await kvGet<AuditLog[]>("gcs-v4-audit-logs")) ?? []);
+        setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
         
@@ -1297,6 +1464,8 @@ export default function GCSDApp() {
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-admin-notifs") setAdminNotifs(val ?? (await kvGet("gcs-v4-admin-notifs")) ?? []);
       if (key === "gcs-v4-redeem-requests") setRedeemRequests(val ?? (await kvGet("gcs-v4-redeem-requests")) ?? []);
+      if (key === "gcs-v4-audit-logs") setAuditLogs(val ?? (await kvGet("gcs-v4-audit-logs")) ?? []);
+      if (key === "gcs-v4-wishlist") setWishlist(val ?? (await kvGet("gcs-v4-wishlist")) ?? {});
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
       
@@ -1318,6 +1487,8 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-admin-notifs", adminNotifs); }, [hydrated, adminNotifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-redeem-requests", redeemRequests); }, [hydrated, redeemRequests]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-audit-logs", auditLogs); }, [hydrated, auditLogs]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
   
@@ -1465,6 +1636,20 @@ export default function GCSDApp() {
   };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
+  
+  // Audit logging helper
+  const logAudit = (action: string, details: string, agentName?: string, amount?: number) => {
+    const log: AuditLog = {
+      id: uid(),
+      when: nowISO(),
+      adminName: "Admin", // Could be enhanced to track which admin if multiple admins
+      action,
+      details,
+      agentName,
+      amount
+    };
+    setAuditLogs(prev => [log, ...prev].slice(0, 500)); // Keep last 500 logs
+  };
 
   /* actions */
   function adminCredit(agentId:string, ruleKey:string, qty:number){
@@ -1477,6 +1662,7 @@ export default function GCSDApp() {
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
+    logAudit("Credit Added", `${rule.label}${qty>1?` x${qty}`:""}`, getName(agentId), amount);
     
     // Update metrics when new sale is added
     setMetrics(prev => ({
@@ -1490,6 +1676,7 @@ export default function GCSDApp() {
     if (!agentId) return toast.error("Choose an agent");
     if (!amount || amount <= 0) return toast.error("Enter a positive amount");
     if (amount > 100000) return toast.error("Amount too large (max 100,000 GCSD)");
+    logAudit("Manual Transfer", note || "Manual transfer", getName(agentId), amount);
     
     postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
@@ -1504,6 +1691,7 @@ export default function GCSDApp() {
   }
 
   // Two-step redemption: Agent PIN → Admin Approval
+  // ⚠️ IMPORTANT: This function ONLY creates a request. Actual redemption happens in approveRedeem()
   function redeemPrize(agentId:string, prizeKey:string){
     const agent = accounts.find(a => a.id === agentId);
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
@@ -1521,7 +1709,7 @@ export default function GCSDApp() {
     openAgentPin(agentId, (ok)=>{
       if (!ok) return toast.error("Wrong PIN");
       
-      // Step 2: Create redeem request for admin approval
+      // Step 2: Create redeem request for admin approval (NO transaction yet!)
       const request: RedeemRequest = {
         id: uid(),
         agentId,
@@ -1591,8 +1779,16 @@ export default function GCSDApp() {
     // Remove from requests
     setRedeemRequests(prev => prev.filter(r => r.id !== requestId));
     
+    logAudit("Redeem Approved", `${request.prizeLabel}`, request.agentName, request.price);
     toast.success(`Redemption approved for ${request.agentName}!`);
     confettiBurst();
+    
+    // Special prize handling: Show meme generator for meme_generator prize
+    if (request.prizeKey === "meme_generator") {
+      setTimeout(() => {
+        setMemeModal({ open: true, agentName: request.agentName });
+      }, 1000); // Delay to let confetti finish
+    }
   }
 
   // Reject redeem request
@@ -1601,6 +1797,7 @@ export default function GCSDApp() {
     if (!request) return;
     
     setRedeemRequests(prev => prev.filter(r => r.id !== requestId));
+    logAudit("Redeem Rejected", `${request.prizeLabel}`, request.agentName, request.price);
     toast.success("Request rejected");
     notify(`❌ Rejected redemption request from ${request.agentName}`);
   }
@@ -1608,6 +1805,7 @@ export default function GCSDApp() {
   // Freeze agent account
   function freezeAgent(agentId: string) {
     setAccounts(prev => prev.map(a => a.id === agentId ? {...a, frozen: true} : a));
+    logAudit("Account Frozen", "Account access restricted", getName(agentId));
     toast.success(`${getName(agentId)} account frozen`);
     notify(`❄️ ${getName(agentId)} account frozen by admin`);
     
@@ -1624,6 +1822,7 @@ export default function GCSDApp() {
   // Unfreeze agent account
   function unfreezeAgent(agentId: string) {
     setAccounts(prev => prev.map(a => a.id === agentId ? {...a, frozen: false} : a));
+    logAudit("Account Unfrozen", "Account access restored", getName(agentId));
     toast.success(`${getName(agentId)} account unfrozen`);
     notify(`✓ ${getName(agentId)} account unfrozen by admin`);
     
@@ -2238,6 +2437,16 @@ export default function GCSDApp() {
         )}
       </AnimatePresence>
 
+      {/* Meme Generator Modal */}
+      {memeModal?.open && (
+        <MemeModal
+          open={memeModal.open}
+          agentName={memeModal.agentName}
+          onClose={() => setMemeModal(null)}
+          theme={theme}
+        />
+      )}
+
       {/* Agent PIN modal */}
       <PinModal
         open={pinModal.open}
@@ -2371,8 +2580,19 @@ export default function GCSDApp() {
                 stock={stock}
                 prizes={PRIZE_ITEMS}
                 goals={goals}
+                wishlist={wishlist[currentAgentId] || []}
                 onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
                 onRedeem={(k)=>redeemPrize(currentAgentId, k)}
+                onToggleWishlist={(prizeKey) => {
+                  setWishlist(prev => {
+                    const current = prev[currentAgentId] || [];
+                    const has = current.includes(prizeKey);
+                    return {
+                      ...prev,
+                      [currentAgentId]: has ? current.filter(k => k !== prizeKey) : [...current, prizeKey]
+                    };
+                  });
+                }}
               />
             </motion.div>
           )}
@@ -2398,6 +2618,18 @@ export default function GCSDApp() {
                 adminNotifs={adminNotifs}
                 redeemRequests={redeemRequests}
                 activeUsers={activeUsers}
+                auditLogs={auditLogs}
+                wishlist={wishlist}
+                onToggleWishlist={(agentId, prizeKey) => {
+                  setWishlist(prev => {
+                    const current = prev[agentId] || [];
+                    const has = current.includes(prizeKey);
+                    return {
+                      ...prev,
+                      [agentId]: has ? current.filter(k => k !== prizeKey) : [...current, prizeKey]
+                    };
+                  });
+                }}
                 onCredit={adminCredit}
                 onManualTransfer={manualTransfer}
                 onUndoSale={undoSale}
@@ -2620,26 +2852,34 @@ function Home({
         >
           <div className="text-lg font-semibold mb-4">🏆 Leaderboard</div>
           <div className="space-y-2 max-h-[600px] overflow-auto pr-2">
-            {leaderboard.map((row, i) => (
-              <motion.div 
-                key={row.id} 
-                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.2 }}
-                whileHover={{ scale: 1.02, x: 4 }}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="w-5 text-right font-semibold opacity-70">
-                    {i + 1}.
-                  </span>
-                  <span className="font-medium">{row.name}</span>
-                </div>
-                <div className="text-sm font-semibold">
-                  <NumberFlash value={row.balance} />
-                </div>
-              </motion.div>
-            ))}
+            {leaderboard.map((row, i) => {
+              const badge = getBadge(i + 1, row.balance);
+              return (
+                <motion.div 
+                  key={row.id} 
+                  className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                  whileHover={{ scale: 1.02, x: 4 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 text-right font-semibold opacity-70">
+                      {i + 1}.
+                    </span>
+                    <span className="font-medium">{row.name}</span>
+                    {badge && (
+                      <span className={classNames("text-xs px-1.5 py-0.5 rounded", badge.color, "bg-black/5 dark:bg-white/5")}>
+                        {badge.emoji} {badge.title}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-semibold">
+                    <NumberFlash value={row.balance} />
+                  </div>
+                </motion.div>
+              );
+            })}
             {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
           </div>
         </motion.div>
@@ -2753,8 +2993,10 @@ function AgentPortal({
   stock,
   prizes,
   goals,
+  wishlist,
   onSetGoal,
   onRedeem,
+  onToggleWishlist,
 }: {
   theme: Theme;
   agentId: string;
@@ -2763,8 +3005,10 @@ function AgentPortal({
   stock: Record<string, number>;
   prizes: PrizeItem[];
   goals: Record<string, number>;
+  wishlist: string[];
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
+  onToggleWishlist: (prizeKey: string) => void;
 }) {
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
   const balance = txns.reduce((s, t) => {
@@ -2904,9 +3148,27 @@ function AgentPortal({
                   transition={{ delay: i * 0.05, duration: 0.3 }}
                   whileHover={{ scale: can ? 1.02 : 1, x: can ? -4 : 0 }}
                 >
-                  <div>
-                    <div className="font-medium">{p.label}</div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium">{p.label}</div>
+                      <motion.button
+                        className="text-xl"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleWishlist(p.key);
+                        }}
+                        whileHover={{ scale: 1.2 }}
+                        whileTap={{ scale: 0.9 }}
+                      >
+                        {wishlist.includes(p.key) ? "⭐" : "☆"}
+                      </motion.button>
+                    </div>
                     <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
+                    {wishlist.includes(p.key) && balance < p.price && (
+                      <div className="text-xs text-blue-500 mt-1">
+                        🎯 {Math.ceil((p.price - balance) / 500)} Full Evals needed
+                      </div>
+                    )}
                   </div>
                   <motion.button 
                     disabled={!can} 
@@ -2952,6 +3214,9 @@ function AdminPortal({
   adminNotifs,
   redeemRequests,
   activeUsers,
+  auditLogs,
+  wishlist,
+  onToggleWishlist,
   onCredit,
   onManualTransfer,
   onUndoSale,
@@ -2982,6 +3247,9 @@ function AdminPortal({
   adminNotifs: AdminNotification[];
   redeemRequests: RedeemRequest[];
   activeUsers: Set<string>;
+  auditLogs: AuditLog[];
+  wishlist: Wishlist;
+  onToggleWishlist: (agentId: string, prizeKey: string) => void;
   onCredit: (agentId: string, ruleKey: string, qty: number) => void;
   onManualTransfer: (agentId: string, amount: number, note: string) => void;
   onUndoSale: (txId: string) => void;
@@ -3000,7 +3268,7 @@ function AdminPortal({
   onApproveRedeem: (requestId: string) => void;
   onRejectRedeem: (requestId: string) => void;
 }) {
-  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests">("dashboard");
+  const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests" | "audit" | "export">("dashboard");
   const [agentId, setAgentId] = useState("");
   const [ruleKey, setRuleKey] = useState(rules[0]?.key || "full_evaluation");
   const [qty, setQty] = useState(1);
@@ -3079,6 +3347,8 @@ function AdminPortal({
           ["notifications", "🔔 Notifications"],
           ["goals", "🎯 Goals"],
           ["requests", "⏳ Requests"],
+          ["audit", "📋 Audit Log"],
+          ["export", "📥 Export Data"],
         ].map(([k, lab]) => (
           <motion.button 
             key={k} 
@@ -3973,6 +4243,227 @@ function AdminPortal({
                 <div className="text-sm">No pending requests</div>
               </div>
             )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Audit Log Tab */}
+      {adminTab === "audit" && (
+        <motion.div
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">📋 Admin Audit Log</h3>
+            <div className="text-sm opacity-70">{auditLogs.length} total actions</div>
+          </div>
+          
+          <div className="space-y-2 max-h-[600px] overflow-auto pr-2">
+            {auditLogs.slice(0, 100).map((log, i) => (
+              <motion.div
+                key={log.id}
+                className={classNames(
+                  "p-3 rounded-xl border",
+                  log.action.includes("Frozen") ? "bg-orange-500/10 border-orange-500/30" :
+                  log.action.includes("Approved") ? "bg-emerald-500/10 border-emerald-500/30" :
+                  log.action.includes("Rejected") ? "bg-rose-500/10 border-rose-500/30" :
+                  "bg-blue-500/10 border-blue-500/30"
+                )}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.01 }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="text-sm font-semibold">{log.action}</div>
+                      {log.agentName && (
+                        <div className="text-xs px-2 py-0.5 rounded bg-white/10">
+                          {log.agentName}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-xs opacity-70">{log.details}</div>
+                    <div className="text-xs opacity-50 mt-1">
+                      by {log.adminName} • {new Date(log.when).toLocaleString()}
+                    </div>
+                  </div>
+                  {log.amount && (
+                    <div className="text-sm font-bold whitespace-nowrap">
+                      {log.amount.toLocaleString()} GCSD
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+            {auditLogs.length === 0 && (
+              <div className="text-center py-12 opacity-70">
+                <div className="text-4xl mb-2">📋</div>
+                <div className="text-sm">No audit logs yet</div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Export Data Tab */}
+      {adminTab === "export" && (
+        <motion.div
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <h3 className="text-lg font-semibold mb-4">📥 Export Data</h3>
+          
+          <div className="grid md:grid-cols-2 gap-4">
+            <motion.div 
+              className="glass-card rounded-xl p-4"
+              whileHover={{ scale: 1.02 }}
+            >
+              <h4 className="font-semibold mb-2">💰 Transactions</h4>
+              <p className="text-sm opacity-70 mb-3">Export all transactions (credits & debits)</p>
+              <motion.button
+                className={classNames("w-full px-4 py-2 rounded-xl", neonBtn(theme, true))}
+                onClick={() => {
+                  const csv = [
+                    ["Date", "Type", "Agent", "Amount", "Memo", "ID"],
+                    ...txns.map(t => [
+                      new Date(t.dateISO).toLocaleString(),
+                      t.kind,
+                      t.toId ? accounts.find(a => a.id === (t.toId || t.fromId))?.name || "—" : accounts.find(a => a.id === t.fromId)?.name || "—",
+                      t.amount,
+                      t.memo || "",
+                      t.id
+                    ])
+                  ].map(row => row.join(",")).join("\\n");
+                  
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `gcsd-transactions-${new Date().toISOString().split("T")[0]}.csv`;
+                  a.click();
+                  toast.success("Transactions exported!");
+                }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Download CSV
+              </motion.button>
+            </motion.div>
+
+            <motion.div 
+              className="glass-card rounded-xl p-4"
+              whileHover={{ scale: 1.02 }}
+            >
+              <h4 className="font-semibold mb-2">👥 Agent Balances</h4>
+              <p className="text-sm opacity-70 mb-3">Current balance for all agents</p>
+              <motion.button
+                className={classNames("w-full px-4 py-2 rounded-xl", neonBtn(theme, true))}
+                onClick={() => {
+                  const balances = accounts.filter(a => a.role === "agent").map(a => {
+                    const bal = txns.reduce((s, t) => {
+                      if (t.toId === a.id && t.kind === "credit") s += t.amount;
+                      if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
+                      return s;
+                    }, 0);
+                    return [a.name, bal, a.frozen ? "Frozen" : "Active"];
+                  });
+                  
+                  const csv = [
+                    ["Agent", "Balance", "Status"],
+                    ...balances
+                  ].map(row => row.join(",")).join("\\n");
+                  
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `gcsd-balances-${new Date().toISOString().split("T")[0]}.csv`;
+                  a.click();
+                  toast.success("Balances exported!");
+                }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Download CSV
+              </motion.button>
+            </motion.div>
+
+            <motion.div 
+              className="glass-card rounded-xl p-4"
+              whileHover={{ scale: 1.02 }}
+            >
+              <h4 className="font-semibold mb-2">📋 Audit Log</h4>
+              <p className="text-sm opacity-70 mb-3">Complete admin action history</p>
+              <motion.button
+                className={classNames("w-full px-4 py-2 rounded-xl", neonBtn(theme, true))}
+                onClick={() => {
+                  const csv = [
+                    ["Date", "Admin", "Action", "Details", "Agent", "Amount"],
+                    ...auditLogs.map(log => [
+                      new Date(log.when).toLocaleString(),
+                      log.adminName,
+                      log.action,
+                      log.details,
+                      log.agentName || "",
+                      log.amount || ""
+                    ])
+                  ].map(row => row.join(",")).join("\\n");
+                  
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `gcsd-audit-log-${new Date().toISOString().split("T")[0]}.csv`;
+                  a.click();
+                  toast.success("Audit log exported!");
+                }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Download CSV
+              </motion.button>
+            </motion.div>
+
+            <motion.div 
+              className="glass-card rounded-xl p-4"
+              whileHover={{ scale: 1.02 }}
+            >
+              <h4 className="font-semibold mb-2">🎯 Goals</h4>
+              <p className="text-sm opacity-70 mb-3">Agent goals and progress</p>
+              <motion.button
+                className={classNames("w-full px-4 py-2 rounded-xl", neonBtn(theme, true))}
+                onClick={() => {
+                  const goalsData = accounts.filter(a => a.role === "agent").map(a => {
+                    const bal = txns.reduce((s, t) => {
+                      if (t.toId === a.id && t.kind === "credit") s += t.amount;
+                      if (t.fromId === a.id && t.kind === "debit") s -= t.amount;
+                      return s;
+                    }, 0);
+                    const goal = goals[a.id] || 0;
+                    const progress = goal > 0 ? Math.round((bal / goal) * 100) : 0;
+                    return [a.name, bal, goal, `${progress}%`];
+                  });
+                  
+                  const csv = [
+                    ["Agent", "Current Balance", "Goal", "Progress"],
+                    ...goalsData
+                  ].map(row => row.join(",")).join("\\n");
+                  
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `gcsd-goals-${new Date().toISOString().split("T")[0]}.csv`;
+                  a.click();
+                  toast.success("Goals exported!");
+                }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Download CSV
+              </motion.button>
+            </motion.div>
           </div>
         </motion.div>
       )}
