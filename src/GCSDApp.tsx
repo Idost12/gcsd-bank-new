@@ -967,6 +967,70 @@ export default function GCSDApp() {
     };
   }, [theme]);
 
+  /* iOS-style scroll edge indicators and glass shimmer effects */
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+    let ticking = false;
+
+    const updateScrollEffects = () => {
+      const scrollY = window.scrollY;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = document.documentElement.clientHeight;
+      const atTop = scrollY <= 10;
+      const atBottom = scrollY + clientHeight >= scrollHeight - 10;
+
+      // Update edge indicator classes
+      if (atTop) {
+        document.body.classList.add('at-top');
+        document.body.classList.remove('scrolling-up');
+      } else {
+        document.body.classList.remove('at-top');
+        if (scrollY < lastScrollY) {
+          document.body.classList.add('scrolling-up');
+        } else {
+          document.body.classList.remove('scrolling-up');
+        }
+      }
+
+      if (atBottom) {
+        document.body.classList.add('at-bottom');
+        document.body.classList.remove('scrolling-down');
+      } else {
+        document.body.classList.remove('at-bottom');
+        if (scrollY > lastScrollY) {
+          document.body.classList.add('scrolling-down');
+        } else {
+          document.body.classList.remove('scrolling-down');
+        }
+      }
+
+      // Update glass shimmer effect based on scroll position
+      // Creates a wave effect that moves with scroll
+      const scrollPercent = (scrollY / (scrollHeight - clientHeight)) * 100;
+      const shimmerValue = (scrollPercent % 100) - 50; // Oscillates between -50% and 50%
+      document.documentElement.style.setProperty('--scroll-shimmer', `${shimmerValue}%`);
+
+      lastScrollY = scrollY;
+      ticking = false;
+    };
+
+    const onScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(updateScrollEffects);
+        ticking = true;
+      }
+    };
+
+    // Initial check
+    updateScrollEffects();
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      document.body.classList.remove('scrolling-up', 'scrolling-down', 'at-top', 'at-bottom');
+    };
+  }, []);
+
   /* Wrapped setTheme for local-only theme changes */
   const setThemeLocal = (newTheme: Theme) => {
     setTheme(newTheme);
