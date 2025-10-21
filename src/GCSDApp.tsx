@@ -611,6 +611,7 @@ function RaceToRedeemBoard({
             transition={{ duration: 0.3 }}
             className="overflow-hidden"
           >
+            <div className="space-y-4 mt-4" onClick={(e) => e.stopPropagation()}>
               {premiumPrizes.map((prize, idx) => {
                 const racers = getPrizeRacers(prize);
                 const stockLeft = stock[prize.key] ?? 0;
