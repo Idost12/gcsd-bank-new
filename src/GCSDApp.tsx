@@ -710,14 +710,14 @@ export default function GCSDApp() {
     .filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint" && !G_isReversalOfRedemption(t))
     .reduce((a,b)=>a+b.amount,0)
     - agentTxns.filter(t=> G_isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
-  const lifetimeSpend = agentTxns.filter(t=> {
+  const lifetimeSpend = txns.filter(t=> {
     if (t.kind !== "debit" || t.fromId !== currentAgentId) return false;
     if (t.memo?.startsWith("Correction") || t.memo?.startsWith("Reversal") || t.memo?.startsWith("Balance reset")) return false;
     
     // For redemptions, check if they've been undone
     if (t.memo?.startsWith("Redeem:")) {
       const redemptionLabel = t.memo.replace("Redeem: ", "");
-      const hasBeenUndone = agentTxns.some(reversal => 
+      const hasBeenUndone = txns.some(reversal => 
         reversal.kind === "credit" && 
         reversal.toId === currentAgentId &&
         reversal.memo === `Reversal of redemption: ${redemptionLabel}` &&
@@ -728,12 +728,12 @@ export default function GCSDApp() {
     
     return true;
   }).reduce((a,b)=>a+b.amount,0);
-  const prizeCountActive = agentTxns.filter(t=> {
+  const prizeCountActive = txns.filter(t=> {
     if (t.kind !== "debit" || t.fromId !== currentAgentId || !t.memo?.startsWith("Redeem:")) return false;
     
     // Check if this redemption has been undone
     const redemptionLabel = t.memo.replace("Redeem: ", "");
-    const hasBeenUndone = agentTxns.some(reversal => 
+    const hasBeenUndone = txns.some(reversal => 
       reversal.kind === "credit" && 
       reversal.toId === currentAgentId &&
       reversal.memo === `Reversal of redemption: ${redemptionLabel}` &&
@@ -1002,8 +1002,13 @@ export default function GCSDApp() {
 
   // Reset all transactions (keep agents, clear all sales/redeems/history)
   async function completeReset(){
-    const extra = prompt("Type 'RESET' to confirm clearing all transactions:");
-    if (!extra || extra.toUpperCase() !== "RESET") return toast.error("Reset cancelled");
+    console.log("completeReset called");
+    const extra = prompt("⚠️ WARNING: This will clear ALL transactions!\n\nType 'RESET' to confirm:");
+    console.log("User input:", extra);
+    if (!extra || extra.trim().toUpperCase() !== "RESET") {
+      console.log("Reset cancelled - input was:", extra);
+      return toast.error("Reset cancelled - you must type 'RESET' exactly");
+    }
     
     // Keep existing accounts but clear all transactions except initial mint to vault
     const vaultAccount = accounts.find(a => a.role === "system");
@@ -1048,17 +1053,23 @@ export default function GCSDApp() {
 
   /** Admin metric resets */
   async function resetMetric(kind: keyof MetricsEpoch){
+    console.log("resetMetric called with:", kind);
+    console.log("Current metrics:", metrics);
+    
     const newMetrics = { ...metrics, [kind]: nowISO() };
+    console.log("New metrics:", newMetrics);
+    
     setMetrics(newMetrics);
     
     // Save to database
     try {
       await kvSet("gcs-v4-metrics", newMetrics);
+      console.log("Metrics saved to database");
     } catch (error) {
       console.warn("Failed to save metric reset:", error);
     }
     
-    toast.success("Reset applied");
+    toast.success(`Reset applied for ${kind}`);
   }
 
   // Sandbox mode removed - not needed for banking app
@@ -1434,6 +1445,11 @@ function Home({
 
   // Simple "star of day" & "leader of month" (apply metric epochs) - memoized for stability
   const { starOfDay, leaderOfMonth } = useMemo(() => {
+    console.log("Recalculating star of day and leader of month");
+    console.log("Current metrics:", metrics);
+    console.log("starOfDay epoch:", metrics.starOfDay);
+    console.log("leaderOfMonth epoch:", metrics.leaderOfMonth);
+    
     const todayKey = new Date().toLocaleDateString();
     const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     const earnedToday: Record<string, number> = {};
@@ -1451,13 +1467,19 @@ function Home({
       }
     }
     
+    console.log("earnedToday:", earnedToday);
+    console.log("earnedMonth:", earnedMonth);
+    
     const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
     const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
     
-    return {
+    const result = {
       starOfDay: starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null,
       leaderOfMonth: leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null
     };
+    
+    console.log("Result:", result);
+    return result;
   }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
