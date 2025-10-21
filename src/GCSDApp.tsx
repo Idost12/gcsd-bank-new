@@ -938,7 +938,8 @@ function LiveActivityFeed({ txns, accounts, theme }: { txns: Transaction[]; acco
   return (
     <div className="space-y-3">
       <div className="text-sm opacity-70">📊 Live Activity</div>
-      <div className="space-y-2 max-h-64 overflow-auto pr-2">
+      <div className="relative">
+        <div className="space-y-2 max-h-64 overflow-auto pr-2 scroll-smooth">
         {recentTxns.map((txn, i) => (
           <motion.div
             key={txn.id}
@@ -966,6 +967,9 @@ function LiveActivityFeed({ txns, accounts, theme }: { txns: Transaction[]; acco
             </div>
           </motion.div>
         ))}
+        </div>
+        {/* Fade effect at bottom */}
+        <div className="absolute bottom-0 left-0 right-2 h-6 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
       </div>
     </div>
   );
@@ -1063,12 +1067,16 @@ function HoverCard({ children, onClick, delay = 0, theme }: { children: React.Re
     <motion.button 
       onClick={handleClick} 
       className={classNames("border rounded-2xl px-3 py-3 text-left haptic-feedback", neonBox(theme))}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -5 }}
+      transition={{ 
+        duration: 0.2, 
+        delay: delay,
+        ease: "easeOut"
+      }}
+      whileHover={{ scale: 1.03, y: -2 }}
+      whileTap={{ scale: 0.97 }}
     >
       {children}
     </motion.button>
@@ -1722,6 +1730,25 @@ export default function GCSDApp() {
 
   /* helpers bound to state */
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) => {
+    // Validate transaction data
+    if (!partial.amount || partial.amount <= 0) {
+      console.error("Invalid transaction: amount must be positive", partial);
+      return;
+    }
+    if (partial.amount > 1000000) {
+      console.error("Invalid transaction: amount too large", partial);
+      toast.error("Transaction amount too large");
+      return;
+    }
+    if (partial.kind === "credit" && !partial.toId) {
+      console.error("Invalid credit transaction: missing toId", partial);
+      return;
+    }
+    if (partial.kind === "debit" && !partial.fromId) {
+      console.error("Invalid debit transaction: missing fromId", partial);
+      return;
+    }
+    
     const txn = { id: uid(), dateISO: nowISO(), memo: "", ...partial };
     setTxns(prev => [txn, ...prev ]);
     
@@ -1780,8 +1807,15 @@ export default function GCSDApp() {
     if (!rule) return toast.error("Invalid product rule");
     if (!agentId) return toast.error("Choose agent");
     if (!qty || qty <= 0) return toast.error("Quantity must be positive");
+    if (qty > 100) return toast.error("Quantity too large (max 100)");
+    
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    if (agent.frozen) return toast.error("Cannot credit frozen account");
     
     const amount = rule.gcsd * Math.max(1, qty||1);
+    if (amount > 1000000) return toast.error("Amount too large (max 1,000,000 GCSD)");
+    
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
@@ -1798,10 +1832,16 @@ export default function GCSDApp() {
   function manualTransfer(agentId:string, amount:number, note:string){
     if (!agentId) return toast.error("Choose an agent");
     if (!amount || amount <= 0) return toast.error("Enter a positive amount");
-    if (amount > 100000) return toast.error("Amount too large (max 100,000 GCSD)");
-    logAudit("Manual Transfer", note || "Manual transfer", getName(agentId), amount);
+    if (amount > 1000000) return toast.error("Amount too large (max 1,000,000 GCSD)");
     
-    postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    if (agent.frozen) return toast.error("Cannot transfer to frozen account");
+    
+    const trimmedNote = note?.trim() || "Manual transfer";
+    logAudit("Manual Transfer", trimmedNote, getName(agentId), amount);
+    
+    postTxn({ kind:"credit", amount, toId: agentId, memo: trimmedNote });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
     toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
     
@@ -1869,10 +1909,18 @@ export default function GCSDApp() {
   // Approve redeem request (admin only)
   function approveRedeem(requestId: string) {
     const request = redeemRequests.find(r => r.id === requestId);
-    if (!request) return;
+    if (!request) {
+      toast.error("Request not found");
+      return;
+    }
     
     const agent = accounts.find(a => a.id === request.agentId);
-    if (agent?.frozen) {
+    if (!agent) {
+      toast.error("Agent not found");
+      return;
+    }
+    
+    if (agent.frozen) {
       toast.error("Cannot approve - account is frozen");
       return;
     }
@@ -1883,9 +1931,23 @@ export default function GCSDApp() {
       return;
     }
     
+    // Check stock availability
+    const currentStock = stock[request.prizeKey] ?? 0;
+    if (currentStock <= 0) {
+      toast.error("Out of stock");
+      return;
+    }
+    
+    // Check if the prize still exists
+    const prize = PRIZE_ITEMS.find(p => p.key === request.prizeKey);
+    if (!prize) {
+      toast.error("Prize no longer available");
+      return;
+    }
+    
     // Process the redemption
     postTxn({ kind:"debit", amount: request.price, fromId: request.agentId, memo:`Redeem: ${request.prizeLabel}` });
-    setStock(s=> ({...s, [request.prizeKey]: (s[request.prizeKey] ?? 0) - 1}));
+    setStock(s=> ({...s, [request.prizeKey]: Math.max(0, (s[request.prizeKey] ?? 0) - 1)}));
     notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
       setReceipt({
         id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
@@ -1921,16 +1983,34 @@ export default function GCSDApp() {
   // Reject redeem request
   function rejectRedeem(requestId: string) {
     const request = redeemRequests.find(r => r.id === requestId);
-    if (!request) return;
+    if (!request) {
+      toast.error("Request not found");
+      return;
+    }
     
     setRedeemRequests(prev => prev.filter(r => r.id !== requestId));
     logAudit("Redeem Rejected", `${request.prizeLabel}`, request.agentName, request.price);
     toast.success("Request rejected");
     notify(`❌ Rejected redemption request from ${request.agentName}`);
+    
+    // Notify the admin
+    const adminNotif: AdminNotification = {
+      id: uid(),
+      when: nowISO(),
+      type: "redeem_rejected",
+      text: `Rejected: ${request.agentName} → ${request.prizeLabel}`,
+      agentName: request.agentName,
+      amount: request.price
+    };
+    setAdminNotifs(prev => [...prev, adminNotif].slice(0, 200));
   }
 
   // Freeze agent account
   function freezeAgent(agentId: string) {
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    if (agent.frozen) return toast.error("Account already frozen");
+    
     setAccounts(prev => prev.map(a => a.id === agentId ? {...a, frozen: true} : a));
     logAudit("Account Frozen", "Account access restricted", getName(agentId));
     toast.success(`${getName(agentId)} account frozen`);
@@ -1948,6 +2028,10 @@ export default function GCSDApp() {
 
   // Unfreeze agent account
   function unfreezeAgent(agentId: string) {
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    if (!agent.frozen) return toast.error("Account is not frozen");
+    
     setAccounts(prev => prev.map(a => a.id === agentId ? {...a, frozen: false} : a));
     logAudit("Account Unfrozen", "Account access restored", getName(agentId));
     toast.success(`${getName(agentId)} account unfrozen`);
@@ -1983,7 +2067,16 @@ export default function GCSDApp() {
 
   function undoSale(txId:string){
     const t = txns.find(x=>x.id===txId); 
-    if (!t || t.kind!=="credit" || !t.toId) return;
+    if (!t || t.kind!=="credit" || !t.toId) {
+      toast.error("Invalid transaction");
+      return;
+    }
+    
+    const agent = accounts.find(a => a.id === t.toId);
+    if (!agent) {
+      toast.error("Agent not found");
+      return;
+    }
     
     // Check if already undone
     if (G_isTransactionUndone(t, txns)) {
@@ -1991,9 +2084,17 @@ export default function GCSDApp() {
       return;
     }
     
+    // Check if agent has sufficient balance
+    const bal = balances.get(t.toId) || 0;
+    if (bal < t.amount) {
+      toast.error("Cannot undo - insufficient balance");
+      return;
+    }
+    
     postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo ?? "Sale"}`, meta:{reversesTxnId: t.id} });
     notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
     toast.success("Sale reversed");
+    logAudit("Sale Undone", t.memo ?? "Sale", getName(t.toId), t.amount);
     
     // Update metrics when sale is undone
     setMetrics(prev => ({
@@ -2005,7 +2106,16 @@ export default function GCSDApp() {
 
   function undoRedemption(txId:string){
     const t = txns.find(x=>x.id===txId); 
-    if (!t || t.kind!=="debit" || !t.fromId) return;
+    if (!t || t.kind!=="debit" || !t.fromId) {
+      toast.error("Invalid transaction");
+      return;
+    }
+    
+    const agent = accounts.find(a => a.id === t.fromId);
+    if (!agent) {
+      toast.error("Agent not found");
+      return;
+    }
     
     // Check if already undone
     if (G_isTransactionUndone(t, txns)) {
@@ -2015,10 +2125,14 @@ export default function GCSDApp() {
     
     const label = (t.memo||"").replace("Redeem: ","");
     const prize = PRIZE_ITEMS.find(p=>p.label===label);
+    
     postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}`, meta:{reversesTxnId: t.id} });
-    if (prize) setStock(s=> ({...s, [prize.key]: (s[prize.key]??0)+1}));
+    if (prize) {
+      setStock(s=> ({...s, [prize.key]: Math.min(999, (s[prize.key]??0)+1)})); // Cap at 999 to prevent overflow
+    }
     notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
     toast.success("Redemption reversed & stock restored");
+    logAudit("Redemption Undone", label, getName(t.fromId), t.amount);
     
     // Update metrics when redemption is undone
     setMetrics(prev => ({
@@ -2057,11 +2171,18 @@ export default function GCSDApp() {
   function withdrawManual(agentId:string, amount:number, note?:string){
     if (!agentId) return toast.error("Choose an agent");
     if (!amount || amount <= 0) return toast.error("Enter a positive amount");
+    if (amount > 1000000) return toast.error("Amount too large (max 1,000,000 GCSD)");
+    
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    
     const bal = balances.get(agentId)||0;
     if (bal < amount) return toast.error("Cannot withdraw more than current balance");
+    
     postTxn({ kind:"debit", amount, fromId: agentId, memo:`Correction (withdraw): ${note?.trim() || "Manual correction"}` });
     notify(`🧾 Withdrawn ${amount} GCSD from ${getName(agentId)} (manual correction)`);
     toast.success("Credits withdrawn");
+    logAudit("Manual Withdrawal", note?.trim() || "Manual correction", getName(agentId), amount);
     
     // Update metrics when withdrawal occurs
     setMetrics(prev => ({
@@ -2098,16 +2219,24 @@ export default function GCSDApp() {
   }
 
   function setAgentPin(agentId:string, pin:string){
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
     if (!/^\d{5}$/.test(pin)) return toast.error("PIN must be 5 digits");
+    
     setPins(prev=> ({...prev, [agentId]: pin}));
     notify(`🔐 PIN set/reset for ${getName(agentId)}`);
     toast.success("PIN updated");
+    logAudit("PIN Updated", "PIN changed", getName(agentId));
   }
 
   function resetPin(agentId:string){
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    
     setPins(prev=> { const next = {...prev}; delete next[agentId]; return next; });
     notify(`🔐 PIN cleared for ${getName(agentId)}`);
     toast.success("PIN reset (cleared)");
+    logAudit("PIN Reset", "PIN cleared", getName(agentId));
   }
   
   function deleteAgent(agentId:string){
@@ -2371,8 +2500,8 @@ export default function GCSDApp() {
             className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
           >
             <div className="text-center w-full max-w-md">
               {/* Logo */}
@@ -2736,10 +2865,10 @@ export default function GCSDApp() {
           {portal==="home" && (
             <motion.div
               key="home"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <Home
                 theme={theme}
@@ -2754,11 +2883,11 @@ export default function GCSDApp() {
 
           {portal==="agent" && currentAgentId && (
             <motion.div
-              key="agent"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
+              key={`agent-${currentAgentId}`}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <AgentPortal
                 theme={theme}
@@ -2788,10 +2917,10 @@ export default function GCSDApp() {
           {portal==="admin" && isAdmin && (
             <motion.div
               key="admin"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <AdminPortal
                 theme={theme}
@@ -2843,10 +2972,10 @@ export default function GCSDApp() {
           {portal==="feed" && (
             <motion.div
               key="feed"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <FeedPage theme={theme} notifs={notifs} />
             </motion.div>
@@ -2909,7 +3038,15 @@ function Home({
   }, [txns, metrics.earned30d, days, nonSystemIds]);
 
   const spentSeries: number[] = useMemo(() => days.map((d) =>
-    sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
+    sumInRange(txns, d, 1, (t) => {
+      // Only count debits from agents that are NOT corrections AND have NOT been undone (reversed)
+      if (t.kind !== "debit" || !t.fromId || !nonSystemIds.has(t.fromId)) return false;
+      if (G_isCorrectionDebit(t)) return false;
+      if (!afterISO(metrics.spent30d, t.dateISO)) return false;
+      // Check if this debit has been reversed (e.g., redemption undone)
+      if (G_isTransactionUndone(t, txns)) return false;
+      return true;
+    })
   ), [txns, metrics.spent30d, days, nonSystemIds]);
 
   // Leaderboard: use current balance (proper banking logic) - memoized for stability
@@ -3040,7 +3177,8 @@ function Home({
           transition={{ delay: 0.1 }}
         >
           <div className="text-lg font-semibold mb-4">🏆 Leaderboard</div>
-          <div className="space-y-2 max-h-[600px] overflow-auto pr-2">
+          <div className="relative">
+            <div className="space-y-2 max-h-[800px] overflow-auto pr-2 scroll-smooth">
             {leaderboard.map((row, i) => {
               const badge = getBadge(i + 1, row.balance);
               return (
@@ -3070,6 +3208,9 @@ function Home({
               );
             })}
             {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
+            </div>
+            {/* Fade effect at bottom */}
+            <div className="absolute bottom-0 left-0 right-2 h-8 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
           </div>
         </motion.div>
 
@@ -3096,8 +3237,9 @@ function Home({
             <div className="text-sm mb-2">
               Total purchases: <b>{purchases.length}</b>
             </div>
-            <div className="space-y-2 max-h-64 overflow-auto pr-2">
-              {purchases.map((p, i) => (
+            <div className="relative">
+              <div className="space-y-2 max-h-64 overflow-auto pr-2 scroll-smooth">
+                {purchases.map((p, i) => (
                 <motion.div 
                   key={i} 
                   className={classNames(
@@ -3112,8 +3254,11 @@ function Home({
                   <div className="font-medium text-sm">{p.memo.replace("Redeem: ", "")}</div>
                   <div className="text-xs opacity-60">{p.when.toLocaleString()}</div>
                 </motion.div>
-              ))}
-              {purchases.length === 0 && <div className="text-sm opacity-70 text-center py-4">No purchases yet.</div>}
+                ))}
+                {purchases.length === 0 && <div className="text-sm opacity-70 text-center py-4">No purchases yet.</div>}
+              </div>
+              {/* Fade effect at bottom */}
+              <div className="absolute bottom-0 left-0 right-2 h-6 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
             </div>
           </motion.div>
 
@@ -3125,8 +3270,9 @@ function Home({
             transition={{ delay: 0.3 }}
           >
             <div className="text-sm opacity-70 mb-3">🎯 Available Prizes</div>
-            <div className="space-y-2 max-h-64 overflow-auto pr-2">
-              {prizes.map((p, i) => (
+            <div className="relative">
+              <div className="space-y-2 max-h-64 overflow-auto pr-2 scroll-smooth">
+                {prizes.map((p, i) => (
                 <motion.div 
                   key={p.key} 
                   className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
@@ -3148,8 +3294,11 @@ function Home({
                     </motion.span>
                   </div>
                 </motion.div>
-              ))}
-              {prizes.length === 0 && <div className="text-sm opacity-70">No prizes available.</div>}
+                ))}
+                {prizes.length === 0 && <div className="text-sm opacity-70">No prizes available.</div>}
+              </div>
+              {/* Fade effect at bottom */}
+              <div className="absolute bottom-0 left-0 right-2 h-6 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
             </div>
           </motion.div>
         </div>
@@ -3324,8 +3473,9 @@ function AgentPortal({
             <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
             <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
           </div>
-          <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
-            {prizes.map((p, i) => {
+          <div className="relative">
+            <div className="space-y-2 max-h-[560px] overflow-auto pr-2 scroll-smooth">
+              {prizes.map((p, i) => {
               const left = stock[p.key] ?? 0;
               // Special prizes that bypass the 2-prize limit
               const unlimitedPrizes = ["meme_generator", "office_dj"];
@@ -3379,6 +3529,9 @@ function AgentPortal({
                 </motion.div>
               );
             })}
+            </div>
+            {/* Fade effect at bottom */}
+            <div className="absolute bottom-0 left-0 right-2 h-8 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
           </div>
         </div>
       </div>
@@ -3505,30 +3658,15 @@ function AdminPortal({
     if (t.kind !== "credit" || t.toId !== agentId || t.memo === "Mint") return false;
     if (t.memo?.startsWith("Reversal") || t.memo?.startsWith("Manual") || t.memo?.startsWith("Withdraw") || t.memo?.startsWith("Correction")) return false;
     
-    // Check if this credit has been withdrawn by looking for a withdrawal transaction
-    const hasBeenWithdrawn = txns.some(withdrawal => 
-      withdrawal.kind === "debit" && 
-      withdrawal.fromId === agentId &&
-      withdrawal.memo === `Withdraw: ${t.memo}` &&
-      new Date(withdrawal.dateISO) > new Date(t.dateISO)
-    );
-    
-    return !hasBeenWithdrawn;
+    // Use the proper helper function to check if transaction has been undone
+    return !G_isTransactionUndone(t, txns);
   });
   
   const agentRedeems = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t)=> {
     if (t.kind !== "debit" || t.fromId !== agentId || !t.memo?.startsWith("Redeem:")) return false;
     
-    // Check if this redemption has been undone by looking for a reversal
-    const redemptionLabel = t.memo.replace("Redeem: ", "");
-    const hasBeenUndone = txns.some(reversal => 
-      reversal.kind === "credit" && 
-      reversal.toId === agentId &&
-      reversal.memo === `Reversal of redemption: ${redemptionLabel}` &&
-      new Date(reversal.dateISO) > new Date(t.dateISO)
-    );
-    
-    return !hasBeenUndone;
+    // Use the proper helper function to check if redemption has been undone
+    return !G_isTransactionUndone(t, txns);
   });
 
   try {
@@ -4726,10 +4864,10 @@ function Picker({
     >
       <motion.div 
         className={classNames("glass-card rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 10 }}
+        transition={{ type: "spring", stiffness: 400, damping: 30 }}
       >
         <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
@@ -4745,7 +4883,7 @@ function Picker({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-1 sm:pr-2">
-          <HoverCard theme={theme} onClick={onChooseAdmin}>
+          <HoverCard theme={theme} onClick={onChooseAdmin} delay={0}>
             <div className="font-semibold flex items-center gap-2">
               <Lock className="w-4 h-4" /> Admin Portal
             </div>
@@ -4754,8 +4892,8 @@ function Picker({
 
           {accounts
             .filter((a) => a.role !== "system")
-            .map((a) => (
-              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)}>
+            .map((a, index) => (
+              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)} delay={0.02 * (index + 1)}>
                 <div className="flex items-center gap-2 mb-1">
                   <Avatar name={a.name} size="sm" theme={theme} />
                   <div className="font-medium flex-1 truncate">{a.name}</div>
