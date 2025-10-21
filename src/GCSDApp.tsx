@@ -118,7 +118,7 @@ function accountsAreEqual(a1: Account[], a2: Account[]): boolean {
   return names1.join(',') === names2.join(',');
 }
 
-/** Compute balances map for all accounts - properly handles reversals and prevents negative balances */
+/** Compute balances map for all accounts - properly handles reversals and allows negative balances */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>();
   for (const a of accounts) map.set(a.id, 0);
@@ -133,8 +133,8 @@ function computeBalances(accounts: Account[], txns: Transaction[]) {
     if (t.kind === "debit" && t.fromId) {
       const currentBalance = map.get(t.fromId) || 0;
       const newBalance = currentBalance - t.amount;
-      // Prevent negative balances - minimum balance is 0
-      map.set(t.fromId, Math.max(0, newBalance));
+      // Allow negative balances for accurate accounting
+      map.set(t.fromId, newBalance);
     }
   }
   return map;
@@ -1003,7 +1003,7 @@ export default function GCSDApp() {
   // Reset all transactions (keep agents, clear all sales/redeems/history)
   async function completeReset(){
     const extra = prompt("Type 'RESET' to confirm clearing all transactions:");
-    if (!extra || extra !== "RESET") return toast.error("Reset cancelled");
+    if (!extra || extra.toUpperCase() !== "RESET") return toast.error("Reset cancelled");
     
     // Keep existing accounts but clear all transactions except initial mint to vault
     const vaultAccount = accounts.find(a => a.role === "system");
@@ -1814,15 +1814,20 @@ function AdminPortal({
   console.log("AdminPortal rendering:", { isAdmin, adminTab, agentId, ruleKey });
 
   /** show only ACTIVE credits (not already reversed/withdrawn) and NOT reversals themselves */
-  const agentCredits = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t) => 
-    t.kind === "credit" && 
-    t.toId === agentId && 
-    t.memo !== "Mint" && 
-    !t.memo?.startsWith("Reversal") && // Exclude reversal transactions
-    !t.memo?.startsWith("Manual") && // Exclude manual transactions
-    !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
-    !t.memo?.startsWith("Correction") // Exclude corrections
-  );
+  const agentCredits = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t) => {
+    if (t.kind !== "credit" || t.toId !== agentId || t.memo === "Mint") return false;
+    if (t.memo?.startsWith("Reversal") || t.memo?.startsWith("Manual") || t.memo?.startsWith("Withdraw") || t.memo?.startsWith("Correction")) return false;
+    
+    // Check if this credit has been withdrawn by looking for a withdrawal transaction
+    const hasBeenWithdrawn = txns.some(withdrawal => 
+      withdrawal.kind === "debit" && 
+      withdrawal.fromId === agentId &&
+      withdrawal.memo === `Withdraw: ${t.memo}` &&
+      new Date(withdrawal.dateISO) > new Date(t.dateISO)
+    );
+    
+    return !hasBeenWithdrawn;
+  });
   
   const agentRedeems = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t)=> {
     if (t.kind !== "debit" || t.fromId !== agentId || !t.memo?.startsWith("Redeem:")) return false;
