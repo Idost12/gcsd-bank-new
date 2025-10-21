@@ -2152,55 +2152,6 @@ export default function GCSDApp() {
     toast.success("All transactions cleared - all balances reset to 0");
   }
 
-  // Clean up duplicate agents
-  async function cleanupDuplicates(){
-    console.log("cleanupDuplicates called");
-    
-    // First verify admin PIN
-    const adminPin = prompt("Enter admin PIN to proceed:");
-    if (adminPin !== "13577531") {
-      return toast.error("Invalid admin PIN");
-    }
-    
-    const extra = prompt("⚠️ This will remove duplicate agents!\n\nType 'CLEANUP' to confirm:");
-    if (!extra || extra.trim().toUpperCase() !== "CLEANUP") {
-      return toast.error("Cleanup cancelled - you must type 'CLEANUP' exactly");
-    }
-    
-    // Find and remove duplicates
-    const seenNames = new Set<string>();
-    const cleanedAgents: Account[] = [];
-    const vaultAccount = accounts.find(a => a.role === "system");
-    
-    if (vaultAccount) {
-      cleanedAgents.push(vaultAccount);
-    }
-    
-    // Keep only the first occurrence of each agent name
-    for (const agent of accounts) {
-      if (agent.role === "agent") {
-        const normalizedName = agent.name.toLowerCase();
-        if (!seenNames.has(normalizedName)) {
-          cleanedAgents.push(agent);
-          seenNames.add(normalizedName);
-        }
-      }
-    }
-    
-    // Update accounts
-    setAccounts(cleanedAgents);
-    
-    // Save to database
-    try {
-      await kvSet("gcs-v4-core", { accounts: cleanedAgents, txns });
-    } catch (error) {
-      console.warn("Failed to save cleaned accounts:", error);
-    }
-    
-    const removedCount = accounts.length - cleanedAgents.length;
-    toast.success(`✅ Removed ${removedCount} duplicate agents!`);
-    logAudit("Cleanup Duplicates", `Removed ${removedCount} duplicate agents`);
-  }
 
   /** Admin metric resets */
   async function resetMetric(kind: keyof MetricsEpoch){
@@ -2698,7 +2649,6 @@ export default function GCSDApp() {
                 onResetBalance={(id)=>resetAgentBalance(id)}
                 onDeleteAgent={(id)=>deleteAgent(id)}
                 onCompleteReset={completeReset}
-                onCleanupDuplicates={cleanupDuplicates}
                 onResetMetric={resetMetric}
                 onFreezeAgent={freezeAgent}
                 onUnfreezeAgent={unfreezeAgent}
@@ -3286,7 +3236,6 @@ function AdminPortal({
   onResetBalance,
   onDeleteAgent,
   onCompleteReset,
-  onCleanupDuplicates,
   onResetMetric,
   onFreezeAgent,
   onUnfreezeAgent,
@@ -3320,7 +3269,6 @@ function AdminPortal({
   onResetBalance: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onCompleteReset: () => void;
-  onCleanupDuplicates: () => void;
   onResetMetric: (k: keyof MetricsEpoch) => void;
   onFreezeAgent: (agentId: string) => void;
   onUnfreezeAgent: (agentId: string) => void;
@@ -4095,17 +4043,7 @@ function AdminPortal({
                   </motion.div>
                 ))}
             </div>
-            <div className="mt-4 border-t pt-4 space-y-3">
-              <motion.button 
-                className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} 
-                onClick={onCleanupDuplicates}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                🧹 Remove Duplicate Agents
-              </motion.button>
-              <div className="text-xs opacity-70">This will remove duplicate agent entries</div>
-              
+            <div className="mt-4 border-t pt-4">
               <motion.button 
                 className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} 
                 onClick={onCompleteReset}
@@ -4114,7 +4052,7 @@ function AdminPortal({
               >
                 🔥 Clear All Transactions
               </motion.button>
-              <div className="text-xs opacity-70">This will clear all sales/redeems but keep agents and PINs</div>
+              <div className="text-xs opacity-70 mt-2">This will clear all sales/redeems but keep agents and PINs</div>
             </div>
           </motion.div>
         </motion.div>
