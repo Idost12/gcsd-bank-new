@@ -503,6 +503,8 @@ function RaceToRedeemBoard({
   stock: Record<string, number>;
   theme: Theme;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
   // Premium prizes (5000+ GCSD)
   const premiumPrizes = PRIZE_ITEMS.filter(p => p.price >= 5000 && (stock[p.key] ?? 0) > 0);
   
@@ -530,133 +532,194 @@ function RaceToRedeemBoard({
     );
   }
 
+  // Get overall closest contenders across all prizes
+  const topContender = premiumPrizes.map(p => {
+    const racers = getPrizeRacers(p);
+    return { prize: p, racer: racers[0], stock: stock[p.key] ?? 0 };
+  }).sort((a, b) => b.racer.progress - a.racer.progress)[0];
+
   return (
     <motion.div
-      className={classNames("rounded-2xl border p-6", neonBox(theme))}
+      className={classNames("rounded-2xl border p-4 sm:p-6 cursor-pointer", neonBox(theme))}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
+      onClick={() => setIsExpanded(!isExpanded)}
+      whileHover={{ scale: 1.01 }}
     >
-      <div className="flex items-center gap-2 mb-4">
-        <Flame className="w-5 h-5 text-orange-500" />
-        <h3 className="font-semibold text-xl">Race to Redeem</h3>
-        <span className="text-xs opacity-70">Live Competition</span>
-      </div>
-
-      <div className="space-y-4">
-        {premiumPrizes.map((prize, idx) => {
-          const racers = getPrizeRacers(prize);
-          const stockLeft = stock[prize.key] ?? 0;
-          
-          return (
-            <motion.div
-              key={prize.key}
-              className="glass-card rounded-xl p-4"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: idx * 0.1 }}
-            >
-              {/* Prize Header */}
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="font-semibold text-lg">{prize.label}</div>
-                  <div className="text-xs opacity-70">{prize.price.toLocaleString()} GCSD</div>
-                </div>
-                <div className="text-right">
-                  <div className={classNames(
-                    "text-xs font-medium px-2 py-1 rounded-lg",
-                    stockLeft === 1 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
-                  )}>
-                    {stockLeft === 1 ? "🔥 ONLY 1 LEFT" : `${stockLeft} in stock`}
-                  </div>
-                </div>
-              </div>
-
-              {/* Top Contenders */}
-              <div className="space-y-2">
-                {racers.map((racer, i) => (
-                  <motion.div
-                    key={racer.name}
-                    className="flex items-center gap-3"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 + i * 0.05 }}
-                  >
-                    {/* Position Badge */}
-                    <div className={classNames(
-                      "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
-                      i === 0 ? "bg-yellow-500 text-white" : i === 1 ? "bg-gray-400 text-white" : "bg-amber-700 text-white"
-                    )}>
-                      {i + 1}
-                    </div>
-
-                    {/* Avatar */}
-                    <Avatar name={racer.name} size="sm" theme={theme} />
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium truncate">{racer.name}</span>
-                        <span className={classNames(
-                          "text-xs font-semibold ml-2",
-                          racer.progress >= 100 ? "text-emerald-500" : racer.progress >= 75 ? "text-yellow-500" : "text-slate-500"
-                        )}>
-                          {racer.progress}%
-                        </span>
-                      </div>
-                      
-                      {/* Progress Bar */}
-                      <div className="h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                        <motion.div
-                          className={classNames(
-                            "h-2 rounded-full",
-                            racer.progress >= 100 ? "bg-emerald-500" : racer.progress >= 75 ? "bg-yellow-500" : "bg-blue-500"
-                          )}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${racer.progress}%` }}
-                          transition={{ duration: 0.8, delay: idx * 0.1 + i * 0.05 + 0.2 }}
-                        />
-                      </div>
-                      
-                      {/* Remaining */}
-                      <div className="text-xs opacity-60 mt-1">
-                        {racer.progress >= 100 ? (
-                          <span className="text-emerald-500 font-medium">✓ Can redeem now!</span>
-                        ) : (
-                          <span>Need {racer.remaining.toLocaleString()} more GCSD ({Math.ceil(racer.remaining / 500)} Full Evals)</span>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-
-              {/* Winner spotlight if someone can redeem */}
-              {racers[0]?.progress >= 100 && (
-                <motion.div
-                  className="mt-3 pt-3 border-t border-white/10"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.5 }}
-                >
-                  <div className="text-center text-sm">
-                    <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-500/20 text-emerald-500 font-medium">
-                      🎉 {racers[0].name} can claim this prize!
-                    </span>
-                  </div>
-                </motion.div>
-              )}
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {premiumPrizes.length === 0 && (
-        <div className="text-center py-8 opacity-70">
-          <div className="text-4xl mb-2">📦</div>
-          <div className="text-sm">All premium prizes are currently out of stock</div>
+      {/* Header - Always Visible */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Flame className="w-5 h-5 text-orange-500" />
+          <h3 className="font-semibold text-lg sm:text-xl">Race to Redeem</h3>
+          <span className="text-xs opacity-70 hidden sm:inline">Live Competition</span>
         </div>
+        <motion.div
+          animate={{ rotate: isExpanded ? 180 : 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <ChevronDown className="w-5 h-5 opacity-70" />
+        </motion.div>
+      </div>
+
+      {/* Minimized Preview */}
+      {!isExpanded && topContender && (
+        <motion.div
+          className="mt-3 glass rounded-xl p-3"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="text-2xl">🏆</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">
+                {topContender.racer.name} leading for <span className="text-orange-500">{topContender.prize.label}</span>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="flex-1 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                  <div
+                    className={classNames(
+                      "h-2 rounded-full",
+                      topContender.racer.progress >= 100 ? "bg-emerald-500" : "bg-yellow-500"
+                    )}
+                    style={{ width: `${topContender.racer.progress}%` }}
+                  />
+                </div>
+                <span className="text-xs font-semibold">{topContender.racer.progress}%</span>
+              </div>
+            </div>
+            {topContender.stock === 1 && (
+              <div className="text-xs font-medium px-2 py-1 rounded-lg bg-red-500/20 text-red-500 whitespace-nowrap">
+                🔥 1 LEFT
+              </div>
+            )}
+          </div>
+          <div className="text-xs opacity-60 text-center mt-2">
+            Click to see all {premiumPrizes.length} premium prizes
+          </div>
+        </motion.div>
       )}
+
+      {/* Expanded View */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+              {premiumPrizes.map((prize, idx) => {
+                const racers = getPrizeRacers(prize);
+                const stockLeft = stock[prize.key] ?? 0;
+                
+                return (
+                  <motion.div
+                    key={prize.key}
+                    className="glass-card rounded-xl p-4"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.1 }}
+                  >
+                    {/* Prize Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div className="font-semibold text-lg">{prize.label}</div>
+                        <div className="text-xs opacity-70">{prize.price.toLocaleString()} GCSD</div>
+                      </div>
+                      <div className="text-right">
+                        <div className={classNames(
+                          "text-xs font-medium px-2 py-1 rounded-lg",
+                          stockLeft === 1 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                        )}>
+                          {stockLeft === 1 ? "🔥 ONLY 1 LEFT" : `${stockLeft} in stock`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Top Contenders */}
+                    <div className="space-y-2">
+                      {racers.map((racer, i) => (
+                        <motion.div
+                          key={racer.name}
+                          className="flex items-center gap-3"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.1 + i * 0.05 }}
+                        >
+                          {/* Position Badge */}
+                          <div className={classNames(
+                            "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                            i === 0 ? "bg-yellow-500 text-white" : i === 1 ? "bg-gray-400 text-white" : "bg-amber-700 text-white"
+                          )}>
+                            {i + 1}
+                          </div>
+
+                          {/* Avatar */}
+                          <Avatar name={racer.name} size="sm" theme={theme} />
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-medium truncate">{racer.name}</span>
+                              <span className={classNames(
+                                "text-xs font-semibold ml-2",
+                                racer.progress >= 100 ? "text-emerald-500" : racer.progress >= 75 ? "text-yellow-500" : "text-slate-500"
+                              )}>
+                                {racer.progress}%
+                              </span>
+                            </div>
+                            
+                            {/* Progress Bar */}
+                            <div className="h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                              <motion.div
+                                className={classNames(
+                                  "h-2 rounded-full",
+                                  racer.progress >= 100 ? "bg-emerald-500" : racer.progress >= 75 ? "bg-yellow-500" : "bg-blue-500"
+                                )}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${racer.progress}%` }}
+                                transition={{ duration: 0.8, delay: idx * 0.1 + i * 0.05 + 0.2 }}
+                              />
+                            </div>
+                            
+                            {/* Remaining */}
+                            <div className="text-xs opacity-60 mt-1">
+                              {racer.progress >= 100 ? (
+                                <span className="text-emerald-500 font-medium">✓ Can redeem now!</span>
+                              ) : (
+                                <span>Need {racer.remaining.toLocaleString()} more GCSD ({Math.ceil(racer.remaining / 500)} Full Evals)</span>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Winner spotlight if someone can redeem */}
+                    {racers[0]?.progress >= 100 && (
+                      <motion.div
+                        className="mt-3 pt-3 border-t border-white/10"
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.5 }}
+                      >
+                        <div className="text-center text-sm">
+                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-500/20 text-emerald-500 font-medium">
+                            🎉 {racers[0].name} can claim this prize!
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
