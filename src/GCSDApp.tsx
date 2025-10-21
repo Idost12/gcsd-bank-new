@@ -710,8 +710,38 @@ export default function GCSDApp() {
     .filter(t=> t.kind==="credit" && t.toId===currentAgentId && t.memo!=="Mint" && !G_isReversalOfRedemption(t))
     .reduce((a,b)=>a+b.amount,0)
     - agentTxns.filter(t=> G_isCorrectionDebit(t) && t.fromId===currentAgentId).reduce((a,b)=>a+b.amount,0);
-  const lifetimeSpend = agentTxns.filter(t=> t.kind==="debit"  && t.fromId===currentAgentId && !G_isCorrectionDebit(t)).reduce((a,b)=>a+b.amount,0);
-  const prizeCountActive = agentTxns.filter(t=> G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
+  const lifetimeSpend = agentTxns.filter(t=> {
+    if (t.kind !== "debit" || t.fromId !== currentAgentId) return false;
+    if (t.memo?.startsWith("Correction") || t.memo?.startsWith("Reversal") || t.memo?.startsWith("Balance reset")) return false;
+    
+    // For redemptions, check if they've been undone
+    if (t.memo?.startsWith("Redeem:")) {
+      const redemptionLabel = t.memo.replace("Redeem: ", "");
+      const hasBeenUndone = agentTxns.some(reversal => 
+        reversal.kind === "credit" && 
+        reversal.toId === currentAgentId &&
+        reversal.memo === `Reversal of redemption: ${redemptionLabel}` &&
+        new Date(reversal.dateISO) > new Date(t.dateISO)
+      );
+      return !hasBeenUndone;
+    }
+    
+    return true;
+  }).reduce((a,b)=>a+b.amount,0);
+  const prizeCountActive = agentTxns.filter(t=> {
+    if (t.kind !== "debit" || t.fromId !== currentAgentId || !t.memo?.startsWith("Redeem:")) return false;
+    
+    // Check if this redemption has been undone
+    const redemptionLabel = t.memo.replace("Redeem: ", "");
+    const hasBeenUndone = agentTxns.some(reversal => 
+      reversal.kind === "credit" && 
+      reversal.toId === currentAgentId &&
+      reversal.memo === `Reversal of redemption: ${redemptionLabel}` &&
+      new Date(reversal.dateISO) > new Date(t.dateISO)
+    );
+    
+    return !hasBeenUndone;
+  }).length;
 
   /* helpers bound to state */
   const postTxn = (partial: Partial<Transaction> & Pick<Transaction,"kind"|"amount">) =>
@@ -979,9 +1009,12 @@ export default function GCSDApp() {
     const vaultAccount = accounts.find(a => a.role === "system");
     if (!vaultAccount) return toast.error("System error: vault not found");
     
+    // Create fresh transactions with only the initial mint
     const freshTxns: Transaction[] = [
       { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: vaultAccount.id },
     ];
+    
+    // Reset all other data
     const freshStock = INITIAL_STOCK;
     const freshGoals = {};
     const freshEpochs = {};
@@ -1009,8 +1042,8 @@ export default function GCSDApp() {
     setMetrics(freshMetrics);
     setNotifs(freshNotifs);
     
-    notify("🧨 All transactions cleared by admin");
-    toast.success("All transactions cleared - agents preserved");
+    notify("🧨 All transactions cleared by admin - all balances reset to 0");
+    toast.success("All transactions cleared - all balances reset to 0");
   }
 
   /** Admin metric resets */
@@ -1791,14 +1824,20 @@ function AdminPortal({
     !t.memo?.startsWith("Correction") // Exclude corrections
   );
   
-  const agentRedeems = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t)=> 
-    t.kind === "debit" && 
-    t.fromId === agentId &&
-    t.memo?.startsWith("Redeem:") && // Only actual redemptions
-    !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
-    !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
-    !t.memo?.startsWith("Correction") // Exclude corrections
-  );
+  const agentRedeems = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t)=> {
+    if (t.kind !== "debit" || t.fromId !== agentId || !t.memo?.startsWith("Redeem:")) return false;
+    
+    // Check if this redemption has been undone by looking for a reversal
+    const redemptionLabel = t.memo.replace("Redeem: ", "");
+    const hasBeenUndone = txns.some(reversal => 
+      reversal.kind === "credit" && 
+      reversal.toId === agentId &&
+      reversal.memo === `Reversal of redemption: ${redemptionLabel}` &&
+      new Date(reversal.dateISO) > new Date(t.dateISO)
+    );
+    
+    return !hasBeenUndone;
+  });
 
   try {
     return (
