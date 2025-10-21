@@ -1782,39 +1782,28 @@ function AdminPortal({
 
   /** show only ACTIVE credits (not already reversed/withdrawn) and NOT reversals themselves */
   const agentCredits = useMemo(() => {
-    try {
-      if (!agentId || !txns) return [];
-      return txns.filter((t) => 
-        t.kind === "credit" && 
-        t.toId === agentId && 
-        t.memo !== "Mint" && 
-        !G_isReversalOfRedemption(t) && // Exclude reversal transactions
-        !G_isCorrectionDebit(t) && // Exclude corrections
-        !t.memo?.startsWith("Manual") && // Exclude manual transactions
-        !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
-        G_isSaleStillActive(t, txns)
-      );
-    } catch (error) {
-      console.error("Error in agentCredits useMemo:", error);
-      return [];
-    }
+    if (!agentId || !txns || txns.length === 0) return [];
+    return txns.filter((t) => 
+      t.kind === "credit" && 
+      t.toId === agentId && 
+      t.memo !== "Mint" && 
+      !t.memo?.startsWith("Reversal") && // Exclude reversal transactions
+      !t.memo?.startsWith("Manual") && // Exclude manual transactions
+      !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
+      !t.memo?.startsWith("Correction") // Exclude corrections
+    );
   }, [txns, agentId]);
   
   const agentRedeems = useMemo(() => {
-    try {
-      if (!agentId || !txns) return [];
-      return txns.filter((t)=> 
-        G_isRedeemTxn(t) && 
-        t.fromId === agentId &&
-        !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
-        !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
-        !t.memo?.startsWith("Correction") && // Exclude corrections
-        G_isRedeemStillActive(t, txns) // Only show active redeems
-      );
-    } catch (error) {
-      console.error("Error in agentRedeems useMemo:", error);
-      return [];
-    }
+    if (!agentId || !txns || txns.length === 0) return [];
+    return txns.filter((t)=> 
+      t.kind === "debit" && 
+      t.fromId === agentId &&
+      t.memo?.startsWith("Redeem:") && // Only actual redemptions
+      !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
+      !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
+      !t.memo?.startsWith("Correction") // Exclude corrections
+    );
   }, [txns, agentId]);
 
   try {
