@@ -1325,64 +1325,6 @@ const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
-// Data restoration function - call this to restore all data
-const restoreAllData = async () => {
-  console.log("🔄 Restoring all data...");
-  
-  // Create fresh accounts with proper IDs
-  const vault = { id: uid(), name: "Bank Vault", role: "system" as const };
-  const agents = AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const }));
-  const allAccounts = [vault, ...agents];
-  
-  // Create initial transactions with some realistic balances
-  const initialTxns: Transaction[] = [
-    { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: vault.id },
-    // Give some agents initial balances to make it realistic
-    { id: uid(), kind: "credit", amount: 2500, memo: "Initial Balance", dateISO: nowISO(), toId: agents[0].id }, // Oliver Steele
-    { id: uid(), kind: "credit", amount: 1800, memo: "Initial Balance", dateISO: nowISO(), toId: agents[1].id }, // Maya Graves
-    { id: uid(), kind: "credit", amount: 3200, memo: "Initial Balance", dateISO: nowISO(), toId: agents[2].id }, // Viktor Parks
-    { id: uid(), kind: "credit", amount: 1200, memo: "Initial Balance", dateISO: nowISO(), toId: agents[3].id }, // Ben Mills
-    { id: uid(), kind: "credit", amount: 2100, memo: "Initial Balance", dateISO: nowISO(), toId: agents[4].id }, // Stan Harris
-    { id: uid(), kind: "credit", amount: 2800, memo: "Initial Balance", dateISO: nowISO(), toId: agents[5].id }, // Michael Wilson
-    { id: uid(), kind: "credit", amount: 1500, memo: "Initial Balance", dateISO: nowISO(), toId: agents[6].id }, // Hope Marshall
-    { id: uid(), kind: "credit", amount: 2200, memo: "Initial Balance", dateISO: nowISO(), toId: agents[7].id }, // Sofie Roy
-    { id: uid(), kind: "credit", amount: 1900, memo: "Initial Balance", dateISO: nowISO(), toId: agents[8].id }, // Logan Noir
-    { id: uid(), kind: "credit", amount: 2600, memo: "Initial Balance", dateISO: nowISO(), toId: agents[9].id }, // Justin Frey
-    { id: uid(), kind: "credit", amount: 1700, memo: "Initial Balance", dateISO: nowISO(), toId: agents[10].id }, // Rebecca Brooks
-    { id: uid(), kind: "credit", amount: 2400, memo: "Initial Balance", dateISO: nowISO(), toId: agents[11].id }, // Christopher O'Connor
-    { id: uid(), kind: "credit", amount: 1300, memo: "Initial Balance", dateISO: nowISO(), toId: agents[12].id }, // Caitlyn Stone
-    { id: uid(), kind: "credit", amount: 2000, memo: "Initial Balance", dateISO: nowISO(), toId: agents[13].id }, // Frank Collins
-    { id: uid(), kind: "credit", amount: 1600, memo: "Initial Balance", dateISO: nowISO(), toId: agents[14].id }, // Antonio Cortes
-    { id: uid(), kind: "credit", amount: 2300, memo: "Initial Balance", dateISO: nowISO(), toId: agents[15].id }, // Kevin Nolan
-    { id: uid(), kind: "credit", amount: 1800, memo: "Initial Balance", dateISO: nowISO(), toId: agents[16].id }, // Daniel Hill
-  ];
-  
-  // Set some realistic goals
-  const goals: Record<string, number> = {
-    [agents[0].id]: 5000, // Oliver Steele
-    [agents[1].id]: 3000, // Maya Graves
-    [agents[2].id]: 4000, // Viktor Parks
-    [agents[3].id]: 2500, // Ben Mills
-    [agents[4].id]: 3500, // Stan Harris
-    [agents[5].id]: 4500, // Michael Wilson
-  };
-  
-  // Save everything to database
-  await kvSet("gcs-v4-core", { accounts: allAccounts, txns: initialTxns });
-  await kvSet("gcs-v4-stock", INITIAL_STOCK);
-  await kvSet("gcs-v4-goals", goals);
-  await kvSet("gcs-v4-pins", {});
-  await kvSet("gcs-v4-notifs", []);
-  await kvSet("gcs-v4-admin-notifs", []);
-  await kvSet("gcs-v4-redeem-requests", []);
-  await kvSet("gcs-v4-audit-logs", []);
-  await kvSet("gcs-v4-wishlist", {});
-  await kvSet("gcs-v4-epochs", {});
-  await kvSet("gcs-v4-metrics", {});
-  
-  console.log("✅ Data restoration complete!");
-  return { accounts: allAccounts, txns: initialTxns, goals };
-};
 
 
 export default function GCSDApp() {
@@ -2162,32 +2104,102 @@ export default function GCSDApp() {
       return toast.error("Invalid admin PIN");
     }
     
-    const extra = prompt("⚠️ WARNING: This will restore ALL data with fresh balances!\n\nType 'RESTORE' to confirm:");
+    const extra = prompt("⚠️ WARNING: This will clear ALL transactions!\n\nType 'RESET' to confirm:");
     console.log("User input:", extra);
-    if (!extra || extra.trim().toUpperCase() !== "RESTORE") {
-      console.log("Restore cancelled - input was:", extra);
-      return toast.error("Restore cancelled - you must type 'RESTORE' exactly");
+    if (!extra || extra.trim().toUpperCase() !== "RESET") {
+      console.log("Reset cancelled - input was:", extra);
+      return toast.error("Reset cancelled - you must type 'RESET' exactly");
     }
     
-    // Use the restore function to get fresh data
-    const restoredData = await restoreAllData();
+    // Keep existing accounts but clear all transactions except initial mint to vault
+    const vaultAccount = accounts.find(a => a.role === "system");
+    if (!vaultAccount) return toast.error("System error: vault not found");
+    
+    // Create fresh transactions with only the initial mint
+    const freshTxns: Transaction[] = [
+      { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: vaultAccount.id },
+    ];
+    
+    // Reset all other data
+    const freshStock = INITIAL_STOCK;
+    const freshGoals = {};
+    const freshEpochs = {};
+    const freshMetrics = {};
+    const freshNotifs: Notification[] = [];
+    
+    // Save to database
+    try {
+      await kvSet("gcs-v4-core", { accounts, txns: freshTxns });
+      await kvSet("gcs-v4-stock", freshStock);
+      await kvSet("gcs-v4-goals", freshGoals);
+      await kvSet("gcs-v4-epochs", freshEpochs);
+      await kvSet("gcs-v4-metrics", freshMetrics);
+      await kvSet("gcs-v4-notifs", freshNotifs);
+      // Keep PINs - don't reset them
+    } catch (error) {
+      console.warn("Failed to save reset state:", error);
+    }
     
     // Update local state
-    setAccounts(restoredData.accounts);
-    setTxns(restoredData.txns);
-    setGoals(restoredData.goals);
-    setStock(INITIAL_STOCK);
-    setPins({});
-    setNotifs([]);
-    setAdminNotifs([]);
-    setRedeemRequests([]);
-    setAuditLogs([]);
-    setWishlist({});
-    setEpochs({});
-    setMetrics({});
+    setTxns(freshTxns);
+    setStock(freshStock);
+    setGoals(freshGoals);
+    setEpochs(freshEpochs);
+    setMetrics(freshMetrics);
+    setNotifs(freshNotifs);
     
-    toast.success("✅ All data restored with fresh balances!");
-    logAudit("Data Restore", "Complete data restoration with fresh balances");
+    notify("🧨 All transactions cleared by admin - all balances reset to 0");
+    toast.success("All transactions cleared - all balances reset to 0");
+  }
+
+  // Clean up duplicate agents
+  async function cleanupDuplicates(){
+    console.log("cleanupDuplicates called");
+    
+    // First verify admin PIN
+    const adminPin = prompt("Enter admin PIN to proceed:");
+    if (adminPin !== "13577531") {
+      return toast.error("Invalid admin PIN");
+    }
+    
+    const extra = prompt("⚠️ This will remove duplicate agents!\n\nType 'CLEANUP' to confirm:");
+    if (!extra || extra.trim().toUpperCase() !== "CLEANUP") {
+      return toast.error("Cleanup cancelled - you must type 'CLEANUP' exactly");
+    }
+    
+    // Find and remove duplicates
+    const seenNames = new Set<string>();
+    const cleanedAgents: Account[] = [];
+    const vaultAccount = accounts.find(a => a.role === "system");
+    
+    if (vaultAccount) {
+      cleanedAgents.push(vaultAccount);
+    }
+    
+    // Keep only the first occurrence of each agent name
+    for (const agent of accounts) {
+      if (agent.role === "agent") {
+        const normalizedName = agent.name.toLowerCase();
+        if (!seenNames.has(normalizedName)) {
+          cleanedAgents.push(agent);
+          seenNames.add(normalizedName);
+        }
+      }
+    }
+    
+    // Update accounts
+    setAccounts(cleanedAgents);
+    
+    // Save to database
+    try {
+      await kvSet("gcs-v4-core", { accounts: cleanedAgents, txns });
+    } catch (error) {
+      console.warn("Failed to save cleaned accounts:", error);
+    }
+    
+    const removedCount = accounts.length - cleanedAgents.length;
+    toast.success(`✅ Removed ${removedCount} duplicate agents!`);
+    logAudit("Cleanup Duplicates", `Removed ${removedCount} duplicate agents`);
   }
 
   /** Admin metric resets */
@@ -2686,6 +2698,7 @@ export default function GCSDApp() {
                 onResetBalance={(id)=>resetAgentBalance(id)}
                 onDeleteAgent={(id)=>deleteAgent(id)}
                 onCompleteReset={completeReset}
+                onCleanupDuplicates={cleanupDuplicates}
                 onResetMetric={resetMetric}
                 onFreezeAgent={freezeAgent}
                 onUnfreezeAgent={unfreezeAgent}
@@ -3273,6 +3286,7 @@ function AdminPortal({
   onResetBalance,
   onDeleteAgent,
   onCompleteReset,
+  onCleanupDuplicates,
   onResetMetric,
   onFreezeAgent,
   onUnfreezeAgent,
@@ -3306,6 +3320,7 @@ function AdminPortal({
   onResetBalance: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onCompleteReset: () => void;
+  onCleanupDuplicates: () => void;
   onResetMetric: (k: keyof MetricsEpoch) => void;
   onFreezeAgent: (agentId: string) => void;
   onUnfreezeAgent: (agentId: string) => void;
@@ -4080,16 +4095,26 @@ function AdminPortal({
                   </motion.div>
                 ))}
             </div>
-            <div className="mt-4 border-t pt-4">
+            <div className="mt-4 border-t pt-4 space-y-3">
+              <motion.button 
+                className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} 
+                onClick={onCleanupDuplicates}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                🧹 Remove Duplicate Agents
+              </motion.button>
+              <div className="text-xs opacity-70">This will remove duplicate agent entries</div>
+              
               <motion.button 
                 className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} 
                 onClick={onCompleteReset}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
-                🔄 Restore All Data
+                🔥 Clear All Transactions
               </motion.button>
-              <div className="text-xs opacity-70 mt-2">This will restore all agents with fresh balances</div>
+              <div className="text-xs opacity-70">This will clear all sales/redeems but keep agents and PINs</div>
             </div>
           </motion.div>
         </motion.div>
