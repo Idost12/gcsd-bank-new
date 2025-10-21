@@ -1777,37 +1777,51 @@ function AdminPortal({
     );
   }
 
+  // Debug: Log admin portal state
+  console.log("AdminPortal rendering:", { isAdmin, adminTab, agentId, ruleKey });
+
   /** show only ACTIVE credits (not already reversed/withdrawn) and NOT reversals themselves */
   const agentCredits = useMemo(() => {
-    if (!agentId) return [];
-    return txns.filter((t) => 
-      t.kind === "credit" && 
-      t.toId === agentId && 
-      t.memo !== "Mint" && 
-      !G_isReversalOfRedemption(t) && // Exclude reversal transactions
-      !G_isCorrectionDebit(t) && // Exclude corrections
-      !t.memo?.startsWith("Manual") && // Exclude manual transactions
-      !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
-      G_isSaleStillActive(t, txns)
-    );
+    try {
+      if (!agentId || !txns) return [];
+      return txns.filter((t) => 
+        t.kind === "credit" && 
+        t.toId === agentId && 
+        t.memo !== "Mint" && 
+        !G_isReversalOfRedemption(t) && // Exclude reversal transactions
+        !G_isCorrectionDebit(t) && // Exclude corrections
+        !t.memo?.startsWith("Manual") && // Exclude manual transactions
+        !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
+        G_isSaleStillActive(t, txns)
+      );
+    } catch (error) {
+      console.error("Error in agentCredits useMemo:", error);
+      return [];
+    }
   }, [txns, agentId]);
   
   const agentRedeems = useMemo(() => {
-    if (!agentId) return [];
-    return txns.filter((t)=> 
-      G_isRedeemTxn(t) && 
-      t.fromId === agentId &&
-      !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
-      !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
-      !t.memo?.startsWith("Correction") && // Exclude corrections
-      G_isRedeemStillActive(t, txns) // Only show active redeems
-    );
+    try {
+      if (!agentId || !txns) return [];
+      return txns.filter((t)=> 
+        G_isRedeemTxn(t) && 
+        t.fromId === agentId &&
+        !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
+        !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
+        !t.memo?.startsWith("Correction") && // Exclude corrections
+        G_isRedeemStillActive(t, txns) // Only show active redeems
+      );
+    } catch (error) {
+      console.error("Error in agentRedeems useMemo:", error);
+      return [];
+    }
   }, [txns, agentId]);
 
-  return (
-    <div className="grid gap-4">
-      {/* Tabs */}
-      <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
+  try {
+    return (
+      <div className="grid gap-4">
+        {/* Tabs */}
+        <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
         {[
           ["dashboard", "Dashboard"],
           ["addsale", "Add Sale"],
@@ -2442,6 +2456,16 @@ function AdminPortal({
       )}
     </div>
   );
+  } catch (error) {
+    console.error("Error in AdminPortal:", error);
+    return (
+      <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
+        <div className="text-red-500 mb-2">⚠️ Admin Portal Error</div>
+        <div className="text-sm opacity-70">Please refresh the page and try again.</div>
+        <div className="text-xs opacity-50 mt-2">Error: {error instanceof Error ? error.message : 'Unknown error'}</div>
+      </div>
+    );
+  }
 }
 
 /** Picker */
