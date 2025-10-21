@@ -2050,7 +2050,7 @@ function Home({
         <EnhancedPodium leaderboard={leaderboard} theme={theme} />
       </motion.div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid lg:grid-cols-3 gap-6">
         {/* Left Column - Dashboard & Performance */}
         <div className="space-y-6">
           {/* Dashboard Stats */}
@@ -2092,6 +2092,44 @@ function Home({
             <LineChart earned={earnedSeries} spent={spentSeries} />
           </motion.div>
         </div>
+
+        {/* Middle Column - Leaderboard */}
+        <motion.div 
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="text-lg font-semibold mb-4">🏆 Leaderboard</div>
+          <div className="space-y-2 max-h-[600px] overflow-auto pr-2">
+            {leaderboard.map((row, i) => (
+              <motion.div 
+                key={row.id} 
+                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.05, duration: 0.3 }}
+                whileHover={{ scale: 1.02, x: 4 }}
+              >
+                <div className="flex items-center gap-2">
+                  <motion.span 
+                    className="w-5 text-right"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: i * 0.05 + 0.1, type: "spring", stiffness: 200 }}
+                  >
+                    {i + 1}.
+                  </motion.span>
+                  <span className="font-medium">{row.name}</span>
+                </div>
+                <div className="text-sm">
+                  <NumberFlash value={row.balance} />
+                </div>
+              </motion.div>
+            ))}
+            {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
+          </div>
+        </motion.div>
 
         {/* Right Column - Activity & Prizes */}
         <div className="space-y-6">
@@ -2281,6 +2319,9 @@ function AgentPortal({
                   {progress < 100 && (
                     <div className="mt-2 text-xs opacity-70">
                       💡 Need ~{Math.ceil((goal - balance) / 50)} more evaluations to reach goal
+                      <div className="text-xs opacity-60 mt-1">
+                        (Current: {balance.toLocaleString()} / {goal.toLocaleString()} GCSD)
+                      </div>
                     </div>
                   )}
                   {progress >= 100 && (
