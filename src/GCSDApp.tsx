@@ -1744,6 +1744,33 @@ function Home({
     sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
   ), [txns, metrics.spent30d, days, nonSystemIds]);
 
+  // Leaderboard: use current balance (proper banking logic) - memoized for stability
+  const balances = useMemo(() => computeBalances(accounts, txns), [accounts, txns]);
+
+  // Calculate total accumulated credited balance (all earnings minus withdrawals, not affected by purchases)
+  const totalActiveBalance = useMemo(() => {
+    const total = Array.from(nonSystemIds).reduce((sum: number, agentId) => {
+      // Get all transactions for this agent
+      const agentTxns = txns.filter(t => t.toId === agentId || t.fromId === agentId);
+      
+      // Sum all credits (earnings) - excluding Mint and redemption reversals
+      const totalCredits = agentTxns
+        .filter(t => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
+        .reduce((acc, t) => acc + t.amount, 0);
+      
+      // Subtract withdrawals/corrections (admin removing money)
+      const totalWithdrawals = agentTxns
+        .filter(t => G_isCorrectionDebit(t) && t.fromId === agentId)
+        .reduce((acc, t) => acc + t.amount, 0);
+      
+      const agentEarnings = totalCredits - totalWithdrawals;
+      return sum + agentEarnings;
+    }, 0);
+    
+    console.log("Total accumulated credited balance (earnings - withdrawals):", total);
+    return Math.max(0, total); // Never negative
+  }, [nonSystemIds, txns]);
+  
   const totalEarned = useMemo(() => {
     const total = earnedSeries.reduce((a, b) => a + b, 0);
     console.log("Total earned (30d):", total);
@@ -1751,9 +1778,6 @@ function Home({
     return total;
   }, [earnedSeries]);
   const totalSpent = useMemo(() => spentSeries.reduce((a, b) => a + b, 0), [spentSeries]);
-
-  // Leaderboard: use current balance (proper banking logic) - memoized for stability
-  const balances = useMemo(() => computeBalances(accounts, txns), [accounts, txns]);
   const leaderboard = useMemo(() => Array.from(nonSystemIds)
     .map((id) => {
       const balance = balances.get(id) || 0;
@@ -1815,7 +1839,7 @@ function Home({
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Dashboard</div>
           <div className="grid sm:grid-cols-2 gap-4">
-            <TileRow label="Total GCSD Earned (30d)" value={totalEarned} />
+            <TileRow label="Total Active Balance" value={totalActiveBalance} />
             <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
           </div>
 
@@ -2302,7 +2326,7 @@ function AdminPortal({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
-                Reset "Total GCSD Earned (30d)"
+                Reset "Earned" Chart (30d)
               </motion.button>
               <motion.button 
                 className={classNames("px-3 py-2 rounded-xl text-sm", neonBtn(theme, true))} 
