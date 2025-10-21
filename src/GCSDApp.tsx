@@ -620,8 +620,9 @@ export default function GCSDApp() {
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-        // Load theme from KV storage
-        setTheme((await kvGet<Theme>("gcs-v4-theme")) ?? "light");
+        // Theme is local to each browser session - use localStorage
+        const savedTheme = localStorage.getItem("gcsd-theme") as Theme;
+        setTheme(savedTheme || "light");
       } finally {
         setHydrated(true);
       }
@@ -655,7 +656,7 @@ export default function GCSDApp() {
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
-      if (key === "gcs-v4-theme") setTheme(val ?? (await kvGet("gcs-v4-theme")) ?? "light");
+      // Theme is local to each browser - not synced across users
     });
     return off;
   }, []);
@@ -669,6 +670,13 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
+  
+  /* theme persistence - local to each browser */
+  useEffect(() => { 
+    if (hydrated) {
+      localStorage.setItem("gcsd-theme", theme);
+    }
+  }, [hydrated, theme]);
 
   /* clock + intro */
   useEffect(()=> {
@@ -977,9 +985,15 @@ export default function GCSDApp() {
 
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
-    setGoals(prev=> ({...prev, [agentId]: amount}));
-    notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
-    toast.success("Goal updated");
+    
+    // Require PIN verification for setting goals
+    openAgentPin(agentId, (ok) => {
+      if (!ok) return toast.error("Wrong PIN");
+      
+      setGoals(prev=> ({...prev, [agentId]: amount}));
+      notify(`🎯 ${getName(agentId)} updated savings goal to ${amount} GCSD`);
+      toast.success("Goal updated");
+    });
   }
 
   // Reset agent completely - clear all transactions and history for this agent
@@ -1188,31 +1202,31 @@ export default function GCSDApp() {
             : "sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200"
         }
       >
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src={LOGO_URL} alt="GCS Bank logo" className="h-14 w-14 rounded drop-shadow-sm" />
-            <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
+        <div className="max-w-6xl mx-auto px-2 sm:px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-1 sm:gap-3">
+            <img src={LOGO_URL} alt="GCS Bank logo" className="h-8 w-8 sm:h-14 sm:w-14 rounded drop-shadow-sm" />
+            <span className="font-semibold text-sm sm:text-base lg:text-lg">{APP_NAME}</span>
             <motion.button
-              className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
+              className={classNames("ml-1 sm:ml-3 inline-flex items-center gap-1 text-xs sm:text-sm px-1 sm:px-2 py-1 rounded-lg", neonBtn(theme))}
               onClick={()=> setPortal("home")}
               title="Go Home"
               whileHover={{ scale: 1.05, y: -1 }}
               whileTap={{ scale: 0.95 }}
             >
-              <HomeIcon className="w-4 h-4"/> Home
+              <HomeIcon className="w-3 h-3 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Home</span>
             </motion.button>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 sm:gap-3">
             <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
-            <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+            <span className={classNames("text-xs font-mono hidden sm:inline", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
             <motion.button 
-              className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
+              className={classNames("px-1 sm:px-3 py-1 sm:py-1.5 rounded-xl flex items-center gap-1 sm:gap-2 text-xs sm:text-sm", neonBtn(theme))}
               onClick={()=> setPickerOpen(true)}
               whileHover={{ scale: 1.05, y: -1 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Users className="w-4 h-4"/> Switch User
+              <Users className="w-3 h-3 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Switch User</span>
             </motion.button>
           </div>
         </div>
@@ -1240,7 +1254,10 @@ export default function GCSDApp() {
             maxLen={8}
             onClose={() => { setPortal("home"); }}
             onOk={(pin) => {
-              if (!/^\d{5,8}$/.test(pin)) { toast.error("Enter a valid PIN"); return; }
+              if (pin !== "13577531") { 
+                toast.error("Invalid admin PIN"); 
+                return; 
+              }
               setAdminPin(pin);
               setIsAdmin(true);
               toast.success("Admin unlocked");
@@ -1324,7 +1341,7 @@ export default function GCSDApp() {
       </AnimatePresence>
 
       {/* Pages */}
-      <div className="max-w-6xl mx-auto px-4 py-6">
+      <div className="max-w-6xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
         <AnimatePresence mode="wait">
           {portal==="home" && (
             <motion.div
@@ -1733,10 +1750,15 @@ function AgentPortal({
             <div className="rounded-xl border p-3">
               <div className="flex items-center gap-3">
                 <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
-                <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={() => (goalInput ? onSetGoal(parseInt(goalInput, 10)) : null)}>
+                <button 
+                  className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} 
+                  onClick={() => (goalInput ? onSetGoal(parseInt(goalInput, 10)) : null)}
+                  title="PIN required to set goal"
+                >
                   <Check className="w-4 h-4 inline mr-1" /> Set goal
                 </button>
               </div>
+              <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
               <div className="mt-3 text-sm opacity-70">{goal > 0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
               <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
                 <motion.div 
@@ -2606,16 +2628,16 @@ function Picker({
       transition={{ duration: 0.2 }}
     >
       <motion.div 
-        className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}
+        className={classNames("rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-hidden", neonBox(theme))}
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ duration: 0.3 }}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" />
-            <h2 className="text-xl font-semibold">Switch User</h2>
+            <h2 className="text-lg sm:text-xl font-semibold">Switch User</h2>
           </div>
           <motion.button 
             className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" 
@@ -2627,7 +2649,7 @@ function Picker({
           </motion.button>
         </div>
 
-        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-2">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-[60vh] overflow-auto pr-1 sm:pr-2">
           <HoverCard theme={theme} onClick={onChooseAdmin}>
             <div className="font-semibold flex items-center gap-2">
               <Lock className="w-4 h-4" /> Admin Portal
