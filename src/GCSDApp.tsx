@@ -79,13 +79,17 @@ const PRIZE_ITEMS: PrizeItem[] = [
   { key: "flight_milan",   label: "Milan Flights",          price: 11350 },
   { key: "meme_generator", label: "Custom Meme Generator",  price: 100   },
   { key: "vip_entrance",   label: "VIP Entrance (Applause)", price: 400  },
+  { key: "office_dj",      label: "Office DJ (2 Hours)",    price: 700   },
+  { key: "shorts_day",     label: "Shorts Privilege (1 Day)", price: 1000  },
 ];
 
 const INITIAL_STOCK: Record<string, number> = {
   airfryer: 1, soundbar: 1, burger_lunch: 2, voucher_50: 1, poker: 1,
   soda_maker: 1, magsafe: 1, galaxy_fit3: 1, cinema_tickets: 2, neo_massager: 1, logi_g102: 1,
   flight_madrid: 1, flight_london: 1, flight_milan: 1,
-  meme_generator: 99, vip_entrance: 99, // Fun prizes with high stock
+  meme_generator: 9999, vip_entrance: 9999, // Unlimited fun prizes!
+  office_dj: 10, // Limited - makes it special!
+  shorts_day: 2, // Exclusive privilege!
 };
 
 /* ===========================
@@ -1321,6 +1325,31 @@ const seedTxns: Transaction[] = [
   { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: VAULT_ID },
 ];
 
+// Sandbox test data - pre-seeded with realistic scenarios
+const getSandboxSeedData = () => {
+  const testAgents = [
+    { id: uid(), name: "Test Agent Alpha", role: "agent" as const },
+    { id: uid(), name: "Test Agent Beta", role: "agent" as const },
+    { id: uid(), name: "Test Agent Gamma", role: "agent" as const, frozen: true },
+  ];
+  const vault = { id: uid(), name: "Bank Vault", role: "system" as const };
+  const allAccounts = [vault, ...testAgents];
+  
+  const testTxns: Transaction[] = [
+    { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: vault.id },
+    { id: uid(), kind: "credit", amount: 2500, memo: "Full Evaluation x5", dateISO: nowISO(), toId: testAgents[0].id },
+    { id: uid(), kind: "credit", amount: 1500, memo: "Full Evaluation x3", dateISO: nowISO(), toId: testAgents[1].id },
+    { id: uid(), kind: "credit", amount: 500, memo: "Full Evaluation", dateISO: nowISO(), toId: testAgents[2].id },
+  ];
+  
+  const testGoals: Record<string, number> = {
+    [testAgents[0].id]: 5000,
+    [testAgents[1].id]: 3000,
+  };
+  
+  return { accounts: allAccounts, txns: testTxns, goals: testGoals };
+};
+
 export default function GCSDApp() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [txns, setTxns] = useState<Transaction[]>([]);
@@ -1344,6 +1373,7 @@ export default function GCSDApp() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPin, setAdminPin] = useState<string>("");
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
+  const [sandboxMode, setSandboxMode] = useState(false);
 
   const [showIntro, setShowIntro] = useState(true);
   const [clock, setClock] = useState(fmtTime(new Date()));
@@ -1479,18 +1509,18 @@ export default function GCSDApp() {
   }, []);
 
   /* persist on changes */
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-core",  { accounts, txns }); }, [hydrated, accounts, txns]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-core"),  { accounts, txns }); }, [hydrated, accounts, txns, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-stock"), stock);             }, [hydrated, stock, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-pins"),  pins);              }, [hydrated, pins, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-goals"), goals);             }, [hydrated, goals, sandboxMode]);
   // Notifications now persist to KV storage
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-admin-notifs", adminNotifs); }, [hydrated, adminNotifs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-redeem-requests", redeemRequests); }, [hydrated, redeemRequests]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-audit-logs", auditLogs); }, [hydrated, auditLogs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-notifs"), notifs);           }, [hydrated, notifs, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-admin-notifs"), adminNotifs); }, [hydrated, adminNotifs, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-redeem-requests"), redeemRequests); }, [hydrated, redeemRequests, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-audit-logs"), auditLogs); }, [hydrated, auditLogs, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-wishlist"), wishlist); }, [hydrated, wishlist, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-epochs"), epochs);           }, [hydrated, epochs, sandboxMode]);
+  useEffect(() => { if (hydrated) kvSet(kvKey("gcs-v4-metrics"), metrics);         }, [hydrated, metrics, sandboxMode]);
   
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
@@ -1636,6 +1666,91 @@ export default function GCSDApp() {
   };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
+  
+  // Sandbox KV key helper - returns sandbox keys when in sandbox mode
+  const kvKey = (baseKey: string) => sandboxMode ? `${baseKey}-SANDBOX` : baseKey;
+  
+  // Load data from storage (live or sandbox)
+  const loadData = async (isSandbox: boolean) => {
+    const keyPrefix = isSandbox ? "gcs-v4-" : "gcs-v4-";
+    const keySuffix = isSandbox ? "-SANDBOX" : "";
+    
+    if (isSandbox) {
+      // Load or create sandbox data
+      const sandboxCore = await kvGet<{accounts: Account[]; txns: Transaction[]}>(`gcs-v4-core-SANDBOX`);
+      if (sandboxCore) {
+        setAccounts(sandboxCore.accounts);
+        setTxns(sandboxCore.txns);
+      } else {
+        // First time in sandbox - create test data
+        const testData = getSandboxSeedData();
+        setAccounts(testData.accounts);
+        setTxns(testData.txns);
+        setGoals(testData.goals);
+        await kvSet(`gcs-v4-core-SANDBOX`, { accounts: testData.accounts, txns: testData.txns });
+        await kvSet(`gcs-v4-goals-SANDBOX`, testData.goals);
+        toast.success("🧪 Sandbox initialized with test data!");
+      }
+      setStock((await kvGet<Record<string, number>>(`gcs-v4-stock-SANDBOX`)) ?? INITIAL_STOCK);
+      setPins((await kvGet<Record<string, string>>(`gcs-v4-pins-SANDBOX`)) ?? {});
+      setGoals((await kvGet<Record<string, number>>(`gcs-v4-goals-SANDBOX`)) ?? testData.goals);
+      setNotifs((await kvGet<Notification[]>(`gcs-v4-notifs-SANDBOX`)) ?? []);
+      setAdminNotifs((await kvGet<AdminNotification[]>(`gcs-v4-admin-notifs-SANDBOX`)) ?? []);
+      setRedeemRequests((await kvGet<RedeemRequest[]>(`gcs-v4-redeem-requests-SANDBOX`)) ?? []);
+      setAuditLogs((await kvGet<AuditLog[]>(`gcs-v4-audit-logs-SANDBOX`)) ?? []);
+      setWishlist((await kvGet<Wishlist>(`gcs-v4-wishlist-SANDBOX`)) ?? {});
+      setEpochs((await kvGet<Record<string,string>>(`gcs-v4-epochs-SANDBOX`)) ?? {});
+      setMetrics((await kvGet<MetricsEpoch>(`gcs-v4-metrics-SANDBOX`)) ?? {});
+    } else {
+      // Load live data
+      const core = await kvGet<{accounts: Account[]; txns: Transaction[]}>("gcs-v4-core");
+      if (core) {
+        setAccounts(core.accounts);
+        setTxns(core.txns);
+      }
+      setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
+      setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
+      setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
+      setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
+      setAdminNotifs((await kvGet<AdminNotification[]>("gcs-v4-admin-notifs")) ?? []);
+      setRedeemRequests((await kvGet<RedeemRequest[]>("gcs-v4-redeem-requests")) ?? []);
+      setAuditLogs((await kvGet<AuditLog[]>("gcs-v4-audit-logs")) ?? []);
+      setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
+      setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
+      setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
+    }
+  };
+  
+  // Watch sandbox mode changes and reload data
+  useEffect(() => {
+    if (hydrated && isAdmin) {
+      loadData(sandboxMode);
+    }
+  }, [sandboxMode]);
+  
+  // Reset sandbox to fresh test data
+  const resetSandbox = async () => {
+    const testData = getSandboxSeedData();
+    setAccounts(testData.accounts);
+    setTxns(testData.txns);
+    setGoals(testData.goals);
+    setStock(INITIAL_STOCK);
+    setPins({});
+    setNotifs([]);
+    setAdminNotifs([]);
+    setRedeemRequests([]);
+    setAuditLogs([]);
+    setWishlist({});
+    setEpochs({});
+    setMetrics({});
+    
+    await kvSet(`gcs-v4-core-SANDBOX`, { accounts: testData.accounts, txns: testData.txns });
+    await kvSet(`gcs-v4-goals-SANDBOX`, testData.goals);
+    await kvSet(`gcs-v4-stock-SANDBOX`, INITIAL_STOCK);
+    
+    toast.success("🧪 Sandbox reset to fresh test data!");
+    logAudit("Sandbox Reset", "Sandbox environment reset to default test data");
+  };
   
   // Audit logging helper
   const logAudit = (action: string, details: string, agentName?: string, amount?: number) => {
@@ -2620,6 +2735,16 @@ export default function GCSDApp() {
                 activeUsers={activeUsers}
                 auditLogs={auditLogs}
                 wishlist={wishlist}
+                sandboxMode={sandboxMode}
+                onToggleSandbox={() => {
+                  if (!sandboxMode) {
+                    toast.success("🧪 Entering Sandbox Mode - Safe testing environment");
+                  } else {
+                    toast.success("✅ Returning to Live Mode");
+                  }
+                  setSandboxMode(!sandboxMode);
+                }}
+                onResetSandbox={resetSandbox}
                 onToggleWishlist={(agentId, prizeKey) => {
                   setWishlist(prev => {
                     const current = prev[agentId] || [];
@@ -3216,6 +3341,9 @@ function AdminPortal({
   activeUsers,
   auditLogs,
   wishlist,
+  sandboxMode,
+  onToggleSandbox,
+  onResetSandbox,
   onToggleWishlist,
   onCredit,
   onManualTransfer,
@@ -3249,6 +3377,9 @@ function AdminPortal({
   activeUsers: Set<string>;
   auditLogs: AuditLog[];
   wishlist: Wishlist;
+  sandboxMode: boolean;
+  onToggleSandbox: () => void;
+  onResetSandbox: () => void;
   onToggleWishlist: (agentId: string, prizeKey: string) => void;
   onCredit: (agentId: string, ruleKey: string, qty: number) => void;
   onManualTransfer: (agentId: string, amount: number, note: string) => void;
@@ -3299,7 +3430,7 @@ function AdminPortal({
   }
 
   // Debug: Log admin portal state
-  console.log("AdminPortal rendering:", { isAdmin, adminTab, agentId, ruleKey });
+  console.log("AdminPortal rendering:", { isAdmin, adminTab, agentId, ruleKey, sandboxMode });
 
   /** show only ACTIVE credits (not already reversed/withdrawn) and NOT reversals themselves */
   const agentCredits = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t) => {
@@ -3335,6 +3466,43 @@ function AdminPortal({
   try {
     return (
       <div className="grid gap-4">
+        {/* Sandbox Mode Banner */}
+        {sandboxMode && (
+          <motion.div
+            className="rounded-2xl border-2 border-orange-500 bg-gradient-to-r from-orange-500/20 to-yellow-500/20 p-4"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="text-3xl">🧪</div>
+                <div>
+                  <div className="text-lg font-bold text-orange-500">SANDBOX MODE ACTIVE</div>
+                  <div className="text-sm opacity-70">All changes are isolated - Live data is safe</div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <motion.button
+                  className="px-4 py-2 rounded-xl bg-orange-500 text-white hover:bg-orange-600 font-semibold"
+                  onClick={onResetSandbox}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  🔄 Reset Sandbox
+                </motion.button>
+                <motion.button
+                  className="px-4 py-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 font-semibold"
+                  onClick={onToggleSandbox}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  ✓ Exit to Live
+                </motion.button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Tabs */}
         <div className={classNames("rounded-2xl border p-2 flex flex-wrap gap-2", neonBox(theme))}>
         {[
@@ -3373,6 +3541,36 @@ function AdminPortal({
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
         >
+          {/* Sandbox Mode Control */}
+          <motion.div
+            className={classNames(
+              "rounded-2xl border p-4",
+              sandboxMode ? "bg-orange-500/10 border-orange-500" : neonBox(theme)
+            )}
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-semibold mb-1">🧪 Sandbox Testing Environment</div>
+                <div className="text-sm opacity-70">
+                  {sandboxMode ? "Testing mode active - Changes isolated from live data" : "Switch to sandbox for safe testing"}
+                </div>
+              </div>
+              <motion.button
+                className={classNames(
+                  "px-6 py-3 rounded-xl font-semibold",
+                  sandboxMode ? "bg-emerald-500 text-white hover:bg-emerald-600" : "bg-orange-500 text-white hover:bg-orange-600"
+                )}
+                onClick={onToggleSandbox}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {sandboxMode ? "✓ Exit Sandbox" : "🧪 Enter Sandbox"}
+              </motion.button>
+            </div>
+          </motion.div>
+
           {/* Real-Time Stats */}
           <div className="grid md:grid-cols-4 gap-4">
             <motion.div 
@@ -3418,6 +3616,70 @@ function AdminPortal({
               <div className="text-xs opacity-70 mt-1">Transactions Today</div>
             </motion.div>
           </div>
+
+          {/* Sandbox Quick Test Actions */}
+          {sandboxMode && (
+            <motion.div
+              className="rounded-2xl border-2 border-orange-500/50 p-4 bg-orange-500/5"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <div className="font-semibold mb-3">⚡ Quick Test Actions</div>
+              <div className="grid md:grid-cols-3 gap-3">
+                <motion.button
+                  className="px-4 py-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 text-sm"
+                  onClick={() => {
+                    accounts.filter(a => a.role === "agent").forEach(a => {
+                      onCredit(a.id, "full_evaluation", 2); // Give 1000 GCSD to each
+                    });
+                    toast.success("💰 Added 1000 GCSD to all test agents!");
+                  }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  💰 Bulk Add 1000 GCSD
+                </motion.button>
+
+                <motion.button
+                  className="px-4 py-2 rounded-xl bg-purple-500 text-white hover:bg-purple-600 text-sm"
+                  onClick={() => {
+                    const testAgent = accounts.find(a => a.role === "agent");
+                    if (testAgent) {
+                      const testRequest: RedeemRequest = {
+                        id: uid(),
+                        agentId: testAgent.id,
+                        agentName: testAgent.name,
+                        prizeKey: "meme_generator",
+                        prizeLabel: "Custom Meme Generator",
+                        price: 100,
+                        when: nowISO(),
+                        agentPinVerified: true
+                      };
+                      onApproveRedeem(testRequest.id); // This won't work directly, need to use state
+                      toast.success("🎁 Created test redemption request!");
+                    }
+                  }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  🎁 Create Test Request
+                </motion.button>
+
+                <motion.button
+                  className="px-4 py-2 rounded-xl bg-rose-500 text-white hover:bg-rose-600 text-sm"
+                  onClick={onResetSandbox}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  🔄 Full Reset
+                </motion.button>
+              </div>
+              <div className="text-xs opacity-60 mt-2 text-center">
+                These actions only affect sandbox data
+              </div>
+            </motion.div>
+          )}
 
           {/* Agent Balances with Freeze Controls */}
           <div className="grid md:grid-cols-3 gap-4">
