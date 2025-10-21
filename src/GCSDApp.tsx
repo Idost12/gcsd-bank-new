@@ -343,6 +343,211 @@ function TypeLabel({ text }: { text: string }) {
 }
 
 
+/* Enhanced Podium Component with Animated Medals */
+function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number }>; theme: Theme }) {
+  if (leaderboard.length === 0) return <div className="text-center text-sm opacity-60">No data yet</div>;
+
+  const top3 = leaderboard.slice(0, 3);
+  const podiumData = [
+    { position: 2, agent: top3[1], height: "h-32", color: "from-gray-300 to-gray-500", medal: "🥈", delay: 0.1 },
+    { position: 1, agent: top3[0], height: "h-40", color: "from-yellow-400 to-yellow-600", medal: "🥇", delay: 0 },
+    { position: 3, agent: top3[2], height: "h-24", color: "from-amber-600 to-amber-800", medal: "🥉", delay: 0.2 }
+  ];
+
+  return (
+    <div className="flex items-end justify-center gap-4 py-6">
+      {podiumData.map(({ position, agent, height, color, medal, delay }) => {
+        if (!agent) return null;
+        
+        return (
+          <motion.div 
+            key={position}
+            className="flex flex-col items-center"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay }}
+          >
+            {/* Animated Medal */}
+            <motion.div 
+              className="mb-2 text-4xl"
+              animate={position === 1 ? { 
+                rotate: [0, -10, 10, -10, 0],
+                scale: [1, 1.1, 1]
+              } : {}}
+              transition={{ 
+                duration: 2, 
+                repeat: Infinity, 
+                repeatDelay: 3,
+                ease: "easeInOut"
+              }}
+            >
+              {medal}
+            </motion.div>
+            
+            {/* Agent Info */}
+            <div className="text-center mb-2">
+              <div className="font-bold text-lg">{agent.name}</div>
+              <div className="text-sm opacity-70">{agent.balance.toLocaleString()} GCSD</div>
+            </div>
+            
+            {/* Animated Podium */}
+            <motion.div 
+              className={`${height} w-24 rounded-t-xl bg-gradient-to-b ${color} shadow-lg flex items-center justify-center text-white font-bold relative overflow-hidden`}
+              initial={{ height: 0 }}
+              animate={{ height: position === 1 ? "10rem" : position === 2 ? "8rem" : "6rem" }}
+              transition={{ delay: delay + 0.3, type: "spring", stiffness: 100 }}
+            >
+              {/* Shimmer effect for gold medal */}
+              {position === 1 && (
+                <motion.div
+                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                  animate={{ x: ["-100%", "200%"] }}
+                  transition={{ duration: 2, repeat: Infinity, repeatDelay: 1 }}
+                />
+              )}
+              <span className="relative z-10">#{position}</span>
+            </motion.div>
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Performance Chart Component */
+function PerformanceChart({ txns, accounts, theme }: { txns: Transaction[]; accounts: Account[]; theme: Theme }) {
+  const nonSystemIds = useMemo(() => new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id)), [accounts]);
+  
+  // Get last 7 days of data
+  const last7Days = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    });
+    
+    return days.map(day => {
+      const dayStart = new Date(day);
+      const dayEnd = new Date(day);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      const dayTxns = txns.filter(t => {
+        const txnDate = new Date(t.dateISO);
+        return txnDate >= dayStart && txnDate <= dayEnd && 
+               t.kind === "credit" && t.toId && nonSystemIds.has(t.toId) && 
+               t.memo !== "Mint" && !G_isReversalOfRedemption(t);
+      });
+      
+      const totalEarned = dayTxns.reduce((sum, t) => sum + t.amount, 0);
+      
+      return {
+        date: day,
+        earned: totalEarned,
+        transactions: dayTxns.length
+      };
+    });
+  }, [txns, nonSystemIds]);
+
+  const maxEarned = Math.max(...last7Days.map(d => d.earned), 1);
+
+  return (
+    <div className="space-y-4">
+      <div className="text-sm opacity-70">📈 Performance (Last 7 Days)</div>
+      <div className="space-y-2">
+        {last7Days.map((day, i) => (
+          <motion.div
+            key={i}
+            className="flex items-center gap-3"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.1 }}
+          >
+            <div className="w-16 text-xs opacity-70">
+              {day.date.toLocaleDateString('en-US', { weekday: 'short' })}
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <div 
+                  className={classNames(
+                    "h-2 rounded-full transition-all duration-500",
+                    theme === "neon" ? "bg-orange-500" : "bg-emerald-500"
+                  )}
+                  style={{ width: `${(day.earned / maxEarned) * 100}%` }}
+                />
+                <span className="text-xs font-medium">{day.earned.toLocaleString()}</span>
+              </div>
+              <div className="text-xs opacity-60">{day.transactions} transactions</div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Live Activity Feed Component */
+function LiveActivityFeed({ txns, accounts, theme }: { txns: Transaction[]; accounts: Account[]; theme: Theme }) {
+  const recentTxns = useMemo(() => 
+    txns.slice(0, 8).map(txn => {
+      const isCredit = txn.kind === "credit";
+      const agentId = isCredit ? txn.toId : txn.fromId;
+      const agentName = accounts.find(a => a.id === agentId)?.name || "System";
+      
+      const getIcon = () => {
+        if (txn.memo?.includes("Redeem")) return "🎁";
+        if (txn.memo?.includes("Reversal")) return "↩️";
+        if (txn.memo?.includes("Correction")) return "⚠️";
+        if (txn.memo?.includes("Withdraw")) return "💸";
+        if (isCredit) return "💰";
+        return "📤";
+      };
+      
+      return {
+        ...txn,
+        agentName,
+        icon: getIcon(),
+        isCredit
+      };
+    }), [txns, accounts]
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm opacity-70">📊 Live Activity</div>
+      <div className="space-y-2 max-h-64 overflow-auto pr-2">
+        {recentTxns.map((txn, i) => (
+          <motion.div
+            key={txn.id}
+            className={classNames(
+              "flex items-center gap-3 p-3 rounded-lg border",
+              theme === "neon" 
+                ? "bg-[#1a1a1a] border-orange-800 hover:bg-[#2a2a2a]" 
+                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700"
+            )}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.05 }}
+            whileHover={{ scale: 1.02, x: 4 }}
+          >
+            <div className="text-lg">{txn.icon}</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm truncate">{txn.agentName}</div>
+              <div className="text-xs opacity-70 truncate">{txn.memo || (txn.isCredit ? "Credit" : "Debit")}</div>
+            </div>
+            <div className={classNames(
+              "text-sm font-bold",
+              txn.isCredit ? "text-emerald-500" : "text-rose-500"
+            )}>
+              {txn.isCredit ? "+" : "-"}{txn.amount.toLocaleString()}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   const isDark = theme === "dark";
   const isNeon = theme === "neon";
@@ -427,10 +632,18 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
 }
 
 function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
+  const handleClick = () => {
+    // Haptic feedback for mobile
+    if ('vibrate' in navigator) {
+      navigator.vibrate(50);
+    }
+    onClick();
+  };
+
   return (
     <motion.button 
-      onClick={onClick} 
-      className={classNames("border rounded-2xl px-3 py-3 text-left", neonBox(theme))}
+      onClick={handleClick} 
+      className={classNames("border rounded-2xl px-3 py-3 text-left haptic-feedback hover-lift", neonBox(theme))}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
@@ -1223,8 +1436,8 @@ export default function GCSDApp() {
     <div
       className={
         theme === "neon"
-          ? "min-h-screen overflow-x-hidden bg-[#0B0B0B] text-orange-50 transition-colors duration-200"
-          : "min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200"
+          ? "min-h-screen overflow-x-hidden bg-[#0B0B0B] text-orange-50 transition-colors duration-200 swipe-container"
+          : "min-h-screen overflow-x-hidden bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-950 dark:text-slate-100 transition-colors duration-200 swipe-container"
       }
     >
       <Toaster position="top-center" richColors />
@@ -1826,114 +2039,139 @@ function Home({
   }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
-    <div>
-      <div className="grid md:grid-cols-3 gap-4">
-        {/* Dashboard */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Dashboard</div>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <TileRow label="Total Active Balance" value={totalActiveBalance} />
-            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
-          </div>
+    <div className="space-y-6">
+      {/* Enhanced Podium Section */}
+      <motion.div 
+        className={classNames("rounded-2xl border p-6", neonBox(theme))}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="text-lg font-semibold mb-4 text-center">🏆 Top Performers</div>
+        <EnhancedPodium leaderboard={leaderboard} theme={theme} />
+      </motion.div>
 
-          <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Finance (30 days)</div>
-            <LineChart earned={earnedSeries} spent={spentSeries} />
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4 mt-4">
-            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
-            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
-          </div>
-
-          <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Purchased Prizes (Active)</div>
-            <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
-              <div className="text-sm mb-2">
-                Total purchases: <b>{purchases.length}</b>
-              </div>
-              <div className="space-y-2 max-h-40 overflow-auto pr-1">
-                {purchases.map((p, i) => (
-                  <motion.div 
-                    key={i} 
-                    className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05, duration: 0.3 }}
-                    whileHover={{ scale: 1.02, backgroundColor: "rgba(0,0,0,0.02)" }}
-                  >
-                    <span>{p.memo.replace("Redeem: ", "")}</span>
-                    <span className="opacity-70">{p.when.toLocaleString()}</span>
-                  </motion.div>
-                ))}
-                {purchases.length === 0 && <div className="text-sm opacity-70">No purchases yet.</div>}
-              </div>
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Left Column - Dashboard & Performance */}
+        <div className="space-y-6">
+          {/* Dashboard Stats */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <div className="text-lg font-semibold mb-4">📊 Dashboard</div>
+            <div className="grid sm:grid-cols-2 gap-4 mb-6">
+              <TileRow label="Total Active Balance" value={totalActiveBalance} />
+              <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
             </div>
-          </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
+              <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
+            </div>
+          </motion.div>
+
+          {/* Performance Chart */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <PerformanceChart txns={txns} accounts={accounts} theme={theme} />
+          </motion.div>
+
+          {/* Finance Chart */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="text-sm opacity-70 mb-3">Finance (30 days)</div>
+            <LineChart earned={earnedSeries} spent={spentSeries} />
+          </motion.div>
         </div>
 
-        {/* Leaderboard */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Leaderboard</div>
-          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {leaderboard.map((row, i) => (
-              <motion.div 
-                key={row.id} 
-                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
-                whileHover={{ scale: 1.02, x: 4 }}
-              >
-                <div className="flex items-center gap-2">
-                  <motion.span 
-                    className="w-5 text-right"
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ delay: i * 0.05 + 0.1, type: "spring", stiffness: 200 }}
-                  >
-                    {i + 1}.
-                  </motion.span>
-                  <span className="font-medium">{row.name}</span>
-                </div>
-                <div className="text-sm">
-                  <NumberFlash value={row.balance} />
-                </div>
-              </motion.div>
-            ))}
-            {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
-          </div>
-        </div>
+        {/* Right Column - Activity & Prizes */}
+        <div className="space-y-6">
+          {/* Live Activity Feed */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <LiveActivityFeed txns={txns} accounts={accounts} theme={theme} />
+          </motion.div>
 
-        {/* Prizes */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
-          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {prizes.map((p, i) => (
-              <motion.div 
-                key={p.key} 
-                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
-                whileHover={{ scale: 1.02, x: -4 }}
-              >
-                <div className="font-medium">{p.label}</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
-                  <motion.span 
-                    className={theme === "neon" ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200" : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"}
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ delay: i * 0.05 + 0.15, duration: 0.2 }}
-                  >
-                    Stock: {stock[p.key] ?? 0}
-                  </motion.span>
-                </div>
-              </motion.div>
-            ))}
-            {prizes.length === 0 && <div className="text-sm opacity-70">No prizes available.</div>}
-          </div>
+          {/* Purchased Prizes */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <div className="text-sm opacity-70 mb-3">🎁 Purchased Prizes (Active)</div>
+            <div className="text-sm mb-2">
+              Total purchases: <b>{purchases.length}</b>
+            </div>
+            <div className="space-y-2 max-h-64 overflow-auto pr-2">
+              {purchases.map((p, i) => (
+                <motion.div 
+                  key={i} 
+                  className={classNames(
+                    "flex flex-col border rounded-lg px-3 py-2",
+                    theme === "neon" ? "bg-orange-500/5 border-orange-800/30" : "bg-slate-50 dark:bg-slate-900/50"
+                  )}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05, duration: 0.3 }}
+                  whileHover={{ scale: 1.02 }}
+                >
+                  <div className="font-medium text-sm">{p.memo.replace("Redeem: ", "")}</div>
+                  <div className="text-xs opacity-60">{p.when.toLocaleString()}</div>
+                </motion.div>
+              ))}
+              {purchases.length === 0 && <div className="text-sm opacity-70 text-center py-4">No purchases yet.</div>}
+            </div>
+          </motion.div>
+
+          {/* Available Prizes */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="text-sm opacity-70 mb-3">🎯 Available Prizes</div>
+            <div className="space-y-2 max-h-64 overflow-auto pr-2">
+              {prizes.map((p, i) => (
+                <motion.div 
+                  key={p.key} 
+                  className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05, duration: 0.3 }}
+                  whileHover={{ scale: 1.02, x: -4 }}
+                >
+                  <div className="font-medium">{p.label}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
+                    <motion.span 
+                      className={theme === "neon" ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200" : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"}
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ delay: i * 0.05 + 0.15, duration: 0.2 }}
+                    >
+                      Stock: {stock[p.key] ?? 0}
+                    </motion.span>
+                  </div>
+                </motion.div>
+              ))}
+              {prizes.length === 0 && <div className="text-sm opacity-70">No prizes available.</div>}
+            </div>
+          </motion.div>
         </div>
       </div>
     </div>
@@ -2015,23 +2253,50 @@ function AgentPortal({
               <div className="flex items-center gap-3">
                 <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
                 <button 
-                  className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} 
-                  onClick={() => (goalInput ? onSetGoal(parseInt(goalInput, 10)) : null)}
+                  className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
+                  onClick={() => {
+                    if ('vibrate' in navigator) navigator.vibrate(30);
+                    if (goalInput) onSetGoal(parseInt(goalInput, 10));
+                  }}
                   title="PIN required to set goal"
                 >
                   <Check className="w-4 h-4 inline mr-1" /> Set goal
                 </button>
               </div>
               <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
-              <div className="mt-3 text-sm opacity-70">{goal > 0 ? `${progress}% towards ${goal.toLocaleString()} GCSD` : "No goal set"}</div>
-              <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                <motion.div 
-                  className="h-2 rounded-full bg-emerald-500" 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.8, ease: "easeOut" }}
-                />
-              </div>
+              {goal > 0 && (
+                <>
+                  <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
+                  <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                    <motion.div 
+                      className={classNames(
+                        "h-2 rounded-full",
+                        theme === "neon" ? "bg-orange-500" : "bg-emerald-500"
+                      )}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                    />
+                  </div>
+                  {progress < 100 && (
+                    <div className="mt-2 text-xs opacity-70">
+                      💡 Need ~{Math.ceil((goal - balance) / 50)} more evaluations to reach goal
+                    </div>
+                  )}
+                  {progress >= 100 && (
+                    <motion.div 
+                      className="mt-2 text-xs text-emerald-500 font-medium"
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+                    >
+                      🎉 Goal achieved! Great job!
+                    </motion.div>
+                  )}
+                </>
+              )}
+              {goal === 0 && (
+                <div className="mt-3 text-sm opacity-70">No goal set</div>
+              )}
             </div>
           </div>
 
