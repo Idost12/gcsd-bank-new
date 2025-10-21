@@ -1106,7 +1106,7 @@ export default function GCSDApp() {
   }, [mobileMenuOpen]);
   useEffect(()=> {
     if (!showIntro) return;
-    const timer = setTimeout(()=> setShowIntro(false), 1500);
+    const timer = setTimeout(()=> setShowIntro(false), 2500);
     const onKey = (e: KeyboardEvent)=> { if (e.key === "Enter") setShowIntro(false); };
     window.addEventListener("keydown", onKey);
     return ()=> { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
@@ -1126,63 +1126,6 @@ export default function GCSDApp() {
     };
   }, [theme]);
 
-  /* iOS-style scroll edge indicators */
-  useEffect(() => {
-    let lastScrollY = window.scrollY;
-    let ticking = false;
-
-    const updateScrollEdges = () => {
-      const scrollY = window.scrollY;
-      const scrollHeight = document.documentElement.scrollHeight;
-      const clientHeight = document.documentElement.clientHeight;
-      const atTop = scrollY <= 10;
-      const atBottom = scrollY + clientHeight >= scrollHeight - 10;
-
-      // Update classes
-      if (atTop) {
-        document.body.classList.add('at-top');
-        document.body.classList.remove('scrolling-up');
-      } else {
-        document.body.classList.remove('at-top');
-        if (scrollY < lastScrollY) {
-          document.body.classList.add('scrolling-up');
-        } else {
-          document.body.classList.remove('scrolling-up');
-        }
-      }
-
-      if (atBottom) {
-        document.body.classList.add('at-bottom');
-        document.body.classList.remove('scrolling-down');
-      } else {
-        document.body.classList.remove('at-bottom');
-        if (scrollY > lastScrollY) {
-          document.body.classList.add('scrolling-down');
-        } else {
-          document.body.classList.remove('scrolling-down');
-        }
-      }
-
-      lastScrollY = scrollY;
-      ticking = false;
-    };
-
-    const onScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(updateScrollEdges);
-        ticking = true;
-      }
-    };
-
-    // Initial check
-    updateScrollEdges();
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      document.body.classList.remove('scrolling-up', 'scrolling-down', 'at-top', 'at-bottom');
-    };
-  }, []);
 
   /* Wrapped setTheme for local-only theme changes */
   const setThemeLocal = (newTheme: Theme) => {
@@ -1638,160 +1581,82 @@ export default function GCSDApp() {
     >
       <Toaster position="top-center" richColors />
 
-      {/* Enhanced Intro Animation */}
+      {/* Intro */}
       <AnimatePresence>
         {showIntro && (
           <motion.div 
-            className="fixed inset-0 z-50 grid place-items-center overflow-hidden"
-            style={{
-              background: 'radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.3), rgba(0, 0, 0, 0.95))',
-              backdropFilter: 'blur(20px)'
-            }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
+            transition={{ duration: 0.3 }}
           >
-            {/* Animated particles background */}
-            {[...Array(20)].map((_, i) => (
-              <motion.div
-                key={i}
-                className="absolute w-2 h-2 rounded-full bg-white/20"
-                initial={{
-                  x: Math.random() * window.innerWidth,
-                  y: Math.random() * window.innerHeight,
-                  scale: 0
-                }}
-                animate={{
-                  y: [null, Math.random() * window.innerHeight],
-                  x: [null, Math.random() * window.innerWidth],
-                  scale: [0, 1, 0],
-                  opacity: [0, 0.6, 0]
-                }}
-                transition={{
-                  duration: 3 + Math.random() * 2,
-                  repeat: Infinity,
-                  delay: Math.random() * 2
-                }}
-              />
-            ))}
-
-            <motion.div 
-              className="text-center p-8 relative z-10"
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.5, opacity: 0 }}
-              transition={{ 
-                type: "spring",
-                stiffness: 100,
-                damping: 15,
-                delay: 0.1 
-              }}
-            >
-              {/* Logo with enhanced animations */}
+            <div className="text-center p-8 max-w-2xl mx-auto">
+              {/* Logo */}
               <motion.div 
-                className="mx-auto mb-8 w-56 h-56 rounded-[32px] glass-card grid place-items-center relative overflow-hidden"
-                initial={{ scale: 0, rotate: -180 }}
-                animate={{ 
-                  scale: 1, 
-                  rotate: 0,
-                }}
+                className="mx-auto mb-6 w-40 h-40 rounded-3xl glass-card grid place-items-center"
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
                 transition={{ 
                   type: "spring",
-                  stiffness: 200,
+                  stiffness: 180,
                   damping: 20,
                   delay: 0.2 
                 }}
-                style={{
-                  boxShadow: '0 0 100px rgba(99, 102, 241, 0.6), inset 0 0 50px rgba(255, 255, 255, 0.1)'
-                }}
               >
-                {/* Rotating gradient ring */}
-                <motion.div
-                  className="absolute inset-0 rounded-[32px]"
-                  style={{
-                    background: 'conic-gradient(from 0deg, transparent, rgba(99, 102, 241, 0.5), transparent)',
-                  }}
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                />
-                
                 <motion.img 
                   src={LOGO_URL} 
                   alt="GCS Bank logo" 
-                  className="w-44 h-44 rounded drop-shadow-[0_10px_30px_rgba(99,102,241,.7)] relative z-10"
-                  initial={{ scale: 0, rotate: 180, filter: "blur(10px)" }}
-                  animate={{ 
-                    scale: 1, 
-                    rotate: 0,
-                    filter: "blur(0px)"
-                  }}
-                  transition={{ 
-                    type: "spring",
-                    stiffness: 150,
-                    damping: 15,
-                    delay: 0.4 
-                  }}
+                  className="w-32 h-32 rounded"
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.5, duration: 0.5 }}
                 />
               </motion.div>
 
-              {/* Animated title */}
+              {/* Title */}
               <motion.div
-                initial={{ y: 30, opacity: 0 }}
+                className="text-white text-3xl font-bold mb-3"
+                initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.6, duration: 0.6 }}
+                transition={{ delay: 0.8, duration: 0.5 }}
               >
-                <TypeLabel text={`Welcome to ${APP_NAME}`} />
+                Welcome to {APP_NAME}
               </motion.div>
 
-              {/* Glowing subtitle */}
+              {/* Subtitle */}
               <motion.div 
-                className="text-white/80 mt-4 mb-8 text-lg font-light"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 1.0 }}
-                style={{ textShadow: '0 0 20px rgba(99, 102, 241, 0.5)' }}
+                className="text-white/70 text-lg mb-8"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1.1, duration: 0.5 }}
               >
                 Your Performance Hub
               </motion.div>
 
-              {/* Action buttons */}
-              <motion.div
-                className="flex gap-4 justify-center"
-                initial={{ opacity: 0, y: 20 }}
+              {/* Button */}
+              <motion.button 
+                className="glass-btn text-white px-8 py-3 rounded-xl text-base font-medium"
+                onClick={()=> setShowIntro(false)}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 1.2 }}
+                transition={{ delay: 1.4, duration: 0.4 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
-                <motion.button 
-                  className="glass-btn text-white px-8 py-4 rounded-2xl text-lg font-medium"
-                  onClick={()=> setShowIntro(false)}
-                  whileHover={{ scale: 1.05, boxShadow: "0 0 30px rgba(99, 102, 241, 0.5)" }}
-                  whileTap={{ scale: 0.95 }}
-                  animate={{
-                    boxShadow: [
-                      "0 0 20px rgba(99, 102, 241, 0.3)",
-                      "0 0 40px rgba(99, 102, 241, 0.5)",
-                      "0 0 20px rgba(99, 102, 241, 0.3)"
-                    ]
-                  }}
-                  transition={{ 
-                    boxShadow: { duration: 2, repeat: Infinity }
-                  }}
-                >
-                  Get Started
-                </motion.button>
-              </motion.div>
+                Get Started
+              </motion.button>
 
-              {/* Skip hint */}
+              {/* Hint */}
               <motion.div 
-                className="text-white/50 mt-6 text-sm"
+                className="text-white/40 mt-4 text-sm"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 1.4 }}
+                transition={{ delay: 1.7, duration: 0.4 }}
               >
-                Press Enter to skip
+                Press Enter to continue
               </motion.div>
-            </motion.div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
