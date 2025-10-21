@@ -1781,30 +1781,24 @@ function AdminPortal({
   console.log("AdminPortal rendering:", { isAdmin, adminTab, agentId, ruleKey });
 
   /** show only ACTIVE credits (not already reversed/withdrawn) and NOT reversals themselves */
-  const agentCredits = useMemo(() => {
-    if (!agentId || !txns || txns.length === 0) return [];
-    return txns.filter((t) => 
-      t.kind === "credit" && 
-      t.toId === agentId && 
-      t.memo !== "Mint" && 
-      !t.memo?.startsWith("Reversal") && // Exclude reversal transactions
-      !t.memo?.startsWith("Manual") && // Exclude manual transactions
-      !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
-      !t.memo?.startsWith("Correction") // Exclude corrections
-    );
-  }, [txns, agentId]);
+  const agentCredits = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t) => 
+    t.kind === "credit" && 
+    t.toId === agentId && 
+    t.memo !== "Mint" && 
+    !t.memo?.startsWith("Reversal") && // Exclude reversal transactions
+    !t.memo?.startsWith("Manual") && // Exclude manual transactions
+    !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
+    !t.memo?.startsWith("Correction") // Exclude corrections
+  );
   
-  const agentRedeems = useMemo(() => {
-    if (!agentId || !txns || txns.length === 0) return [];
-    return txns.filter((t)=> 
-      t.kind === "debit" && 
-      t.fromId === agentId &&
-      t.memo?.startsWith("Redeem:") && // Only actual redemptions
-      !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
-      !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
-      !t.memo?.startsWith("Correction") // Exclude corrections
-    );
-  }, [txns, agentId]);
+  const agentRedeems = !agentId || !txns || txns.length === 0 ? [] : txns.filter((t)=> 
+    t.kind === "debit" && 
+    t.fromId === agentId &&
+    t.memo?.startsWith("Redeem:") && // Only actual redemptions
+    !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
+    !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
+    !t.memo?.startsWith("Correction") // Exclude corrections
+  );
 
   try {
     return (
