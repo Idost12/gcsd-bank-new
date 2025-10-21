@@ -334,6 +334,162 @@ function TypeLabel({ text }: { text: string }) {
   );
 }
 
+/* Avatar Component with Initials */
+function Avatar({ name, size = "md", theme }: { name: string; size?: "sm" | "md" | "lg"; theme?: Theme }) {
+  const getInitials = (fullName: string) => {
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
+  };
+
+  const sizeClasses = {
+    sm: "w-8 h-8 text-xs",
+    md: "w-10 h-10 text-sm",
+    lg: "w-12 h-12 text-base"
+  };
+
+  const colors = [
+    "from-blue-500 to-purple-600",
+    "from-pink-500 to-rose-600",
+    "from-green-500 to-emerald-600",
+    "from-orange-500 to-amber-600",
+    "from-cyan-500 to-blue-600",
+    "from-violet-500 to-purple-600",
+    "from-red-500 to-pink-600",
+    "from-teal-500 to-cyan-600",
+  ];
+
+  const colorIndex = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+
+  return (
+    <motion.div
+      className={`${sizeClasses[size]} rounded-full bg-gradient-to-br ${colors[colorIndex]} flex items-center justify-center font-bold text-white shadow-lg ring-2 ring-white/30`}
+      initial={{ scale: 0, rotate: -180 }}
+      animate={{ scale: 1, rotate: 0 }}
+      transition={{ type: "spring", stiffness: 200, damping: 15 }}
+      whileHover={{ scale: 1.1, rotate: 5 }}
+    >
+      {getInitials(name)}
+    </motion.div>
+  );
+}
+
+/* Milestone/Achievement System */
+type Milestone = {
+  id: string;
+  title: string;
+  description: string;
+  emoji: string;
+  requirement: (balance: number, earned: number, txns: Transaction[], agentId: string) => boolean;
+  tier: "bronze" | "silver" | "gold" | "platinum";
+};
+
+const MILESTONES: Milestone[] = [
+  { id: "first_100", title: "Getting Started", description: "Earn your first 100 GCSD", emoji: "🌱", requirement: (_, earned) => earned >= 100, tier: "bronze" },
+  { id: "first_500", title: "Rising Star", description: "Earn 500 GCSD", emoji: "⭐", requirement: (_, earned) => earned >= 500, tier: "bronze" },
+  { id: "first_1000", title: "Achiever", description: "Earn 1,000 GCSD", emoji: "🎯", requirement: (_, earned) => earned >= 1000, tier: "silver" },
+  { id: "first_5000", title: "High Performer", description: "Earn 5,000 GCSD", emoji: "🚀", requirement: (_, earned) => earned >= 5000, tier: "gold" },
+  { id: "first_10000", title: "Elite", description: "Earn 10,000 GCSD", emoji: "💎", requirement: (_, earned) => earned >= 10000, tier: "platinum" },
+  { id: "balance_1000", title: "Wealthy", description: "Have 1,000+ GCSD balance", emoji: "💰", requirement: (balance) => balance >= 1000, tier: "silver" },
+  { id: "balance_5000", title: "Rich", description: "Have 5,000+ GCSD balance", emoji: "🏆", requirement: (balance) => balance >= 5000, tier: "gold" },
+  { id: "big_spender", title: "Big Spender", description: "Redeem 3+ prizes", emoji: "🛍️", requirement: (_, __, txns, agentId) => {
+    return txns.filter(t => t.kind === "debit" && t.fromId === agentId && t.memo?.startsWith("Redeem:")).length >= 3;
+  }, tier: "silver" },
+  { id: "consistent", title: "Consistent", description: "Earn GCSD 5+ times", emoji: "📈", requirement: (_, __, txns, agentId) => {
+    return txns.filter(t => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint").length >= 5;
+  }, tier: "bronze" },
+  { id: "prolific", title: "Prolific", description: "Complete 20+ transactions", emoji: "⚡", requirement: (_, __, txns, agentId) => {
+    return txns.filter(t => t.kind === "credit" && t.toId === agentId && t.memo !== "Mint").length >= 20;
+  }, tier: "gold" },
+];
+
+function MilestonesCard({ balance, earned, txns, agentId, theme }: { 
+  balance: number; 
+  earned: number; 
+  txns: Transaction[]; 
+  agentId: string; 
+  theme: Theme 
+}) {
+  const achievedMilestones = MILESTONES.filter(m => m.requirement(balance, earned, txns, agentId));
+  const nextMilestone = MILESTONES.find(m => !m.requirement(balance, earned, txns, agentId));
+
+  const tierColors = {
+    bronze: "from-amber-700 to-amber-900",
+    silver: "from-gray-400 to-gray-600",
+    gold: "from-yellow-400 to-yellow-600",
+    platinum: "from-cyan-400 to-blue-600"
+  };
+
+  return (
+    <motion.div
+      className={classNames("rounded-2xl border p-4", neonBox(theme))}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <Sparkles className="w-5 h-5 text-yellow-500" />
+        <h3 className="font-semibold text-lg">Achievements</h3>
+        <span className="text-sm opacity-70">({achievedMilestones.length}/{MILESTONES.length})</span>
+      </div>
+
+      {/* Achieved Milestones */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+        {achievedMilestones.map((milestone, i) => (
+          <motion.div
+            key={milestone.id}
+            className={`glass-card rounded-xl p-3 bg-gradient-to-br ${tierColors[milestone.tier]} relative overflow-hidden`}
+            initial={{ scale: 0, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ delay: i * 0.05, type: "spring", stiffness: 200 }}
+            whileHover={{ scale: 1.05, y: -2 }}
+          >
+            <div className="text-3xl mb-1">{milestone.emoji}</div>
+            <div className="text-xs font-semibold text-white drop-shadow-lg">{milestone.title}</div>
+            <div className="text-[10px] text-white/80 line-clamp-1">{milestone.description}</div>
+            
+            {/* Shine effect */}
+            <motion.div
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+              initial={{ x: "-100%" }}
+              animate={{ x: "200%" }}
+              transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+            />
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Next Milestone */}
+      {nextMilestone && (
+        <div className="glass rounded-xl p-3 border border-dashed border-white/30">
+          <div className="flex items-center gap-2">
+            <div className="text-2xl opacity-40">{nextMilestone.emoji}</div>
+            <div className="flex-1">
+              <div className="text-sm font-medium opacity-70">{nextMilestone.title}</div>
+              <div className="text-xs opacity-50">{nextMilestone.description}</div>
+            </div>
+            <div className="text-xs opacity-50">Locked</div>
+          </div>
+        </div>
+      )}
+
+      {achievedMilestones.length === MILESTONES.length && (
+        <motion.div
+          className="text-center py-4"
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: "spring", stiffness: 200 }}
+        >
+          <div className="text-4xl mb-2">🎉</div>
+          <div className="font-semibold text-sm">All Achievements Unlocked!</div>
+          <div className="text-xs opacity-70">You're a legend!</div>
+        </motion.div>
+      )}
+    </motion.div>
+  );
+}
 
 /* Enhanced Podium Component with Animated Medals */
 function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number }>; theme: Theme }) {
@@ -359,22 +515,25 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay }}
           >
-            {/* Animated Medal */}
-            <motion.div 
-              className="mb-2 text-4xl"
-              animate={position === 1 ? { 
-                rotate: [0, -10, 10, -10, 0],
-                scale: [1, 1.1, 1]
-              } : {}}
-              transition={{ 
-                duration: 2, 
-                repeat: Infinity, 
-                repeatDelay: 3,
-                ease: "easeInOut"
-              }}
-            >
-              {medal}
-            </motion.div>
+            {/* Avatar with Medal Badge */}
+            <div className="relative mb-2">
+              <Avatar name={agent.name} size={position === 1 ? "lg" : "md"} theme={theme} />
+              <motion.div 
+                className="absolute -top-1 -right-1 text-2xl"
+                animate={position === 1 ? { 
+                  rotate: [0, -10, 10, -10, 0],
+                  scale: [1, 1.1, 1]
+                } : {}}
+                transition={{ 
+                  duration: 2, 
+                  repeat: Infinity, 
+                  repeatDelay: 3,
+                  ease: "easeInOut"
+                }}
+              >
+                {medal}
+              </motion.div>
+            </div>
             
             {/* Agent Info */}
             <div className="text-center mb-2">
@@ -1479,58 +1638,159 @@ export default function GCSDApp() {
     >
       <Toaster position="top-center" richColors />
 
-      {/* Intro */}
+      {/* Enhanced Intro Animation */}
       <AnimatePresence>
         {showIntro && (
           <motion.div 
-            className="fixed inset-0 z-50 grid place-items-center backdrop-blur-xl bg-black/30 text-white"
+            className="fixed inset-0 z-50 grid place-items-center overflow-hidden"
+            style={{
+              background: 'radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.3), rgba(0, 0, 0, 0.95))',
+              backdropFilter: 'blur(20px)'
+            }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: 0.4 }}
           >
+            {/* Animated particles background */}
+            {[...Array(20)].map((_, i) => (
+              <motion.div
+                key={i}
+                className="absolute w-2 h-2 rounded-full bg-white/20"
+                initial={{
+                  x: Math.random() * window.innerWidth,
+                  y: Math.random() * window.innerHeight,
+                  scale: 0
+                }}
+                animate={{
+                  y: [null, Math.random() * window.innerHeight],
+                  x: [null, Math.random() * window.innerWidth],
+                  scale: [0, 1, 0],
+                  opacity: [0, 0.6, 0]
+                }}
+                transition={{
+                  duration: 3 + Math.random() * 2,
+                  repeat: Infinity,
+                  delay: Math.random() * 2
+                }}
+              />
+            ))}
+
             <motion.div 
-              className="text-center p-8"
-              initial={{ scale: 0.8, opacity: 0 }}
+              className="text-center p-8 relative z-10"
+              initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ 
+                type: "spring",
+                stiffness: 100,
+                damping: 15,
+                delay: 0.1 
+              }}
             >
+              {/* Logo with enhanced animations */}
               <motion.div 
-                className="mx-auto mb-6 w-48 h-48 rounded-[28px] glass grid place-items-center shadow-[0_0_90px_rgba(99,102,241,.4)]"
-                initial={{ y: -20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.6, delay: 0.2 }}
+                className="mx-auto mb-8 w-56 h-56 rounded-[32px] glass-card grid place-items-center relative overflow-hidden"
+                initial={{ scale: 0, rotate: -180 }}
+                animate={{ 
+                  scale: 1, 
+                  rotate: 0,
+                }}
+                transition={{ 
+                  type: "spring",
+                  stiffness: 200,
+                  damping: 20,
+                  delay: 0.2 
+                }}
+                style={{
+                  boxShadow: '0 0 100px rgba(99, 102, 241, 0.6), inset 0 0 50px rgba(255, 255, 255, 0.1)'
+                }}
               >
+                {/* Rotating gradient ring */}
+                <motion.div
+                  className="absolute inset-0 rounded-[32px]"
+                  style={{
+                    background: 'conic-gradient(from 0deg, transparent, rgba(99, 102, 241, 0.5), transparent)',
+                  }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                />
+                
                 <motion.img 
                   src={LOGO_URL} 
                   alt="GCS Bank logo" 
-                  className="w-40 h-40 rounded drop-shadow-[0_6px_24px_rgba(99,102,241,.5)]"
-                  initial={{ scale: 0.5, rotate: -10 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  transition={{ duration: 0.7, delay: 0.3 }}
+                  className="w-44 h-44 rounded drop-shadow-[0_10px_30px_rgba(99,102,241,.7)] relative z-10"
+                  initial={{ scale: 0, rotate: 180, filter: "blur(10px)" }}
+                  animate={{ 
+                    scale: 1, 
+                    rotate: 0,
+                    filter: "blur(0px)"
+                  }}
+                  transition={{ 
+                    type: "spring",
+                    stiffness: 150,
+                    damping: 15,
+                    delay: 0.4 
+                  }}
                 />
               </motion.div>
-              <TypeLabel text={`Welcome to ${APP_NAME}`} />
+
+              {/* Animated title */}
+              <motion.div
+                initial={{ y: 30, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.6, duration: 0.6 }}
+              >
+                <TypeLabel text={`Welcome to ${APP_NAME}`} />
+              </motion.div>
+
+              {/* Glowing subtitle */}
               <motion.div 
-                className="text-white/90 mt-2 mb-6"
+                className="text-white/80 mt-4 mb-8 text-lg font-light"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 1.0 }}
+                style={{ textShadow: '0 0 20px rgba(99, 102, 241, 0.5)' }}
+              >
+                Your Performance Hub
+              </motion.div>
+
+              {/* Action buttons */}
+              <motion.div
+                className="flex gap-4 justify-center"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 1.2 }}
+              >
+                <motion.button 
+                  className="glass-btn text-white px-8 py-4 rounded-2xl text-lg font-medium"
+                  onClick={()=> setShowIntro(false)}
+                  whileHover={{ scale: 1.05, boxShadow: "0 0 30px rgba(99, 102, 241, 0.5)" }}
+                  whileTap={{ scale: 0.95 }}
+                  animate={{
+                    boxShadow: [
+                      "0 0 20px rgba(99, 102, 241, 0.3)",
+                      "0 0 40px rgba(99, 102, 241, 0.5)",
+                      "0 0 20px rgba(99, 102, 241, 0.3)"
+                    ]
+                  }}
+                  transition={{ 
+                    boxShadow: { duration: 2, repeat: Infinity }
+                  }}
+                >
+                  Get Started
+                </motion.button>
+              </motion.div>
+
+              {/* Skip hint */}
+              <motion.div 
+                className="text-white/50 mt-6 text-sm"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 1.2 }}
+                transition={{ duration: 0.5, delay: 1.4 }}
               >
-                Press Enter to continue
+                Press Enter to skip
               </motion.div>
-              <motion.button 
-                className="glass-btn text-white px-6 py-3 rounded-xl"
-                onClick={()=> setShowIntro(false)}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 1.4 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                Skip
-              </motion.button>
             </motion.div>
           </motion.div>
         )}
@@ -2311,8 +2571,11 @@ function AgentPortal({
         {/* Summary */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Agent</div>
-          <div className="text-xl font-semibold mb-1">{name}</div>
-          <div className="grid sm:grid-cols-3 gap-3 mt-3">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar name={name} size="lg" theme={theme} />
+            <div className="text-xl font-semibold">{name}</div>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-3">
             <TileRow label="Balance" value={balance} />
             <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
             <TileRow label="Lifetime Spent" value={lifetimeSpend} />
@@ -2439,6 +2702,17 @@ function AgentPortal({
             })}
           </div>
         </div>
+      </div>
+
+      {/* Milestones & Achievements */}
+      <div className="mt-4">
+        <MilestonesCard 
+          balance={balance}
+          earned={lifetimeEarn}
+          txns={txns}
+          agentId={agentId}
+          theme={theme}
+        />
       </div>
     </div>
   );
@@ -3224,14 +3498,15 @@ function Picker({
 }) {
   return (
     <motion.div 
-      className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center"
+      className="fixed inset-0 z-40 glass grid place-items-center"
+      style={{ backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
     >
       <motion.div 
-        className={classNames("rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-hidden", neonBox(theme))}
+        className={classNames("glass-card rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -3264,7 +3539,10 @@ function Picker({
             .filter((a) => a.role !== "system")
             .map((a, i) => (
               <HoverCard key={a.id} theme={theme} delay={0.03 + i * 0.02} onClick={() => onChooseAgent(a.id)}>
-                <div className="font-medium">{a.name}</div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Avatar name={a.name} size="sm" theme={theme} />
+                  <div className="font-medium flex-1 truncate">{a.name}</div>
+                </div>
                 <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
               </HoverCard>
             ))}
