@@ -606,7 +606,6 @@ export default function GCSDApp() {
     
     // IMPORTANT: Theme is 100% LOCAL - NEVER synced to KV storage
     // Each device/browser maintains its own theme preference
-    console.log(`[THEME] Applied theme: ${theme} (Local to this browser only)`);
   }, [theme, hydrated]);
 
   /* hydrate from KV once on mount */
@@ -668,7 +667,6 @@ export default function GCSDApp() {
         const savedTheme = localStorage.getItem("gcsd-theme") as Theme;
         const loadedTheme = savedTheme || "light";
         setTheme(loadedTheme);
-        console.log(`[THEME] Loaded local theme: ${loadedTheme} from localStorage (NOT from KV)`);
       } finally {
         setHydrated(true);
       }
@@ -706,7 +704,6 @@ export default function GCSDApp() {
       // CRITICAL: Theme is NEVER synced via KV - ignore any theme-related KV changes
       // Each browser maintains its own theme in localStorage independently
       if (key === "gcs-v4-theme") {
-        console.warn("[THEME] Ignoring theme from KV storage - theme is local only!");
         // DO NOT sync theme from KV - intentionally ignored
       }
     });
@@ -729,13 +726,6 @@ export default function GCSDApp() {
       // CRITICAL: Store in localStorage ONLY - NEVER in KV storage
       // Each device/browser has its own independent theme preference
       localStorage.setItem("gcsd-theme", theme);
-      console.log(`[THEME] Saved theme: ${theme} to localStorage (Local only, NOT synced to KV)`);
-      
-      // Verify we're not accidentally saving to KV
-      const kvKeys = ["gcs-v4-core", "gcs-v4-stock", "gcs-v4-pins", "gcs-v4-goals", "gcs-v4-notifs", "gcs-v4-epochs", "gcs-v4-metrics"];
-      if (kvKeys.includes("gcs-v4-theme")) {
-        console.error("[THEME] ERROR: Theme should NEVER be in KV storage!");
-      }
     }
   }, [hydrated, theme]);
 
@@ -770,7 +760,6 @@ export default function GCSDApp() {
   useEffect(() => {
     if (theme === "neon") {
       document.body.classList.add("neon-theme");
-      console.log("[THEME] Added neon-theme class to body (local only)");
     } else {
       document.body.classList.remove("neon-theme");
     }
@@ -781,12 +770,10 @@ export default function GCSDApp() {
     };
   }, [theme]);
 
-  /* Wrapped setTheme with logging and protection */
+  /* Wrapped setTheme for local-only theme changes */
   const setThemeLocal = (newTheme: Theme) => {
-    console.log(`[THEME] User changing theme from ${theme} to ${newTheme} (LOCAL ONLY - not synced)`);
     setTheme(newTheme);
-    // Double-check: ensure theme is NEVER accidentally saved to KV
-    // This is a safety check - theme should only go to localStorage
+    // Theme is saved to localStorage only - never to KV storage
   };
 
   /* derived */
@@ -1465,25 +1452,17 @@ export default function GCSDApp() {
               const isPinMatch = enteredPin === CORRECT_ADMIN_PIN;
               const isNumericOnly = /^\d{8}$/.test(enteredPin);
               
-              console.log("Admin PIN attempt:", { 
-                length: enteredPin.length, 
-                isNumeric: isNumericOnly,
-                matches: isPinMatch 
-              });
-              
               if (!isLengthCorrect || !isPinMatch || !isNumericOnly) { 
                 toast.error("❌ Invalid admin PIN - Access DENIED");
                 setPortal("home"); // Close modal and go back to home
                 setIsAdmin(false); // Ensure admin state is false
                 setAdminPin(""); // Clear any stored PIN
-                console.error("Admin access denied - wrong PIN");
                 return; 
               }
               
               // Only set admin if ALL checks pass
               setAdminPin(enteredPin);
               setIsAdmin(true);
-              console.log("Admin access granted");
               toast.success("✅ Admin unlocked");
             }}
             theme={theme}
@@ -1718,10 +1697,6 @@ function Home({
   }), []); // Empty dependency array since we want consistent 30-day period
 
   const earnedSeries: number[] = useMemo(() => {
-    console.log("Recalculating 30-day earned series");
-    console.log("Total transactions:", txns.length);
-    console.log("Non-system IDs:", Array.from(nonSystemIds));
-    
     return days.map((d) => {
       // Only count active credits (not reversed) for stable calculation
       const activeCredits = sumInRange(
@@ -1729,11 +1704,7 @@ function Home({
         d,
         1,
         (t) => {
-          const isActive = t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO);
-          if (isActive) {
-            console.log(`Active credit on ${d.toLocaleDateString()}:`, t.memo, t.amount, t.toId);
-          }
-          return isActive;
+          return t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO);
         }
       );
       return Math.max(0, activeCredits); // never negative
@@ -1767,15 +1738,11 @@ function Home({
       return sum + agentEarnings;
     }, 0);
     
-    console.log("Total accumulated credited balance (earnings - withdrawals):", total);
     return Math.max(0, total); // Never negative
   }, [nonSystemIds, txns]);
   
   const totalEarned = useMemo(() => {
-    const total = earnedSeries.reduce((a, b) => a + b, 0);
-    console.log("Total earned (30d):", total);
-    console.log("Earned series:", earnedSeries);
-    return total;
+    return earnedSeries.reduce((a, b) => a + b, 0);
   }, [earnedSeries]);
   const totalSpent = useMemo(() => spentSeries.reduce((a, b) => a + b, 0), [spentSeries]);
   const leaderboard = useMemo(() => Array.from(nonSystemIds)
@@ -1787,17 +1754,12 @@ function Home({
 
   // Star of day & leader of month - highest accumulated credits (minus withdrawals)
   const { starOfDay, leaderOfMonth } = useMemo(() => {
-    console.log("Recalculating star of day and leader of month");
-    console.log("Current metrics:", metrics);
-    console.log("starOfDay epoch:", metrics.starOfDay);
-    console.log("leaderOfMonth epoch:", metrics.leaderOfMonth);
-    
     const todayKey = new Date().toLocaleDateString();
     const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     const earnedToday: Record<string, number> = {};
     const earnedMonth: Record<string, number> = {};
     
-    // Process all transactions
+    // Process all transactions - accumulate earnings per agent
     for (const t of txns) {
       const d = new Date(t.dateISO);
       const isToday = d.toLocaleDateString() === todayKey;
@@ -1806,13 +1768,13 @@ function Home({
       
       // Add credits (earnings) - exclude Mint and redemption reversals
       if (t.kind === "credit" && t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t)) {
+        // Star of the Day - only count credits from today
         if (afterISO(metrics.starOfDay, t.dateISO) && isToday) {
           earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
-          console.log(`[Today] Added credit for ${t.toId}: +${t.amount} (total: ${earnedToday[t.toId]})`);
         }
+        // Leader of the Month - count all credits from this month
         if (afterISO(metrics.leaderOfMonth, t.dateISO) && isThisMonth) {
           earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
-          console.log(`[Month] Added credit for ${t.toId}: +${t.amount} (total: ${earnedMonth[t.toId]})`);
         }
       }
       
@@ -1820,35 +1782,46 @@ function Home({
       if (t.kind === "debit" && t.fromId && nonSystemIds.has(t.fromId) && G_isCorrectionDebit(t)) {
         if (afterISO(metrics.starOfDay, t.dateISO) && isToday) {
           earnedToday[t.fromId] = (earnedToday[t.fromId] || 0) - t.amount;
-          console.log(`[Today] Subtracted withdrawal for ${t.fromId}: -${t.amount} (total: ${earnedToday[t.fromId]})`);
         }
         if (afterISO(metrics.leaderOfMonth, t.dateISO) && isThisMonth) {
           earnedMonth[t.fromId] = (earnedMonth[t.fromId] || 0) - t.amount;
-          console.log(`[Month] Subtracted withdrawal for ${t.fromId}: -${t.amount} (total: ${earnedMonth[t.fromId]})`);
         }
       }
     }
     
-    console.log("earnedToday (after withdrawals):", earnedToday);
-    console.log("earnedMonth (after withdrawals):", earnedMonth);
+    // Sort and find top earners with stable sorting
+    const todaySorted = Object.entries(earnedToday)
+      .map(([id, amount]) => ({
+        id,
+        name: accounts.find((a) => a.id === id)?.name || "—",
+        amount
+      }))
+      .filter(entry => entry.amount > 0)
+      .sort((a, b) => {
+        // Primary sort: by amount (descending)
+        if (b.amount !== a.amount) return b.amount - a.amount;
+        // Secondary sort: by name (alphabetical) for stability
+        return a.name.localeCompare(b.name);
+      });
     
-    // Find the person with the HIGHEST accumulated credits
-    const starId = Object.entries(earnedToday)
-      .sort((a, b) => b[1] - a[1])[0]?.[0];
-    const leaderId = Object.entries(earnedMonth)
-      .sort((a, b) => b[1] - a[1])[0]?.[0];
+    const monthSorted = Object.entries(earnedMonth)
+      .map(([id, amount]) => ({
+        id,
+        name: accounts.find((a) => a.id === id)?.name || "—",
+        amount
+      }))
+      .filter(entry => entry.amount > 0)
+      .sort((a, b) => {
+        // Primary sort: by amount (descending)
+        if (b.amount !== a.amount) return b.amount - a.amount;
+        // Secondary sort: by name (alphabetical) for stability
+        return a.name.localeCompare(b.name);
+      });
     
-    const result = {
-      starOfDay: starId && earnedToday[starId] > 0 
-        ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } 
-        : null,
-      leaderOfMonth: leaderId && earnedMonth[leaderId] > 0
-        ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } 
-        : null
+    return {
+      starOfDay: todaySorted[0] || null,
+      leaderOfMonth: monthSorted[0] || null
     };
-    
-    console.log("Result:", result);
-    return result;
   }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
