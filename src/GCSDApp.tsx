@@ -982,22 +982,60 @@ export default function GCSDApp() {
     toast.success("Goal updated");
   }
 
-  // Reset balance to 0 by posting a correcting transaction (and mark an epoch to hide prior history)
-  function resetAgentBalance(agentId:string){
-    const bal = balances.get(agentId)||0;
-    if (bal === 0) {
-      setEpochs(prev=> ({...prev, [agentId]: nowISO()}));
-      return toast.info("Balance already zero; history hidden from now");
+  // Reset agent completely - clear all transactions and history for this agent
+  async function resetAgentBalance(agentId:string){
+    const agent = accounts.find(a => a.id === agentId);
+    if (!agent) return toast.error("Agent not found");
+    
+    const confirmReset = prompt(`⚠️ WARNING: This will completely reset ${agent.name}!\n\nThis will:\n- Clear ALL transaction history\n- Reset balance to 0\n- Clear all redemptions and activities\n\nType 'RESET' to confirm:`);
+    if (!confirmReset || confirmReset.trim().toUpperCase() !== "RESET") {
+      return toast.error("Reset cancelled");
     }
-    if (bal > 0) {
-      postTxn({ kind:"debit", amount: bal, fromId: agentId, memo:`Balance reset to 0` });
-      notify(`🧮 Reset balance of ${getName(agentId)} by −${bal} GCSD`);
-    } else {
-      postTxn({ kind:"credit", amount: -bal, toId: agentId, memo:`Balance reset to 0` });
-      notify(`🧮 Reset balance of ${getName(agentId)} by +${-bal} GCSD`);
+    
+    // Remove all transactions for this agent (except system transactions)
+    const filteredTxns = txns.filter(t => {
+      // Keep system transactions (mint to vault)
+      if (t.memo === "Mint") return true;
+      
+      // Remove all transactions involving this agent
+      if (t.fromId === agentId || t.toId === agentId) {
+        console.log(`Removing transaction for ${agent.name}:`, t);
+        return false;
+      }
+      
+      return true;
+    });
+    
+    console.log(`Original transactions: ${txns.length}, Filtered transactions: ${filteredTxns.length}`);
+    console.log(`Transactions removed for ${agent.name}:`, txns.length - filteredTxns.length);
+    
+    // Update transactions
+    setTxns(filteredTxns);
+    
+    // Clear agent's goals and epochs
+    setGoals(prev => {
+      const newGoals = { ...prev };
+      delete newGoals[agentId];
+      return newGoals;
+    });
+    
+    setEpochs(prev => {
+      const newEpochs = { ...prev };
+      delete newEpochs[agentId];
+      return newEpochs;
+    });
+    
+    // Save to database
+    try {
+      await kvSet("gcs-v4-core", { accounts, txns: filteredTxns });
+      await kvSet("gcs-v4-goals", goals);
+      await kvSet("gcs-v4-epochs", epochs);
+    } catch (error) {
+      console.warn("Failed to save agent reset:", error);
     }
-    setEpochs(prev=> ({...prev, [agentId]: nowISO()}));
-    toast.success("Balance reset");
+    
+    notify(`🧨 Complete reset of ${agent.name} - all history cleared`);
+    toast.success(`${agent.name} completely reset - all history cleared`);
   }
 
   // Reset all transactions (keep agents, clear all sales/redeems/history)
@@ -1416,22 +1454,39 @@ function Home({
     return d;
   }), []); // Empty dependency array since we want consistent 30-day period
 
-  const earnedSeries: number[] = useMemo(() => days.map((d) => {
-    // Only count active credits (not reversed) for stable calculation
-    const activeCredits = sumInRange(
-      txns,
-      d,
-      1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO)
-    );
-    return Math.max(0, activeCredits); // never negative
-  }), [txns, metrics.earned30d, days, nonSystemIds]);
+  const earnedSeries: number[] = useMemo(() => {
+    console.log("Recalculating 30-day earned series");
+    console.log("Total transactions:", txns.length);
+    console.log("Non-system IDs:", Array.from(nonSystemIds));
+    
+    return days.map((d) => {
+      // Only count active credits (not reversed) for stable calculation
+      const activeCredits = sumInRange(
+        txns,
+        d,
+        1,
+        (t) => {
+          const isActive = t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO);
+          if (isActive) {
+            console.log(`Active credit on ${d.toLocaleDateString()}:`, t.memo, t.amount, t.toId);
+          }
+          return isActive;
+        }
+      );
+      return Math.max(0, activeCredits); // never negative
+    });
+  }, [txns, metrics.earned30d, days, nonSystemIds]);
 
   const spentSeries: number[] = useMemo(() => days.map((d) =>
     sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
   ), [txns, metrics.spent30d, days, nonSystemIds]);
 
-  const totalEarned = useMemo(() => earnedSeries.reduce((a, b) => a + b, 0), [earnedSeries]);
+  const totalEarned = useMemo(() => {
+    const total = earnedSeries.reduce((a, b) => a + b, 0);
+    console.log("Total earned (30d):", total);
+    console.log("Earned series:", earnedSeries);
+    return total;
+  }, [earnedSeries]);
   const totalSpent = useMemo(() => spentSeries.reduce((a, b) => a + b, 0), [spentSeries]);
 
   // Leaderboard: use current balance (proper banking logic) - memoized for stability
@@ -1458,12 +1513,20 @@ function Home({
     for (const t of txns) {
       if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
       const d = new Date(t.dateISO);
+      
+      // Debug: Log transactions being counted
+      if (t.toId && nonSystemIds.has(t.toId)) {
+        console.log(`Transaction for ${t.toId}:`, t.memo, t.amount, t.dateISO);
+      }
+      
       if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
         earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
+        console.log(`Added to today's earnings for ${t.toId}: ${t.amount} (total: ${earnedToday[t.toId]})`);
       }
       const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
         earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+        console.log(`Added to month's earnings for ${t.toId}: ${t.amount} (total: ${earnedMonth[t.toId]})`);
       }
     }
     
@@ -2483,8 +2546,9 @@ function AdminPortal({
                     {/* Other Actions */}
                     <div className="border-t pt-2 mt-2">
                       <button className={classNames("w-full px-3 py-2 rounded-xl", neonBtn(theme, true))} onClick={() => onResetBalance(a.id)}>
-                        Reset Balance (to 0)
+                        🧨 Complete Reset
                       </button>
+                      <div className="text-xs opacity-70 mt-1">Clears all history & redemptions</div>
                     </div>
                   </motion.div>
                 ))}
