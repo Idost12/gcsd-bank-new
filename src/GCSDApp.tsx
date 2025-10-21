@@ -1309,12 +1309,12 @@ export default function GCSDApp() {
                 onWithdraw={withdrawAgentCredit}
                 onWithdrawManual={withdrawManual}
                 onAddAgent={addAgent}
-            onSetPin={setAgentPin}
-            onResetPin={(id)=>resetPin(id)}
-            onResetBalance={(id)=>resetAgentBalance(id)}
-            onDeleteAgent={(id)=>deleteAgent(id)}
-            onCompleteReset={completeReset}
-            onResetMetric={resetMetric}
+                onSetPin={setAgentPin}
+                onResetPin={(id)=>resetPin(id)}
+                onResetBalance={(id)=>resetAgentBalance(id)}
+                onDeleteAgent={(id)=>deleteAgent(id)}
+                onCompleteReset={completeReset}
+                onResetMetric={resetMetric}
               />
             </motion.div>
           )}
@@ -1749,7 +1749,7 @@ function AdminPortal({
 }) {
   const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users">("dashboard");
   const [agentId, setAgentId] = useState("");
-  const [ruleKey, setRuleKey] = useState(rules[0]?.key || "");
+  const [ruleKey, setRuleKey] = useState(rules[0]?.key || "full_evaluation");
   const [qty, setQty] = useState(1);
   const [xferAmt, setXferAmt] = useState("");
   const [xferNote, setXferNote] = useState("");
@@ -1761,6 +1761,13 @@ function AdminPortal({
   const [showPins, setShowPins] = useState<Record<string, boolean>>({});
   const [editingPin, setEditingPin] = useState<string | null>(null);
 
+  // Ensure ruleKey is set when component mounts
+  useEffect(() => {
+    if (!ruleKey && rules.length > 0) {
+      setRuleKey(rules[0].key);
+    }
+  }, [ruleKey, rules]);
+
   if (!isAdmin) {
     return (
       <div className={classNames("rounded-2xl border p-6 text-center", neonBox(theme))}>
@@ -1771,8 +1778,9 @@ function AdminPortal({
   }
 
   /** show only ACTIVE credits (not already reversed/withdrawn) and NOT reversals themselves */
-  const agentCredits = useMemo(() => 
-    txns.filter((t) => 
+  const agentCredits = useMemo(() => {
+    if (!agentId) return [];
+    return txns.filter((t) => 
       t.kind === "credit" && 
       t.toId === agentId && 
       t.memo !== "Mint" && 
@@ -1781,20 +1789,20 @@ function AdminPortal({
       !t.memo?.startsWith("Manual") && // Exclude manual transactions
       !t.memo?.startsWith("Withdraw") && // Exclude withdrawals
       G_isSaleStillActive(t, txns)
-    ),
-    [txns, agentId]
-  );
-  const agentRedeems = useMemo(() => 
-    txns.filter((t)=> 
+    );
+  }, [txns, agentId]);
+  
+  const agentRedeems = useMemo(() => {
+    if (!agentId) return [];
+    return txns.filter((t)=> 
       G_isRedeemTxn(t) && 
       t.fromId === agentId &&
       !t.memo?.startsWith("Manual") && // Exclude manual withdrawals
       !t.memo?.startsWith("Withdraw") && // Exclude manual withdrawals
       !t.memo?.startsWith("Correction") && // Exclude corrections
       G_isRedeemStillActive(t, txns) // Only show active redeems
-    ),
-    [txns, agentId]
-  );
+    );
+  }, [txns, agentId]);
 
   return (
     <div className="grid gap-4">
