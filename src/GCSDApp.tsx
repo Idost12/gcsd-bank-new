@@ -12,10 +12,10 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
    =========================== */
 
 const APP_NAME = "GCS Bank";
-const LOGO_URL = "/Logo.png"; // put high-res in /public/Logo.png
+const LOGO_URL = "/logo.png"; // put high-res in /public/logo.png
 
 type Theme  = "light" | "dark" | "neon";
-type Portal = "home" | "agent" | "admin" | "feed";
+type Portal = "home" | "agent" | "admin" | "sandbox" | "feed";
 
 type TxnKind = "credit" | "debit";
 type Transaction = {
@@ -39,9 +39,9 @@ type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string;
 const MAX_PRIZES_PER_AGENT = 2;
 
 const AGENT_NAMES = [
-  "Oliver Steele", "Maya Graves", "Viktor Parks", "Ben Mills", "Stan Harris", "Michael Wilson",
-  "Hope Marshall", "Sofie Roy", "Logan Noir", "Justin Frey", "Rebecca Brooks", "Christopher O'Connor",
-  "Caitlyn Stone", "Frank Collins", "Antonio", "Kevin Nolan", "Daniel Hill"
+  "Ben Mills","Oliver Steele","Maya Graves","Stan Harris","Frank Collins","Michael Wilson",
+  "Caitlyn Stone","Rebecca Brooks","Logan Noir","Christopher O'Connor","Viktor Parks",
+  "Hope Marshall","Justin Frey","Kevin Nolan","Sofie Roy"
 ];
 
 // Updated product rules (these are “earn” credits)
@@ -101,41 +101,18 @@ function mergeTxns(local: Transaction[], remote: Transaction[]) {
 }
 function mergeAccounts(local: Account[], remote: Account[]) {
   const map = new Map<string, Account>();
-  // Remote takes precedence to avoid duplication
   for (const a of remote) map.set(a.id, a);
-  // Only add local accounts that don't exist remotely
-  for (const a of local) {
-    if (!map.has(a.id)) map.set(a.id, a);
-  }
+  for (const a of local) map.set(a.id, a);
   return Array.from(map.values());
 }
 
-// Helper to check if accounts are the same (by name and role)
-function accountsAreEqual(a1: Account[], a2: Account[]): boolean {
-  if (a1.length !== a2.length) return false;
-  const names1 = a1.map(a => `${a.name}-${a.role}`).sort();
-  const names2 = a2.map(a => `${a.name}-${a.role}`).sort();
-  return names1.join(',') === names2.join(',');
-}
-
-/** Compute balances map for all accounts - properly handles reversals and prevents negative balances */
+/** Compute balances map for all accounts */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
   const map = new Map<string, number>();
   for (const a of accounts) map.set(a.id, 0);
-  
-  // Process transactions in chronological order to handle reversals correctly
-  const sortedTxns = [...txns].sort((a, b) => new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime());
-  
-  for (const t of sortedTxns) {
-    if (t.kind === "credit" && t.toId) {
-      map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
-    }
-    if (t.kind === "debit" && t.fromId) {
-      const currentBalance = map.get(t.fromId) || 0;
-      const newBalance = currentBalance - t.amount;
-      // Prevent negative balances - minimum balance is 0
-      map.set(t.fromId, Math.max(0, newBalance));
-    }
+  for (const t of txns) {
+    if (t.kind === "credit" && t.toId) map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
+    if (t.kind === "debit"  && t.fromId) map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
   }
   return map;
 }
@@ -204,18 +181,6 @@ function G_isSaleStillActive(creditTxn: Transaction, all: Transaction[]) {
   );
 }
 
-/** Check if a transaction has already been undone */
-function G_isTransactionUndone(txn: Transaction, all: Transaction[]): boolean {
-  if (txn.kind === "credit") {
-    // Check if this credit has been reversed
-    return !G_isSaleStillActive(txn, all);
-  } else if (txn.kind === "debit" && txn.memo?.startsWith("Redeem:")) {
-    // Check if this redemption has been reversed
-    return !G_isRedeemStillActive(txn, all);
-  }
-  return false;
-}
-
 /* ===== Mini chart/tiles (single versions) ===== */
 function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
   const max = Math.max(1, ...earned, ...spent);
@@ -243,11 +208,23 @@ function TileRow({ label, value }: { label: string; value: number }) {
   );
 }
 function NumberFlash({ value }:{ value:number }) {
-  // Simplified - no animations to prevent jumping
+  const prev = useRef(value);
+  const [pulse, setPulse] = useState<"up"|"down"|"none">("none");
+  useEffect(()=>{
+    if (value > prev.current) { setPulse("up"); setTimeout(()=>setPulse("none"), 500); }
+    else if (value < prev.current) { setPulse("down"); setTimeout(()=>setPulse("none"), 500); }
+    prev.current = value;
+  }, [value]);
   return (
-    <span>
+    <motion.span
+      key={value}
+      initial={{ y: 4, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: .15 }}
+      className={pulse==="up" ? "text-emerald-500" : pulse==="down" ? "text-rose-500" : undefined}
+    >
       {value.toLocaleString()} GCSD
-    </span>
+    </motion.span>
   );
 }
 
@@ -273,30 +250,30 @@ function classNames(...x: (string | false | undefined | null)[]) {
 /** Neon-aware containers/buttons/inputs */
 const neonBox = (theme: Theme) =>
   theme === "neon"
-    ? "bg-[#1a1a1a] border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
+    ? "bg-[#14110B] border border-orange-800 text-orange-50"
     : "bg-white dark:bg-slate-800";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
     ? solid
-      ? "bg-orange-500 text-black border border-orange-400 hover:bg-orange-400 shadow-lg shadow-orange-500/30"
-      : "bg-[#2a2a2a] border border-orange-500 text-orange-100 hover:bg-[#3a3a3a] shadow-lg shadow-orange-500/20"
+      ? "bg-orange-700 text-black border border-orange-600"
+      : "bg-[#0B0B0B] border border-orange-800 text-orange-50"
     : solid
       ? "bg-black text-white"
       : "bg-white dark:bg-slate-800";
 
 const inputCls = (theme: Theme) =>
   theme === "neon"
-    ? "border border-orange-500 bg-[#2a2a2a] text-orange-100 rounded-xl px-3 py-2 w-full placeholder-orange-300 focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20 [color-scheme:dark]"
+    ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50 rounded-xl px-3 py-2 w-full placeholder-orange-300/60 [color-scheme:dark]"
     : "border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800";
 
 function TypeLabel({ text }: { text: string }) {
   return (
     <div aria-label={text} className="text-2xl font-semibold">
       {text.split("").map((ch, i) => (
-        <span key={i}>
+        <motion.span key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.08, delay: i * 0.015 }}>
           {ch}
-        </span>
+        </motion.span>
       ))}
     </div>
   );
@@ -315,13 +292,13 @@ function ThemeToggle({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
       >
         <AnimatePresence initial={false} mode="wait">
           {isDark ? (
-            <span key="moon">
+            <motion.span key="moon" initial={{ rotate: -20, scale: 0.7, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 20, scale: 0.7, opacity: 0 }} transition={{ duration: 0.12 }}>
               <Moon className="w-4 h-4" />
-            </span>
+            </motion.span>
           ) : (
-            <span key="sun">
+            <motion.span key="sun" initial={{ rotate: 20, scale: 0.7, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: -20, scale: 0.7, opacity: 0 }} transition={{ duration: 0.12 }}>
               <Sun className="w-4 h-4" />
-            </span>
+            </motion.span>
           )}
         </AnimatePresence>
       </button>
@@ -359,60 +336,57 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
 
 function HoverCard({ children, onClick, delay = 0.03, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   return (
-    <button 
-      onClick={onClick} 
-      className={classNames("border rounded-2xl px-3 py-3 text-left transition-all duration-200", neonBox(theme))}
-    >
+    <motion.button initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }} whileHover={{ y: -3, boxShadow: "0 10px 22px rgba(0,0,0,.10)" }} whileTap={{ scale: 0.98 }} onClick={onClick} className={classNames("border rounded-2xl px-3 py-3 text-left transition-colors", neonBox(theme))}>
       {children}
-    </button>
+    </motion.button>
   );
 }
 
 /** Neon-friendly select */
 function FancySelect({ value, onChange, children, theme, placeholder }: { value: string; onChange: (v: string) => void; children: React.ReactNode; theme: Theme; placeholder?: string }) {
   return (
-    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-500 bg-[#2a2a2a] text-orange-100 shadow-lg shadow-orange-500/20" : "border bg-white dark:bg-slate-800")}>
+    <div className={classNames("relative rounded-xl", theme === "neon" ? "border border-orange-700 bg-[#0B0B0B]/60 text-orange-50" : "border bg-white dark:bg-slate-800")}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20", theme === "neon" ? "bg-transparent text-orange-100 [color-scheme:dark]" : "bg-transparent")}
+        className={classNames("appearance-none w-full px-3 py-2 pr-8 rounded-xl focus:outline-none", theme === "neon" ? "bg-transparent text-orange-50 [color-scheme:dark]" : "bg-transparent")}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {children}
       </select>
-      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-300" : "text-slate-500 dark:text-slate-300")} />
+      <ChevronDown className={classNames("pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4", theme === "neon" ? "text-orange-200" : "text-slate-500 dark:text-slate-300")} />
     </div>
   );
 }
 
 /* PIN modals */
-function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: () => void; onCheck: (pin: string) => void; theme: Theme }) {
+function PinModal({ open, onClose, onCheck }: { open: boolean; onClose: () => void; onCheck: (pin: string) => void }) {
   return (
-    <AnimatePresence>{open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} theme={theme} />}</AnimatePresence>
+    <AnimatePresence>{open && <PinModalGeneric title="Enter PIN" onClose={onClose} onOk={(pin) => onCheck(pin)} maxLen={5} />}</AnimatePresence>
   );
 }
-function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number; theme: Theme }) {
+function PinModalGeneric({ title, onClose, onOk, maxLen }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number }) {
   const [pin, setPin] = useState("");
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-      <div className={classNames("rounded-2xl p-5 w-[min(440px,92vw)]", neonBox(theme))}>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-[min(440px,92vw)]">
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold flex items-center gap-2">
             <Lock className="w-4 h-4" /> {title}
           </div>
-          <button className={classNames("p-1 rounded", theme === "neon" ? "hover:bg-orange-500/20" : "hover:bg-slate-100 dark:hover:bg-slate-800")} onClick={onClose}>
+          <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={onClose}>
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="space-y-3">
           <div className="text-sm opacity-70">Enter {maxLen}-digit PIN.</div>
-          <input className={inputCls(theme)} placeholder="PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={maxLen} />
-          <button className={classNames("px-3 py-1.5 rounded-xl border", neonBtn(theme, true))} onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}>
+          <input className="border rounded-xl px-3 py-2 w-full bg-white dark:bg-slate-800" placeholder="PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={maxLen} />
+          <button className="px-3 py-1.5 rounded-xl border bg-black text-white" onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}>
             <Check className="w-4 h-4 inline mr-1" /> OK
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -438,7 +412,7 @@ export default function GCSDApp() {
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>((localStorage.getItem("gcs-v4-theme") as Theme) || "light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -449,7 +423,7 @@ export default function GCSDApp() {
   const [clock, setClock] = useState(fmtTime(new Date()));
   const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
-  // Sandbox state removed
+  const [sandboxActive, setSandboxActive] = useState(false);
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
@@ -460,10 +434,10 @@ export default function GCSDApp() {
 
   // theme side effect
   useEffect(() => {
+    localStorage.setItem("gcs-v4-theme", theme);
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
-    if (hydrated) kvSet("gcs-v4-theme", theme);
-  }, [theme, hydrated]);
+  }, [theme]);
 
   /* hydrate from KV once on mount */
   useEffect(() => {
@@ -481,12 +455,9 @@ export default function GCSDApp() {
         setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
-        // Load notifications from KV storage instead of starting empty
         setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-        // Load theme from KV storage
-        setTheme((await kvGet<Theme>("gcs-v4-theme")) ?? "light");
       } finally {
         setHydrated(true);
       }
@@ -500,27 +471,16 @@ export default function GCSDApp() {
       if (key === "gcs-v4-core") {
         const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
         if (!remote) return;
-        
-        // Check if this is a complete reset by comparing account names
-        setAccounts(prev => {
-          const merged = mergeAccounts(prev, remote.accounts || []);
-          // If remote has significantly different accounts (like after reset), use remote completely
-          if (remote.accounts && remote.accounts.length > 0 && !accountsAreEqual(prev, remote.accounts)) {
-            return remote.accounts;
-          }
-          return merged;
-        });
+        setAccounts(prev => mergeAccounts(prev, remote.accounts || []));
         setTxns(prev => mergeTxns(prev, remote.txns || []));
         return;
       }
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
       if (key === "gcs-v4-pins")   setPins(val ?? (await kvGet("gcs-v4-pins")) ?? {});
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
-      // Notifications now sync live
       if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
-      if (key === "gcs-v4-theme") setTheme(val ?? (await kvGet("gcs-v4-theme")) ?? "light");
     });
     return off;
   }, []);
@@ -530,7 +490,6 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
-  // Notifications now persist to KV storage
   useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
@@ -578,11 +537,8 @@ export default function GCSDApp() {
 
   /* actions */
   function adminCredit(agentId:string, ruleKey:string, qty:number){
-    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); 
-    if (!rule) return toast.error("Invalid product rule");
+    const rule = PRODUCT_RULES.find(r=>r.key===ruleKey); if (!rule) return;
     if (!agentId) return toast.error("Choose agent");
-    if (!qty || qty <= 0) return toast.error("Quantity must be positive");
-    
     const amount = rule.gcsd * Math.max(1, qty||1);
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
@@ -590,10 +546,7 @@ export default function GCSDApp() {
   }
 
   function manualTransfer(agentId:string, amount:number, note:string){
-    if (!agentId) return toast.error("Choose an agent");
-    if (!amount || amount <= 0) return toast.error("Enter a positive amount");
-    if (amount > 100000) return toast.error("Amount too large (max 100,000 GCSD)");
-    
+    if (!agentId || !amount || amount<=0) return toast.error("Enter agent and amount");
     postTxn({ kind:"credit", amount, toId: agentId, memo: note || "Manual transfer" });
     notify(`➕ ${getName(agentId)} credited +${amount} GCSD (manual)`);
     toast.success(`Transferred ${amount} GCSD to ${getName(agentId)}`);
@@ -624,33 +577,17 @@ export default function GCSDApp() {
   }
 
   function undoSale(txId:string){
-    const t = txns.find(x=>x.id===txId); 
-    if (!t || t.kind!=="credit" || !t.toId) return;
-    
-    // Check if already undone
-    if (G_isTransactionUndone(t, txns)) {
-      toast.error("This transaction has already been undone");
-      return;
-    }
-    
-    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo ?? "Sale"}`, meta:{reversesTxnId: t.id} });
+    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="credit" || !t.toId) return;
+    postTxn({ kind:"debit", amount: t.amount, fromId: t.toId, memo:`Reversal of sale: ${t.memo ?? "Sale"}` });
     notify(`↩️ Reversed sale for ${getName(t.toId)} (−${t.amount})`);
     toast.success("Sale reversed");
   }
 
   function undoRedemption(txId:string){
-    const t = txns.find(x=>x.id===txId); 
-    if (!t || t.kind!=="debit" || !t.fromId) return;
-    
-    // Check if already undone
-    if (G_isTransactionUndone(t, txns)) {
-      toast.error("This redemption has already been undone");
-      return;
-    }
-    
+    const t = txns.find(x=>x.id===txId); if (!t || t.kind!=="debit" || !t.fromId) return;
     const label = (t.memo||"").replace("Redeem: ","");
     const prize = PRIZE_ITEMS.find(p=>p.label===label);
-    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}`, meta:{reversesTxnId: t.id} });
+    postTxn({ kind:"credit", amount: t.amount, toId: t.fromId, memo:`Reversal of redemption: ${label}` });
     if (prize) setStock(s=> ({...s, [prize.key]: (s[prize.key]??0)+1}));
     notify(`↩️ Reversed redemption for ${getName(t.fromId)} (+${t.amount})`);
     toast.success("Redemption reversed & stock restored");
@@ -659,13 +596,6 @@ export default function GCSDApp() {
   function withdrawAgentCredit(agentId:string, txId:string){
     const t = txns.find(x=>x.id===txId);
     if (!t || t.kind!=="credit" || t.toId!==agentId) return toast.error("Choose a credit to withdraw");
-    
-    // Check if already withdrawn/undone
-    if (G_isTransactionUndone(t, txns)) {
-      toast.error("This credit has already been withdrawn");
-      return;
-    }
-    
     const bal = balances.get(agentId)||0;
     if (bal < t.amount) return toast.error("Cannot withdraw more than current balance");
     /** Post a targeted reversal so this sale is treated as not active */
@@ -736,68 +666,40 @@ export default function GCSDApp() {
   }
 
   // Completely wipe app (asks for extra PIN)
-  async function completeReset(){
+  function completeReset(){
     const extra = prompt("Enter additional reset PIN to confirm:");
     if (!extra || extra !== adminPin) return toast.error("Extra PIN invalid");
-    
-    // Create completely fresh seed data with new IDs to avoid any conflicts
-    const freshAccounts = [
-      { id: uid(), name: "Bank Vault", role: "system" as const },
-      ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
-    ];
-    const freshTxns = [
-      { id: uid(), kind: "credit" as const, amount: 8000, memo: "Mint", dateISO: nowISO(), toId: freshAccounts[0].id },
-    ];
-    const freshStock = INITIAL_STOCK;
-    const freshGoals = {};
-    const freshPins = {};
-    const freshEpochs = {};
-    const freshMetrics = {};
-    const freshNotifs = [];
-    
-    // Save to database FIRST to prevent merge conflicts
-    try {
-      await kvSet("gcs-v4-core", { accounts: freshAccounts, txns: freshTxns });
-      await kvSet("gcs-v4-stock", freshStock);
-      await kvSet("gcs-v4-goals", freshGoals);
-      await kvSet("gcs-v4-pins", freshPins);
-      await kvSet("gcs-v4-epochs", freshEpochs);
-      await kvSet("gcs-v4-metrics", freshMetrics);
-      await kvSet("gcs-v4-notifs", freshNotifs);
-    } catch (error) {
-      console.warn("Failed to save reset state:", error);
-    }
-    
-    // Then update local state - this will trigger realtime sync but with fresh data
-    setAccounts(freshAccounts);
-    setTxns(freshTxns);
-    setStock(freshStock);
-    setGoals(freshGoals);
-    setPins(freshPins);
-    setEpochs(freshEpochs);
-    setMetrics(freshMetrics);
-    setNotifs(freshNotifs);
-    
+    const acc = [seedAccounts[0], ...accounts.filter(a=>a.role==="agent")]; // keep agents
+    setAccounts(acc);
+    setTxns([]);
+    setStock(INITIAL_STOCK);
+    setGoals({});
+    setPins({});
+    setEpochs({});
     notify("🧨 App was reset by admin");
     toast.success("Everything reset");
   }
 
   /** Admin metric resets */
-  async function resetMetric(kind: keyof MetricsEpoch){
-    const newMetrics = { ...metrics, [kind]: nowISO() };
-    setMetrics(newMetrics);
-    
-    // Save to database
-    try {
-      await kvSet("gcs-v4-metrics", newMetrics);
-    } catch (error) {
-      console.warn("Failed to save metric reset:", error);
-    }
-    
+  function resetMetric(kind: keyof MetricsEpoch){
+    setMetrics(prev => ({ ...prev, [kind]: nowISO() }));
     toast.success("Reset applied");
   }
 
-  // Sandbox mode removed - not needed for banking app
+  /* Sandbox (require PIN first, then stay until exit only) */
+  function enterSandbox() {
+    const pin = prompt("Admin PIN to enter Sandbox:");
+    if (!pin || !/^\d{5,8}$/.test(pin)) return toast.error("Enter a valid PIN");
+    setAdminPin(pin);
+    setSandboxActive(true);
+    setPortal("sandbox");
+    toast.success("Sandbox started");
+  }
+  function exitSandbox() {
+    setSandboxActive(false);
+    setPortal("home");
+    toast.success("Sandbox cleared");
+  }
 
   /* ============================ render ============================ */
   return (
@@ -813,19 +715,21 @@ export default function GCSDApp() {
       {/* Intro */}
       <AnimatePresence>
         {showIntro && (
-          <div className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
-            <div className="text-center p-8">
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            className={`fixed inset-0 z-50 grid place-items-center ${theme==="neon" ? "bg-[#0B0B0B]" : "bg-black/85"} text-white`}>
+            <motion.div initial={{scale:0.96}} animate={{scale:1}} className="text-center p-8">
               <div className="mx-auto mb-6 w-48 h-48 rounded-[28px] bg-white/10 grid place-items-center shadow-[0_0_90px_rgba(255,165,0,.55)]">
                 <img src={LOGO_URL} alt="GCS Bank logo" className="w-40 h-40 rounded drop-shadow-[0_6px_18px_rgba(255,165,0,.35)]"/>
               </div>
               <TypeLabel text={`Welcome to ${APP_NAME}`} />
               <div className="text-white/70 mt-2 mb-6">Press Enter to continue</div>
-              <button                className="px-4 py-2 rounded-xl bg-white text-black"
+              <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.97}}
+                className="px-4 py-2 rounded-xl bg-white text-black"
                 onClick={()=> setShowIntro(false)}>
                 Skip
-              </button>
-            </div>
-          </div>
+              </motion.button>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -843,21 +747,28 @@ export default function GCSDApp() {
             <span className="font-semibold text-base sm:text-lg">{APP_NAME}</span>
             <button
               className={classNames("ml-3 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
-              onClick={()=> setPortal("home")}
+              onClick={()=> setPortal("home")} // note: does NOT exit sandbox; that is explicit
               title="Go Home"
             >
               <HomeIcon className="w-4 h-4"/> Home
             </button>
-            {/* Sandbox button removed */}
+            <button
+              className={classNames("ml-2 inline-flex items-center gap-1 text-sm px-2 py-1 rounded-lg", neonBtn(theme))}
+              onClick={()=> portal==="sandbox" ? exitSandbox() : enterSandbox()}
+              title={portal==="sandbox" ? "Exit Sandbox" : "Enter Sandbox"}
+            >
+              <Shield className="w-4 h-4"/> {portal==="sandbox" ? "Exit Sandbox" : "Sandbox"}
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); }} />
             <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
             <ThemeToggle theme={theme} setTheme={setTheme}/>
-            <button              className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
+            <motion.button whileHover={{y:-1, boxShadow:"0 6px 16px rgba(0,0,0,.08)"}} whileTap={{scale:0.98}}
+              className={classNames("px-3 py-1.5 rounded-xl flex items-center gap-2", neonBtn(theme))}
               onClick={()=> setPickerOpen(true)}>
               <Users className="w-4 h-4"/> Switch User
-            </button>
+            </motion.button>
           </div>
         </div>
       </div>
@@ -889,7 +800,6 @@ export default function GCSDApp() {
               setIsAdmin(true);
               toast.success("Admin unlocked");
             }}
-            theme={theme}
           />
         )}
       </AnimatePresence>
@@ -904,14 +814,13 @@ export default function GCSDApp() {
           pinModal.onOK?.(!!ok);
           setPinModal({open:false});
         }}
-        theme={theme}
       />
 
       {/* Receipt */}
       <AnimatePresence>
         {receipt && (
-          <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
-            <div className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/40 grid place-items-center">
+            <motion.div initial={{scale:0.95}} animate={{scale:1}} exit={{scale:0.95}} className={classNames("rounded-2xl p-5 w-[min(460px,92vw)]", neonBox(theme))}>
               <div className="flex items-center justify-between mb-3">
                 <div className="font-semibold flex items-center gap-2"><Gift className="w-4 h-4"/> Receipt</div>
                 <button className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10" onClick={()=>setReceipt(null)}><X className="w-4 h-4"/></button>
@@ -924,8 +833,8 @@ export default function GCSDApp() {
                 <div><b>Amount:</b> {receipt.amount.toLocaleString()} GCSD</div>
               </div>
               <div className="mt-4 text-xs opacity-70">Tip: screenshot or print this popup for records.</div>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -981,7 +890,7 @@ export default function GCSDApp() {
           />
         )}
 
-        {/* Sandbox portal removed */}
+        {portal==="sandbox" && <SandboxPage onExit={exitSandbox} theme={theme}/>}
 
         {portal==="feed" && <FeedPage theme={theme} notifs={notifs} />}
       </div>
@@ -1009,79 +918,79 @@ function Home({
   prizes: PrizeItem[];
   metrics: MetricsEpoch;
 }) {
-  const nonSystemIds = useMemo(() => new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id)), [accounts]);
+  const nonSystemIds = new Set(accounts.filter((a) => a.role !== "system").map((a) => a.id));
 
   // Purchases list – only active redeems (not reversed)
-  const purchases = useMemo(() => txns
+  const purchases = txns
     .filter((t) => G_isRedeemTxn(t) && t.fromId && nonSystemIds.has(t.fromId))
     .filter((t) => G_isRedeemStillActive(t, txns))
-    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount })), [txns, nonSystemIds]);
+    .map((t) => ({ when: new Date(t.dateISO), memo: t.memo!, amount: t.amount }));
 
-  // 30-day series - memoized to prevent recalculation
-  const days = useMemo(() => Array.from({ length: 30 }, (_, i) => {
+  // 30-day series
+  const days = Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (29 - i));
     d.setHours(0, 0, 0, 0);
     return d;
-  }), []); // Empty dependency array since we want consistent 30-day period
+  });
 
-  const earnedSeries: number[] = useMemo(() => days.map((d) => {
-    // Only count active credits (not reversed) for stable calculation
-    const activeCredits = sumInRange(
+  const earnedSeries: number[] = days.map((d) => {
+    const credits = sumInRange(
       txns,
       d,
       1,
-      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && G_isSaleStillActive(t, txns) && afterISO(metrics.earned30d, t.dateISO)
+      (t) => t.kind === "credit" && !!t.toId && nonSystemIds.has(t.toId) && t.memo !== "Mint" && !G_isReversalOfRedemption(t) && afterISO(metrics.earned30d, t.dateISO)
     );
-    return Math.max(0, activeCredits); // never negative
-  }), [txns, metrics.earned30d, days, nonSystemIds]);
+    const withdraws = sumInRange(
+      txns,
+      d,
+      1,
+      (t) => G_isCorrectionDebit(t) && !!t.fromId && nonSystemIds.has(t.fromId) && afterISO(metrics.earned30d, t.dateISO)
+    );
+    return Math.max(0, credits - withdraws); // never negative
+  });
 
-  const spentSeries: number[] = useMemo(() => days.map((d) =>
+  const spentSeries: number[] = days.map((d) =>
     sumInRange(txns, d, 1, (t) => t.kind === "debit" && !!t.fromId && nonSystemIds.has(t.fromId) && !G_isCorrectionDebit(t) && afterISO(metrics.spent30d, t.dateISO))
-  ), [txns, metrics.spent30d, days, nonSystemIds]);
+  );
 
-  const totalEarned = useMemo(() => earnedSeries.reduce((a, b) => a + b, 0), [earnedSeries]);
-  const totalSpent = useMemo(() => spentSeries.reduce((a, b) => a + b, 0), [spentSeries]);
+  const totalEarned = earnedSeries.reduce((a, b) => a + b, 0);
+  const totalSpent = spentSeries.reduce((a, b) => a + b, 0);
 
-  // Leaderboard: use current balance (proper banking logic) - memoized for stability
-  const balances = useMemo(() => computeBalances(accounts, txns), [accounts, txns]);
-  const leaderboard = useMemo(() => Array.from(nonSystemIds)
+  // Leaderboard: earned = credits (non-reversal) - corrections; ignore Mint
+  const leaderboard = Array.from(nonSystemIds)
     .map((id) => {
-      const balance = balances.get(id) || 0;
-      return { id, name: accounts.find((a) => a.id === id)?.name || "—", balance };
+      const credits = txns
+        .filter((t) => t.kind === "credit" && t.toId === id && t.memo !== "Mint" && !G_isReversalOfRedemption(t))
+        .reduce((a, b) => a + b.amount, 0);
+      const withdraws = txns.filter((t) => G_isCorrectionDebit(t) && t.fromId === id).reduce((a, b) => a + b.amount, 0);
+      return { id, name: accounts.find((a) => a.id === id)?.name || "—", earned: Math.max(0, credits - withdraws) };
     })
-    .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
+    .sort((a, b) => b.earned - a.earned);
 
-  // Simple "star of day" & "leader of month" (apply metric epochs) - memoized for stability
-  const { starOfDay, leaderOfMonth } = useMemo(() => {
-    const todayKey = new Date().toLocaleDateString();
-    const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-    const earnedToday: Record<string, number> = {};
-    const earnedMonth: Record<string, number> = {};
-    
-    for (const t of txns) {
-      if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
-      const d = new Date(t.dateISO);
-      if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
-        earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
-      }
-      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
-        earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
-      }
+  // Simple "star of day" & "leader of month" (apply metric epochs)
+  const todayKey = new Date().toLocaleDateString();
+  const curMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const earnedToday: Record<string, number> = {};
+  const earnedMonth: Record<string, number> = {};
+  for (const t of txns) {
+    if (t.kind !== "credit" || !t.toId || t.memo === "Mint" || G_isReversalOfRedemption(t) || !nonSystemIds.has(t.toId)) continue;
+    const d = new Date(t.dateISO);
+    if (afterISO(metrics.starOfDay, t.dateISO) && d.toLocaleDateString() === todayKey) {
+      earnedToday[t.toId] = (earnedToday[t.toId] || 0) + t.amount;
     }
-    
-    const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
-    const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
-    
-    return {
-      starOfDay: starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null,
-      leaderOfMonth: leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null
-    };
-  }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
+    const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (afterISO(metrics.leaderOfMonth, t.dateISO) && mk === curMonth) {
+      earnedMonth[t.toId] = (earnedMonth[t.toId] || 0) + t.amount;
+    }
+  }
+  const starId = Object.entries(earnedToday).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const leaderId = Object.entries(earnedMonth).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const starOfDay = starId ? { name: accounts.find((a) => a.id === starId)?.name || "—", amount: earnedToday[starId] } : null;
+  const leaderOfMonth = leaderId ? { name: accounts.find((a) => a.id === leaderId)?.name || "—", amount: earnedMonth[leaderId] } : null;
 
   return (
-    <div>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className="grid md:grid-cols-3 gap-4">
         {/* Dashboard */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
@@ -1125,15 +1034,15 @@ function Home({
           <div className="text-sm opacity-70 mb-2">Leaderboard</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {leaderboard.map((row, i) => (
-              <div key={row.id} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+              <motion.div key={row.id} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 text-right">{i + 1}.</span>
                   <span className="font-medium">{row.name}</span>
                 </div>
                 <div className="text-sm">
-                  <NumberFlash value={row.balance} />
+                  <NumberFlash value={row.earned} />
                 </div>
-              </div>
+              </motion.div>
             ))}
             {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
           </div>
@@ -1144,7 +1053,7 @@ function Home({
           <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
           <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
             {prizes.map((p) => (
-              <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+              <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                 <div className="font-medium">{p.label}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
@@ -1152,12 +1061,12 @@ function Home({
                     Stock: {stock[p.key] ?? 0}
                   </span>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -1212,7 +1121,7 @@ function AgentPortal({
   const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
 
   return (
-    <div>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Summary */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
@@ -1244,10 +1153,10 @@ function AgentPortal({
             <div className="text-sm opacity-70 mb-2">Recent activity</div>
             <div className="space-y-2 max-h-56 overflow-auto pr-2">
               {agentTxns.slice(0, 60).map((t) => (
-                <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
                   <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
-                </div>
+                </motion.div>
               ))}
               {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
             </div>
@@ -1265,7 +1174,7 @@ function AgentPortal({
               const left = stock[p.key] ?? 0;
               const can = left > 0 && balance >= p.price && prizeCount < MAX_PRIZES_PER_AGENT;
               return (
-                <div key={p.key} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
+                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}>
                   <div>
                     <div className="font-medium">{p.label}</div>
                     <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
@@ -1273,13 +1182,13 @@ function AgentPortal({
                   <button disabled={!can} className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} onClick={() => onRedeem(p.key)}>
                     <Gift className="w-4 h-4 inline mr-1" /> Redeem
                   </button>
-                </div>
+                </motion.div>
               );
             })}
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -1385,10 +1294,10 @@ function AdminPortal({
                     return s;
                   }, 0);
                   return (
-                    <div key={a.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <motion.div key={a.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                       <div className="font-medium">{a.name}</div>
                       <div className="text-sm">{bal.toLocaleString()} GCSD</div>
-                    </div>
+                    </motion.div>
                   );
                 })}
             </div>
@@ -1397,10 +1306,10 @@ function AdminPortal({
             <div className="text-sm opacity-70 mb-2">Prize Stock</div>
             <div className="space-y-2 max-h-[420px] overflow-auto pr-2">
               {PRIZE_ITEMS.map((p) => (
-                <div key={p.key} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                <motion.div key={p.key} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                   <div>{p.label}</div>
                   <div className="text-sm">Stock: {stock[p.key] ?? 0}</div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
@@ -1510,28 +1419,23 @@ function AdminPortal({
               <div className="text-sm opacity-70 mb-2">Credits posted to {accounts.find((a) => a.id === agentId)?.name}</div>
               <div className="space-y-2 max-h-[360px] overflow-auto pr-2">
                 {agentCredits.length === 0 && <div className="text-sm opacity-70">No credit transactions found.</div>}
-                {agentCredits.map((t) => {
-                  const isUndone = G_isTransactionUndone(t, txns);
-                  return (
-                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                      <div className="text-sm">
-                        <div className="font-medium">{t.memo || "Credit"}</div>
-                        <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                        {isUndone && <div className="text-xs text-rose-500 mt-1">Already withdrawn</div>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
-                        <button
-                          className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))}
-                          onClick={() => !isUndone && onWithdraw(agentId, t.id)}
-                          disabled={isUndone}
-                        >
-                          {isUndone ? "Withdrawn" : "Withdraw"}
-                        </button>
-                      </div>
+                {agentCredits.map((t) => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">
+                      <div className="font-medium">{t.memo || "Credit"}</div>
+                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
+                      <button
+                        className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))}
+                        onClick={() => onWithdraw(agentId, t.id)}
+                      >
+                        Withdraw
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
               </div>
             </div>
           )}
@@ -1570,57 +1474,43 @@ function AdminPortal({
             <div className="mt-6">
               <div className="text-sm opacity-70 mb-2">Undo redemptions</div>
               <div className="space-y-2 max-h-[200px] overflow-auto pr-2">
-                {agentId && agentRedeems.length>0 ? agentRedeems.map(t => {
-                  const isUndone = G_isTransactionUndone(t, txns);
-                  return (
-                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                      <div className="text-sm">
-                        <div>{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
-                        {isUndone && <div className="text-xs text-rose-500 mt-1">Already undone</div>}
-                      </div>
-                      <button 
-                        className={classNames("px-3 py-1.5 rounded-xl", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme, true))} 
-                        onClick={()=> !isUndone && onUndoRedemption(agentId, t.id)}
-                        disabled={isUndone}
-                      >
-                        <RotateCcw className="w-4 h-4 inline mr-1" />
-                        {isUndone ? "Undone" : "Undo"}
-                      </button>
-                    </div>
-                  );
-                }) : <div className="opacity-60 text-sm">No redeems.</div>}
+                {agentId && agentRedeems.length>0 ? agentRedeems.map(t => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
+                    <button className={classNames("px-3 py-1.5 rounded-xl", neonBtn(theme, true))} onClick={()=> onUndoRedemption(agentId, t.id)}>
+                      <RotateCcw className="w-4 h-4 inline mr-1" />Undo
+                    </button>
+                  </motion.div>
+                )) : <div className="opacity-60 text-sm">No redeems.</div>}
               </div>
             </div>
           </div>
 
           <div className="rounded-xl border p-3">
-            <div className="text-sm opacity-70 mb-2">Quick reversals (credits only)</div>
+            <div className="text-sm opacity-70 mb-2">Quick reversals</div>
             <div className="space-y-2 max-h-[320px] overflow-auto pr-2">
               {txns
-                .filter((t) => t.kind === "credit" && t.memo && t.memo !== "Mint")
-                .map((t) => {
-                  const isUndone = G_isTransactionUndone(t, txns);
-                  return (
-                    <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
-                      <div className="text-sm">
-                        <div className="font-medium">{t.memo}</div>
-                        <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
-                        {isUndone && <div className="text-xs text-rose-500 mt-1">Already undone</div>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm text-emerald-500">+{t.amount.toLocaleString()}</div>
-                        <button 
-                          className={classNames("px-2 py-1 rounded-lg text-xs", isUndone ? "opacity-50 cursor-not-allowed" : neonBtn(theme))} 
-                          onClick={() => !isUndone && onUndoSale(t.id)}
-                          disabled={isUndone}
-                        >
-                          <RotateCcw className="w-4 h-4 inline mr-1" /> 
-                          {isUndone ? "Undone" : "Undo sale"}
-                        </button>
-                      </div>
+                .filter((t) => t.memo && t.memo !== "Mint")
+                .map((t) => (
+                  <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+                    <div className="text-sm">
+                      <div className="font-medium">{t.memo}</div>
+                      <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-2">
+                      <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
+                      {t.kind === "credit" ? (
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoSale(t.id)}>
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo sale
+                        </button>
+                      ) : (
+                        <button className={classNames("px-2 py-1 rounded-lg text-xs", neonBtn(theme))} onClick={() => onUndoRedemption(t.id)}>
+                          <RotateCcw className="w-4 h-4 inline mr-1" /> Undo redeem
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
             </div>
           </div>
         </div>
@@ -1632,13 +1522,13 @@ function AdminPortal({
           <div className="text-sm opacity-70 mb-2">All activity</div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-2">
             {txns.map((t) => (
-              <div key={t.id} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
+              <motion.div key={t.id} layout whileHover={{ y: -2 }} className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}>
                 <div className="text-sm">
                   <div className="font-medium">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
                   <div className="opacity-70 text-xs">{new Date(t.dateISO).toLocaleString()}</div>
                 </div>
                 <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>{t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}</div>
-              </div>
+              </motion.div>
             ))}
             {txns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
           </div>
@@ -1715,8 +1605,8 @@ function Picker({
   onChooseAgent: (id: string) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
-      <div className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-white/80 backdrop-blur dark:bg-slate-900/70 grid place-items-center">
+      <motion.div initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 18 }} className={classNames("rounded-3xl shadow-xl p-6 w-[min(780px,92vw)]", neonBox(theme))}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4" />
@@ -1744,18 +1634,30 @@ function Picker({
               </HoverCard>
             ))}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
 /** Sandbox */
-// SandboxPage component removed - not needed for banking app
+function SandboxPage({ onExit, theme }: { onExit: () => void; theme: Theme }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
+      <div className={classNames("rounded-2xl border p-6", neonBox(theme))}>
+        <div className="text-xl font-semibold mb-2">Sandbox</div>
+        <div className="opacity-80 text-sm">Use this area to experiment. Data here is temporary and resets when you exit.</div>
+        <button className={classNames("mt-4 px-4 py-2 rounded-xl", neonBtn(theme, true))} onClick={onExit}>
+          Exit Sandbox
+        </button>
+      </div>
+    </motion.div>
+  );
+}
 
 /** Feed */
 function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
   return (
-    <div>
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
       <div className={classNames("rounded-2xl border p-4", neonBox(theme))}>
         <div className="text-sm opacity-70 mb-2">Notifications</div>
         <div className="space-y-2 max-h-[70vh] overflow-auto pr-2">
@@ -1768,7 +1670,7 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
           ))}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
