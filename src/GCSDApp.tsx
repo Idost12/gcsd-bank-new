@@ -308,8 +308,8 @@ function classNames(...x: (string | false | undefined | null)[]) {
 /** Neon-aware containers/buttons/inputs */
 const neonBox = (theme: Theme) =>
   theme === "neon"
-    ? "bg-[#1a1a1a] border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
-    : "bg-white dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700";
+    ? "bg-[#1a1a1a]/80 backdrop-blur-xl border border-orange-500 text-orange-100 shadow-lg shadow-orange-500/20"
+    : "bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl dark:text-slate-100 border border-slate-200/50 dark:border-slate-700/50 shadow-xl";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
@@ -338,6 +338,223 @@ function TypeLabel({ text }: { text: string }) {
           {ch}
         </motion.span>
       ))}
+    </div>
+  );
+}
+
+/* Avatar Component - Shows initials in colored circle */
+function Avatar({ name, size = "md", className = "" }: { name: string; size?: "sm" | "md" | "lg" | "xl"; className?: string }) {
+  // Extract initials (first letter of first name + first letter of last name)
+  const getInitials = (fullName: string) => {
+    const parts = fullName.trim().split(" ");
+    if (parts.length === 1) return parts[0][0]?.toUpperCase() || "?";
+    const firstInitial = parts[0][0]?.toUpperCase() || "";
+    const lastInitial = parts[parts.length - 1][0]?.toUpperCase() || "";
+    return firstInitial + lastInitial;
+  };
+
+  // Generate consistent color based on name
+  const getColorFromName = (str: string) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash % 360);
+    return `hsl(${hue}, 70%, 60%)`;
+  };
+
+  const initials = getInitials(name);
+  const bgColor = getColorFromName(name);
+
+  const sizeClasses = {
+    sm: "w-8 h-8 text-xs",
+    md: "w-10 h-10 text-sm",
+    lg: "w-14 h-14 text-lg",
+    xl: "w-20 h-20 text-2xl"
+  };
+
+  return (
+    <motion.div
+      className={`${sizeClasses[size]} rounded-full flex items-center justify-center font-bold text-white shadow-lg ${className}`}
+      style={{ 
+        background: `linear-gradient(135deg, ${bgColor}, ${getColorFromName(name + "2")})`,
+        border: "2px solid rgba(255,255,255,0.3)"
+      }}
+      whileHover={{ scale: 1.1, rotate: 5 }}
+      whileTap={{ scale: 0.95 }}
+    >
+      {initials}
+    </motion.div>
+  );
+}
+
+/* Podium Component - Visual ranking display */
+function Podium({ agents, theme }: { agents: Array<{ name: string; amount: number }>; theme: Theme }) {
+  if (agents.length === 0) return <div className="text-center text-sm opacity-60">No data yet</div>;
+
+  const podiumHeights = ["h-40", "h-32", "h-24"];
+  const podiumColors = [
+    "from-yellow-400 to-yellow-600",
+    "from-gray-300 to-gray-500", 
+    "from-amber-600 to-amber-800"
+  ];
+  const medals = ["🥇", "🥈", "🥉"];
+
+  return (
+    <div className="flex items-end justify-center gap-4 py-6">
+      {/* 2nd Place */}
+      {agents[1] && (
+        <motion.div 
+          className="flex flex-col items-center"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="mb-2 text-3xl">{medals[1]}</div>
+          <Avatar name={agents[1].name} size="lg" />
+          <div className="text-sm font-medium mt-2">{agents[1].name}</div>
+          <div className="text-xs opacity-70">{agents[1].amount.toLocaleString()} GCSD</div>
+          <motion.div 
+            className={`${podiumHeights[1]} w-24 mt-2 rounded-t-xl bg-gradient-to-b ${podiumColors[1]} shadow-lg flex items-center justify-center text-white font-bold`}
+            initial={{ height: 0 }}
+            animate={{ height: "8rem" }}
+            transition={{ delay: 0.3, type: "spring" }}
+          >
+            #2
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* 1st Place */}
+      {agents[0] && (
+        <motion.div 
+          className="flex flex-col items-center"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0 }}
+        >
+          <motion.div 
+            className="mb-2 text-5xl"
+            animate={{ rotate: [0, -10, 10, -10, 0] }}
+            transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+          >
+            {medals[0]}
+          </motion.div>
+          <Avatar name={agents[0].name} size="xl" className="ring-4 ring-yellow-400" />
+          <div className="text-base font-bold mt-2">{agents[0].name}</div>
+          <div className="text-sm opacity-70">{agents[0].amount.toLocaleString()} GCSD</div>
+          <motion.div 
+            className={`${podiumHeights[0]} w-28 mt-2 rounded-t-xl bg-gradient-to-b ${podiumColors[0]} shadow-2xl flex items-center justify-center text-white font-bold text-xl relative overflow-hidden`}
+            initial={{ height: 0 }}
+            animate={{ height: "10rem" }}
+            transition={{ delay: 0.2, type: "spring" }}
+          >
+            <motion.div
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+              animate={{ x: ["-100%", "200%"] }}
+              transition={{ duration: 2, repeat: Infinity, repeatDelay: 1 }}
+            />
+            #1
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* 3rd Place */}
+      {agents[2] && (
+        <motion.div 
+          className="flex flex-col items-center"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div className="mb-2 text-3xl">{medals[2]}</div>
+          <Avatar name={agents[2].name} size="lg" />
+          <div className="text-sm font-medium mt-2">{agents[2].name}</div>
+          <div className="text-xs opacity-70">{agents[2].amount.toLocaleString()} GCSD</div>
+          <motion.div 
+            className={`${podiumHeights[2]} w-20 mt-2 rounded-t-xl bg-gradient-to-b ${podiumColors[2]} shadow-lg flex items-center justify-center text-white font-bold`}
+            initial={{ height: 0 }}
+            animate={{ height: "6rem" }}
+            transition={{ delay: 0.4, type: "spring" }}
+          >
+            #3
+          </motion.div>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+/* Live Transaction Feed Component */
+function TransactionFeed({ txns, accounts, theme }: { txns: Transaction[]; accounts: Account[]; theme: Theme }) {
+  const recentTxns = txns.slice(0, 15); // Show last 15 transactions
+
+  const getTransactionIcon = (txn: Transaction) => {
+    if (txn.memo?.includes("Redeem")) return "🎁";
+    if (txn.memo?.includes("Reversal")) return "↩️";
+    if (txn.memo?.includes("Correction")) return "⚠️";
+    if (txn.memo?.includes("Withdraw")) return "💸";
+    if (txn.kind === "credit") return "💰";
+    return "📤";
+  };
+
+  const getName = (id: string) => accounts.find(a => a.id === id)?.name || "System";
+
+  return (
+    <div className="space-y-2">
+      {recentTxns.map((txn, i) => {
+        const isCredit = txn.kind === "credit";
+        const agentId = isCredit ? txn.toId : txn.fromId;
+        const agentName = getName(agentId || "");
+        const icon = getTransactionIcon(txn);
+        
+        return (
+          <motion.div
+            key={txn.id}
+            className={classNames(
+              "relative overflow-hidden rounded-xl p-4 backdrop-blur-md border",
+              theme === "neon"
+                ? "bg-orange-500/5 border-orange-800/30 hover:bg-orange-500/10"
+                : "bg-white/40 dark:bg-slate-800/40 border-slate-200/50 dark:border-slate-700/50 hover:bg-white/60 dark:hover:bg-slate-800/60"
+            )}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.3 }}
+            whileHover={{ scale: 1.02, x: 5 }}
+          >
+            {/* Glass morphism effect */}
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            
+            <div className="relative flex items-center gap-4">
+              {/* Avatar */}
+              <Avatar name={agentName} size="md" />
+              
+              {/* Transaction Details */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">{icon}</span>
+                  <span className="font-semibold truncate">{agentName}</span>
+                </div>
+                <div className="text-sm opacity-70 truncate">{txn.memo || (isCredit ? "Credit" : "Debit")}</div>
+                <div className="text-xs opacity-50">{new Date(txn.dateISO).toLocaleString()}</div>
+              </div>
+              
+              {/* Amount */}
+              <motion.div 
+                className={classNames(
+                  "text-xl font-bold",
+                  isCredit ? "text-emerald-500" : "text-rose-500"
+                )}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: i * 0.05 + 0.2, type: "spring" }}
+              >
+                {isCredit ? "+" : "-"}{txn.amount.toLocaleString()}
+              </motion.div>
+            </div>
+          </motion.div>
+        );
+      })}
     </div>
   );
 }
@@ -1825,115 +2042,176 @@ function Home({
   }, [txns, metrics.starOfDay, metrics.leaderOfMonth, accounts, nonSystemIds]);
 
   return (
-    <div>
-      <div className="grid md:grid-cols-3 gap-4">
-        {/* Dashboard */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Dashboard</div>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <TileRow label="Total Active Balance" value={totalActiveBalance} />
-            <TileRow label="Total GCSD Spent (30d)" value={totalSpent} />
+    <div className="space-y-6">
+      {/* Hero Stats - Glass Morphism */}
+      <motion.div 
+        className={classNames("rounded-2xl border p-6", neonBox(theme))}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="grid sm:grid-cols-2 gap-6">
+          <div>
+            <div className="text-sm opacity-70 mb-2">Total Active Balance</div>
+            <div className="text-4xl font-bold">{totalActiveBalance.toLocaleString()} <span className="text-xl opacity-70">GCSD</span></div>
           </div>
-
-          <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Finance (30 days)</div>
-            <LineChart earned={earnedSeries} spent={spentSeries} />
+          <div>
+            <div className="text-sm opacity-70 mb-2">Total Spent (30d)</div>
+            <div className="text-4xl font-bold text-rose-500">{totalSpent.toLocaleString()} <span className="text-xl opacity-70">GCSD</span></div>
           </div>
+        </div>
+      </motion.div>
 
-          <div className="grid sm:grid-cols-2 gap-4 mt-4">
-            <Highlight title="Star of the Day" value={starOfDay ? `${starOfDay.name} • +${starOfDay.amount.toLocaleString()} GCSD` : "—"} />
-            <Highlight title="Leader of the Month" value={leaderOfMonth ? `${leaderOfMonth.name} • +${leaderOfMonth.amount.toLocaleString()} GCSD` : "—"} />
+      {/* Podium - Top 3 Agents by Balance */}
+      <motion.div 
+        className={classNames("rounded-2xl border p-6", neonBox(theme))}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <div className="text-lg font-semibold mb-4 text-center">🏆 Top Performers</div>
+        <Podium agents={leaderboard.slice(0, 3)} theme={theme} />
+      </motion.div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Live Transaction Feed - BIG */}
+        <motion.div 
+          className={classNames("rounded-2xl border p-6", neonBox(theme))}
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-lg font-semibold">📊 Live Activity Feed</div>
+            <div className="text-xs opacity-60">{txns.length} total transactions</div>
           </div>
+          <div className="max-h-[600px] overflow-auto pr-2">
+            <TransactionFeed txns={txns} accounts={accounts} theme={theme} />
+          </div>
+        </motion.div>
 
-          <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Purchased Prizes (Active)</div>
-            <div className={classNames("rounded-xl border p-3", neonBox(theme))}>
-              <div className="text-sm mb-2">
-                Total purchases: <b>{purchases.length}</b>
+        {/* Stats Column */}
+        <div className="space-y-6">
+          {/* Star & Leader Highlights */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm opacity-70 mb-2">⭐ Star of the Day</div>
+                <div className="text-xl font-bold">{starOfDay ? `${starOfDay.name}` : "—"}</div>
+                {starOfDay && <div className="text-sm text-emerald-500">+{starOfDay.amount.toLocaleString()} GCSD</div>}
               </div>
-              <div className="space-y-2 max-h-40 overflow-auto pr-1">
-                {purchases.map((p, i) => (
-                  <motion.div 
-                    key={i} 
-                    className="flex items-center justify-between text-sm border rounded-lg px-3 py-1.5"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05, duration: 0.3 }}
-                    whileHover={{ scale: 1.02, backgroundColor: "rgba(0,0,0,0.02)" }}
-                  >
-                    <span>{p.memo.replace("Redeem: ", "")}</span>
-                    <span className="opacity-70">{p.when.toLocaleString()}</span>
-                  </motion.div>
-                ))}
-                {purchases.length === 0 && <div className="text-sm opacity-70">No purchases yet.</div>}
+              <div>
+                <div className="text-sm opacity-70 mb-2">👑 Leader of the Month</div>
+                <div className="text-xl font-bold">{leaderOfMonth ? `${leaderOfMonth.name}` : "—"}</div>
+                {leaderOfMonth && <div className="text-sm text-emerald-500">+{leaderOfMonth.amount.toLocaleString()} GCSD</div>}
               </div>
             </div>
-          </div>
-        </div>
+          </motion.div>
 
-        {/* Leaderboard */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Leaderboard</div>
-          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {leaderboard.map((row, i) => (
-              <motion.div 
-                key={row.id} 
-                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
-                whileHover={{ scale: 1.02, x: 4 }}
-              >
-                <div className="flex items-center gap-2">
-                  <motion.span 
-                    className="w-5 text-right"
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ delay: i * 0.05 + 0.1, type: "spring", stiffness: 200 }}
-                  >
-                    {i + 1}.
-                  </motion.span>
-                  <span className="font-medium">{row.name}</span>
-                </div>
-                <div className="text-sm">
-                  <NumberFlash value={row.balance} />
-                </div>
-              </motion.div>
-            ))}
-            {leaderboard.length === 0 && <div className="text-sm opacity-70">No data yet.</div>}
-          </div>
-        </div>
+          {/* Finance Chart */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            <div className="text-sm opacity-70 mb-3">Finance (30 days)</div>
+            <LineChart earned={earnedSeries} spent={spentSeries} />
+          </motion.div>
 
-        {/* Prizes */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Prizes (Available)</div>
-          <div className="space-y-2 max-h-[520px] overflow-auto pr-2">
-            {prizes.map((p, i) => (
-              <motion.div 
-                key={p.key} 
-                className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05, duration: 0.3 }}
-                whileHover={{ scale: 1.02, x: -4 }}
-              >
-                <div className="font-medium">{p.label}</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm opacity-80">{p.price.toLocaleString()} GCSD</span>
-                  <motion.span 
-                    className={theme === "neon" ? "px-2 py-0.5 rounded-md text-xs bg-[#0B0B0B] border border-orange-700 text-orange-200" : "px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700"}
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ delay: i * 0.05 + 0.15, duration: 0.2 }}
-                  >
-                    Stock: {stock[p.key] ?? 0}
-                  </motion.span>
-                </div>
-              </motion.div>
-            ))}
-          </div>
+          {/* Purchased Prizes */}
+          <motion.div 
+            className={classNames("rounded-2xl border p-6", neonBox(theme))}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.5 }}
+          >
+            <div className="text-sm opacity-70 mb-3">🎁 Purchased Prizes (Active)</div>
+            <div className="text-sm mb-2">
+              Total purchases: <b>{purchases.length}</b>
+            </div>
+            <div className="space-y-2 max-h-80 overflow-auto pr-2">
+              {purchases.map((p, i) => (
+                <motion.div 
+                  key={i} 
+                  className={classNames(
+                    "flex flex-col border rounded-lg px-3 py-2",
+                    theme === "neon" ? "bg-orange-500/5 border-orange-800/30" : "bg-slate-50 dark:bg-slate-900/50"
+                  )}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05, duration: 0.3 }}
+                  whileHover={{ scale: 1.02 }}
+                >
+                  <div className="font-medium text-sm">{p.memo.replace("Redeem: ", "")}</div>
+                  <div className="text-xs opacity-60">{p.when.toLocaleString()}</div>
+                </motion.div>
+              ))}
+              {purchases.length === 0 && <div className="text-sm opacity-70 text-center py-4">No purchases yet.</div>}
+            </div>
+          </motion.div>
         </div>
       </div>
+
+      {/* Available Prizes Section */}
+      <motion.div 
+        className={classNames("rounded-2xl border p-6", neonBox(theme))}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+      >
+        <div className="text-lg font-semibold mb-4">🎯 Available Prizes</div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[400px] overflow-auto pr-2">
+          {prizes.map((p, i) => {
+            const stockCount = stock[p.key] ?? 0;
+            const isOutOfStock = stockCount === 0;
+            
+            return (
+              <motion.div 
+                key={p.key} 
+                className={classNames(
+                  "relative overflow-hidden border rounded-xl p-4",
+                  neonBox(theme),
+                  isOutOfStock && "opacity-60"
+                )}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: i * 0.03, duration: 0.3 }}
+                whileHover={{ scale: isOutOfStock ? 1 : 1.05, y: isOutOfStock ? 0 : -5 }}
+              >
+                {isOutOfStock && (
+                  <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-10">
+                    <span className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-bold rotate-12 shadow-lg">SOLD OUT</span>
+                  </div>
+                )}
+                <div className="font-semibold mb-2">{p.label}</div>
+                <div className="flex items-center justify-between">
+                  <span className="text-lg font-bold text-emerald-500">{p.price.toLocaleString()} GCSD</span>
+                  <motion.span 
+                    className={classNames(
+                      "px-2 py-1 rounded-md text-xs font-medium",
+                      stockCount > 5 
+                        ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" 
+                        : stockCount > 0 
+                        ? "bg-orange-500/20 text-orange-600 dark:text-orange-400" 
+                        : "bg-red-500/20 text-red-600 dark:text-red-400"
+                    )}
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: i * 0.03 + 0.15, duration: 0.2 }}
+                  >
+                    {stockCount > 0 ? `${stockCount} left` : "Out of Stock"}
+                  </motion.span>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -2923,8 +3201,11 @@ function Picker({
             .filter((a) => a.role !== "system")
             .map((a, i) => (
               <HoverCard key={a.id} theme={theme} delay={0.03 + i * 0.02} onClick={() => onChooseAgent(a.id)}>
-                <div className="font-medium">{a.name}</div>
-                <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
+                <div className="flex flex-col items-center gap-2">
+                  <Avatar name={a.name} size="lg" />
+                  <div className="font-medium text-center">{a.name}</div>
+                  <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
+                </div>
               </HoverCard>
             ))}
         </div>
