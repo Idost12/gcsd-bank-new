@@ -473,6 +473,20 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
 }
 function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: string; onClose: () => void; onOk: (pin: string) => void; maxLen: number; theme: Theme }) {
   const [pin, setPin] = useState("");
+  
+  const handleSubmit = () => {
+    if (pin.length !== maxLen) {
+      toast.error(`PIN must be ${maxLen} digits`);
+      return;
+    }
+    
+    // Call onOk and let it handle validation
+    onOk(pin);
+    
+    // Clear PIN for security
+    setPin("");
+  };
+  
   return (
     <motion.div 
       className="fixed inset-0 z-50 bg-black/40 grid place-items-center"
@@ -503,10 +517,18 @@ function PinModalGeneric({ title, onClose, onOk, maxLen, theme }: { title: strin
         </div>
         <div className="space-y-3">
           <div className="text-sm opacity-70">Enter {maxLen}-digit PIN.</div>
-          <input className={inputCls(theme)} placeholder="PIN" type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={maxLen} />
+          <input 
+            className={inputCls(theme)} 
+            placeholder="PIN" 
+            type="password" 
+            value={pin} 
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} 
+            maxLength={maxLen}
+            onKeyPress={(e) => e.key === "Enter" && handleSubmit()}
+          />
           <motion.button 
             className={classNames("px-3 py-1.5 rounded-xl border", neonBtn(theme, true))} 
-            onClick={() => (pin.length === maxLen ? onOk(pin) : toast.error(`PIN must be ${maxLen} digits`))}
+            onClick={handleSubmit}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
@@ -540,6 +562,7 @@ export default function GCSDApp() {
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
+  // Theme is LOCAL to each browser/device - NEVER synced via KV
   const [theme, setTheme] = useState<Theme>("light");
   const [portal, setPortal] = useState<Portal>("home");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -561,11 +584,11 @@ export default function GCSDApp() {
   /** metric epochs */
   const [metrics, setMetrics] = useState<MetricsEpoch>({});
 
-  // theme side effect
+  // theme side effect - applies theme to DOM
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") root.classList.add("dark"); else root.classList.remove("dark");
-    // Theme is local to each browser - not saved to KV storage
+    // Theme is LOCAL ONLY - never saved to KV storage, only to localStorage
   }, [theme, hydrated]);
 
   /* hydrate from KV once on mount */
@@ -672,9 +695,10 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
   
-  /* theme persistence - local to each browser */
+  /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
     if (hydrated) {
+      // Store in localStorage only - each device has its own theme preference
       localStorage.setItem("gcsd-theme", theme);
     }
   }, [hydrated, theme]);
@@ -1001,6 +1025,11 @@ export default function GCSDApp() {
   function setSavingsGoal(agentId:string, amount:number){
     if (amount <= 0) return toast.error("Enter a positive goal");
     
+    // Check if agent has a PIN set
+    if (!pins[agentId]) {
+      return toast.error("You must set a PIN first (Admin Portal → Users Settings)");
+    }
+    
     // Require PIN verification for setting goals
     openAgentPin(agentId, (ok) => {
       if (!ok) return toast.error("Wrong PIN");
@@ -1274,34 +1303,40 @@ export default function GCSDApp() {
             {mobileMenuOpen && (
               <motion.div 
                 className={classNames(
-                  "sm:hidden py-3 space-y-3",
+                  "sm:hidden py-4 space-y-4 overflow-hidden",
                   theme === "neon" 
-                    ? "border-t border-orange-800 bg-[#14110B]/50" 
-                    : "border-t border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50"
+                    ? "border-t border-orange-800 bg-[#14110B]/95" 
+                    : "border-t border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95"
                 )}
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <div className="px-3">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
+                <div className="px-4">
+                  <div className="flex flex-col space-y-4">
+                    {/* Date and time */}
+                    <div className="text-center pb-2 border-b border-slate-200 dark:border-slate-700">
+                      <span className={classNames("text-xs font-mono", theme==="neon" ? "text-orange-200":"text-slate-600 dark:text-slate-300")}>{dateStr} • {clock}</span>
+                    </div>
+                    
+                    {/* Notifications */}
+                    <div className="flex items-center justify-between py-2">
                       <span className="text-sm font-medium opacity-80">Notifications</span>
                       <NotificationsBell theme={theme} unread={unread} onOpenFeed={() => { setPortal("feed"); setUnread(0); setMobileMenuOpen(false); }} />
                     </div>
                     
-                    <div className="flex items-center justify-between">
+                    {/* Theme Toggle */}
+                    <div className="flex items-center justify-between py-2">
                       <span className="text-sm font-medium opacity-80">Theme</span>
-                      <ThemeToggle theme={theme} setTheme={setTheme}/>
+                      <div className="flex items-center gap-2">
+                        <ThemeToggle theme={theme} setTheme={setTheme}/>
+                      </div>
                     </div>
                     
+                    {/* Switch User Button */}
                     <motion.button 
-                      className={classNames("w-full px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium", neonBtn(theme))}
+                      className={classNames("w-full px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium mt-2", neonBtn(theme))}
                       onClick={()=> { setPickerOpen(true); setMobileMenuOpen(false); }}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
@@ -1336,13 +1371,25 @@ export default function GCSDApp() {
           <PinModalGeneric
             title="Admin PIN"
             maxLen={8}
-            onClose={() => { setPortal("home"); }}
+            onClose={() => { 
+              setPortal("home"); 
+              setIsAdmin(false);
+            }}
             onOk={(pin) => {
-              if (pin !== "13577531") { 
-                toast.error("Invalid admin PIN"); 
+              // CRITICAL: Only accept the exact admin PIN
+              const trimmedPin = pin.trim();
+              const CORRECT_PIN = "13577531";
+              
+              if (trimmedPin !== CORRECT_PIN || trimmedPin.length !== 8) { 
+                toast.error("Invalid admin PIN - Access denied");
+                setPortal("home"); // Close modal and go back to home
+                setIsAdmin(false); // Ensure admin state is false
+                setAdminPin(""); // Clear any stored PIN
                 return; 
               }
-              setAdminPin(pin);
+              
+              // Only set admin if PIN is correct
+              setAdminPin(trimmedPin);
               setIsAdmin(true);
               toast.success("Admin unlocked");
             }}
