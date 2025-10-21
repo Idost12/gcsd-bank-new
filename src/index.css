@@ -2,24 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Glass Morphism Background Effects */
+/* Glass Morphism Background Effects - Very Subtle */
 body {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  background-attachment: fixed;
+  background: #f8fafc;
   min-height: 100vh;
 }
 
 .dark body {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-  background-attachment: fixed;
+  background: #0f172a;
 }
 
 .neon-theme {
-  background: linear-gradient(135deg, #0a0a0a 0%, #1a0a00 50%, #0a0a0a 100%) !important;
-  background-attachment: fixed;
+  background: #0a0a0a !important;
 }
 
-/* Animated gradient background */
+/* Very subtle animated gradient background */
 @keyframes gradientShift {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -33,25 +30,25 @@ body::before {
   right: 0;
   bottom: 0;
   background: 
-    radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.1), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.1), transparent 50%),
-    radial-gradient(circle at 40% 90%, rgba(59, 130, 246, 0.1), transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.03), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.03), transparent 50%),
+    radial-gradient(circle at 40% 90%, rgba(59, 130, 246, 0.03), transparent 50%);
   background-size: 200% 200%;
-  animation: gradientShift 15s ease infinite;
+  animation: gradientShift 20s ease infinite;
   pointer-events: none;
-  z-index: -2;
+  z-index: -10;
 }
 
 .dark body::before {
   background: 
-    radial-gradient(circle at 20% 50%, rgba(51, 65, 85, 0.2), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(71, 85, 105, 0.2), transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(51, 65, 85, 0.05), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(71, 85, 105, 0.05), transparent 50%);
 }
 
 .neon-theme::before {
   background: 
-    radial-gradient(circle at 20% 50%, rgba(249, 115, 22, 0.08), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(234, 88, 12, 0.08), transparent 50%);
+    radial-gradient(circle at 20% 50%, rgba(249, 115, 22, 0.02), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(234, 88, 12, 0.02), transparent 50%);
 }
 
 /* Ensure main content is above background */
