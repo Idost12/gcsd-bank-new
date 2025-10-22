@@ -28,7 +28,7 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean };
+type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean; avatar?: string };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
@@ -100,6 +100,45 @@ const nowISO = () => new Date().toISOString();
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+
+// Haptic feedback helper - more comprehensive
+const haptic = (pattern: number | number[] = 30) => {
+  if ('vibrate' in navigator) {
+    if (Array.isArray(pattern)) {
+      navigator.vibrate(pattern);
+    } else {
+      navigator.vibrate(pattern);
+    }
+  }
+};
+
+// Push notification helper
+const sendPushNotification = async (title: string, body: string, icon?: string) => {
+  if (!("Notification" in window)) {
+    console.log("This browser does not support notifications");
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    new Notification(title, {
+      body,
+      icon: icon || LOGO_URL,
+      badge: LOGO_URL,
+      tag: uid(),
+      requireInteraction: false,
+      silent: false
+    });
+  } else if (Notification.permission !== "denied") {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      new Notification(title, {
+        body,
+        icon: icon || LOGO_URL,
+        badge: LOGO_URL
+      });
+    }
+  }
+};
 
 // merge transactions by id (prevents realtime from overwriting local adds)
 function mergeTxns(local: Transaction[], remote: Transaction[]) {
@@ -338,8 +377,8 @@ function TypeLabel({ text }: { text: string }) {
   );
 }
 
-/* Avatar Component with Initials */
-function Avatar({ name, size = "md", theme }: { name: string; size?: "sm" | "md" | "lg"; theme?: Theme }) {
+/* Avatar Component with Initials or Custom Image */
+function Avatar({ name, size = "md", theme, avatarUrl }: { name: string; size?: "sm" | "md" | "lg"; theme?: Theme; avatarUrl?: string }) {
   const getInitials = (fullName: string) => {
     const parts = fullName.trim().split(/\s+/);
     if (parts.length >= 2) {
@@ -369,13 +408,17 @@ function Avatar({ name, size = "md", theme }: { name: string; size?: "sm" | "md"
 
   return (
     <motion.div
-      className={`${sizeClasses[size]} rounded-full bg-gradient-to-br ${colors[colorIndex]} flex items-center justify-center font-bold text-white shadow-lg ring-2 ring-white/30`}
+      className={`${sizeClasses[size]} rounded-full ${!avatarUrl ? `bg-gradient-to-br ${colors[colorIndex]}` : 'bg-gray-200'} flex items-center justify-center font-bold text-white shadow-lg ring-2 ring-white/30 overflow-hidden`}
       initial={{ scale: 0, rotate: -180 }}
       animate={{ scale: 1, rotate: 0 }}
       transition={{ type: "spring", stiffness: 200, damping: 15 }}
-      whileHover={{ scale: 1.1, rotate: 5 }}
+      whileHover={{ scale: 1.1, rotate: avatarUrl ? 0 : 5 }}
     >
-      {getInitials(name)}
+      {avatarUrl ? (
+        <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
+      ) : (
+        getInitials(name)
+      )}
     </motion.div>
   );
 }
@@ -513,6 +556,7 @@ function RaceToRedeemBoard({
       .filter(a => a.role === "agent")
       .map(a => ({
         name: a.name,
+        avatar: a.avatar,
         balance: balances.get(a.id) || 0,
         progress: Math.min(100, Math.round(((balances.get(a.id) || 0) / prize.price) * 100)),
         remaining: Math.max(0, prize.price - (balances.get(a.id) || 0))
@@ -658,7 +702,7 @@ function RaceToRedeemBoard({
                           </div>
 
                           {/* Avatar */}
-                          <Avatar name={racer.name} size="sm" theme={theme} />
+                          <Avatar name={racer.name} size="sm" theme={theme} avatarUrl={racer.avatar} />
 
                           {/* Info */}
                           <div className="flex-1 min-w-0">
@@ -739,7 +783,7 @@ function getBadge(position: number, balance: number): { emoji: string; title: st
   return null;
 }
 
-function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number }>; theme: Theme }) {
+function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number; avatar?: string }>; theme: Theme }) {
   if (leaderboard.length === 0) return <div className="text-center text-sm opacity-60">No data yet</div>;
 
   const top3 = leaderboard.slice(0, 3);
@@ -764,7 +808,7 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
           >
             {/* Avatar with Medal Badge */}
             <div className="relative mb-2">
-              <Avatar name={agent.name} size={position === 1 ? "lg" : "md"} theme={theme} />
+              <Avatar name={agent.name} size={position === 1 ? "lg" : "md"} theme={theme} avatarUrl={agent.avatar} />
             <motion.div 
                 className="absolute -top-1 -right-1 text-2xl"
               animate={position === 1 ? { 
@@ -1045,9 +1089,7 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
 function HoverCard({ children, onClick, delay = 0, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   const handleClick = () => {
     // Haptic feedback for mobile
-    if ('vibrate' in navigator) {
-      navigator.vibrate(30);
-    }
+    haptic(40);
     onClick();
   };
 
@@ -1114,8 +1156,8 @@ function MemeModal({
   agentName: string; 
   onClose: () => void; 
   theme: Theme;
-  initialData?: { topText: string; bottomText: string; uploadedImage: string | null };
-  onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null }) => void;
+  initialData?: { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number };
+  onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null; textColor: string; fontSize: number }) => void;
   readOnly?: boolean;
 }) {
   const [topText, setTopText] = useState(initialData?.topText || "");
@@ -1123,14 +1165,8 @@ function MemeModal({
   const [uploadedImage, setUploadedImage] = useState<string | null>(initialData?.uploadedImage || null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
-  
-  const templates = [
-    { key: "success", label: "Success Kid", emoji: "😎" },
-    { key: "drake", label: "Drake Meme", emoji: "🦆" },
-    { key: "thinking", label: "Thinking", emoji: "🤔" },
-    { key: "stonks", label: "Stonks", emoji: "📈" },
-    { key: "celebration", label: "Celebration", emoji: "🎉" }
-  ];
+  const [textColor, setTextColor] = useState(initialData?.textColor || "#ffffff");
+  const [fontSize, setFontSize] = useState(initialData?.fontSize || 48);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1201,22 +1237,22 @@ function MemeModal({
 
   const addTextToCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     // Configure text style
-    ctx.fillStyle = 'white';
+    ctx.fillStyle = textColor;
     ctx.strokeStyle = 'black';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = Math.max(3, fontSize / 12);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     // Top text
     if (topText) {
-      ctx.font = 'bold 48px Arial';
+      ctx.font = `bold ${fontSize}px Arial`;
       ctx.strokeText(topText.toUpperCase(), canvas.width / 2, 100);
       ctx.fillText(topText.toUpperCase(), canvas.width / 2, 100);
     }
 
     // Bottom text
     if (bottomText) {
-      ctx.font = 'bold 48px Arial';
+      ctx.font = `bold ${fontSize}px Arial`;
       ctx.strokeText(bottomText.toUpperCase(), canvas.width / 2, canvas.height - 100);
       ctx.fillText(bottomText.toUpperCase(), canvas.width / 2, canvas.height - 100);
     }
@@ -1232,7 +1268,7 @@ function MemeModal({
     
     // Save meme data when downloading (only if not read-only)
     if (onSave && !readOnly) {
-      onSave({ topText, bottomText, uploadedImage });
+      onSave({ topText, bottomText, uploadedImage, textColor, fontSize });
     }
   };
 
@@ -1320,13 +1356,27 @@ function MemeModal({
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500 to-pink-500"></div>
             )}
             
-            <div className="relative z-10 text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
+            <div 
+              className="relative z-10 drop-shadow-lg" 
+              style={{ 
+                textShadow: "2px 2px 4px rgba(0,0,0,0.8)", 
+                fontSize: `${fontSize * 0.625}px`,
+                color: textColor
+              }}
+            >
               {topText || "TOP TEXT"}
             </div>
-            <div className="relative z-10 text-6xl">
-              {uploadedImage ? "🎨" : (templates.find(t => t.key === "success")?.emoji || "😎")}
+            <div className="relative z-10">
+              {/* Emoji removed for cleaner memes */}
             </div>
-            <div className="relative z-10 text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
+            <div 
+              className="relative z-10 drop-shadow-lg" 
+              style={{ 
+                textShadow: "2px 2px 4px rgba(0,0,0,0.8)", 
+                fontSize: `${fontSize * 0.625}px`,
+                color: textColor
+              }}
+            >
               {bottomText || "BOTTOM TEXT"}
             </div>
           </div>
@@ -1355,6 +1405,68 @@ function MemeModal({
                   className={inputCls(theme)}
                   maxLength={40}
                 />
+              </div>
+              
+              {/* Text Customization */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-semibold mb-2 block">🎨 Text Color:</label>
+                  <div className="flex gap-2 items-center">
+                    <input 
+                      type="color"
+                      value={textColor}
+                      onChange={(e) => setTextColor(e.target.value)}
+                      className="w-14 h-14 rounded-xl cursor-pointer border-2 border-white/30"
+                      title="Custom color picker"
+                    />
+                    <div className="flex gap-2 flex-wrap flex-1">
+                      {[
+                        { color: '#ffffff', name: 'White' },
+                        { color: '#000000', name: 'Black' },
+                        { color: '#ffff00', name: 'Yellow' },
+                        { color: '#ff00ff', name: 'Magenta' },
+                        { color: '#00ffff', name: 'Cyan' },
+                        { color: '#ff0000', name: 'Red' },
+                        { color: '#00ff00', name: 'Green' },
+                        { color: '#0000ff', name: 'Blue' },
+                        { color: '#ffa500', name: 'Orange' },
+                      ].map(({ color, name }) => (
+                        <motion.button
+                          key={color}
+                          onClick={() => setTextColor(color)}
+                          className={classNames(
+                            "w-10 h-10 rounded-lg border-2 transition-all",
+                            textColor === color ? "border-purple-500 scale-110 ring-2 ring-purple-400" : "border-white/30"
+                          )}
+                          style={{ backgroundColor: color }}
+                          title={name}
+                          whileHover={{ scale: 1.15 }}
+                          whileTap={{ scale: 0.95 }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="text-sm font-semibold mb-2 block">📏 Font Size: {fontSize}px</label>
+                  <input 
+                    type="range"
+                    min="24"
+                    max="80"
+                    value={fontSize}
+                    onChange={(e) => setFontSize(Number(e.target.value))}
+                    className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, #8B5CF6 0%, #EC4899 100%)`
+                    }}
+                  />
+                  <div className="flex justify-between text-xs opacity-60 mt-1">
+                    <span>24px</span>
+                    <span>52px</span>
+                    <span>80px</span>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1552,16 +1664,20 @@ export default function GCSDApp() {
   const [memeModal, setMemeModal] = useState<{
     open: boolean; 
     agentName: string; 
-    initialData?: { topText: string; bottomText: string; uploadedImage: string | null };
-    onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null }) => void;
+    initialData?: { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number };
+    onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null; textColor: string; fontSize: number }) => void;
     readOnly?: boolean;
   } | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
-  const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
+  const [epochs, setEpochs] = useState<Record<string,string>>({}); // for "erase history from" timestamps
 
   /** metric epochs */
   const [metrics, setMetrics] = useState<MetricsEpoch>({});
+  
+  /** notification permission */
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [showNotifBanner, setShowNotifBanner] = useState(false);
 
   // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
@@ -1724,6 +1840,20 @@ export default function GCSDApp() {
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [mobileMenuOpen]);
+  
+  /* Check notification permission on mount */
+  useEffect(() => {
+    if ("Notification" in window && hydrated) {
+      const permission = Notification.permission;
+      setNotificationsEnabled(permission === "granted");
+      
+      // Show banner if not granted and not denied
+      if (permission === "default") {
+        setTimeout(() => setShowNotifBanner(true), 5000);
+      }
+    }
+  }, [hydrated]);
+  
   useEffect(()=> {
     if (!showIntro) return;
     const timer = setTimeout(()=> setShowIntro(false), 2500);
@@ -1853,9 +1983,14 @@ export default function GCSDApp() {
     }
   };
   
-  const notify = (text:string) => {
+  const notify = (text:string, pushTitle?: string) => {
     setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
     setUnread(c => c + 1);
+    
+    // Send push notification if enabled
+    if (notificationsEnabled && pushTitle) {
+      sendPushNotification(pushTitle, text);
+    }
   };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
@@ -1890,8 +2025,9 @@ export default function GCSDApp() {
     if (amount > 1000000) return toast.error("Amount too large (max 1,000,000 GCSD)");
     
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
-    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
+    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`, `💰 GCSD Earned!`);
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
+    haptic(50);
     logAudit("Credit Added", `${rule.label}${qty>1?` x${qty}`:""}`, getName(agentId), amount);
     
     // Update metrics when new sale is added
@@ -2034,7 +2170,7 @@ export default function GCSDApp() {
       }
     });
     setStock(s=> ({...s, [request.prizeKey]: Math.max(0, (s[request.prizeKey] ?? 0) - 1)}));
-    notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
+    notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`, `🎁 Prize Approved!`);
       setReceipt({
         id: receiptId,
       when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price, buyerId: request.agentId
@@ -2658,6 +2794,70 @@ export default function GCSDApp() {
         )}
       </AnimatePresence>
 
+      {/* Notification Permission Banner */}
+      <AnimatePresence>
+        {showNotifBanner && !notificationsEnabled && (
+          <motion.div
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md mx-4"
+            initial={{ y: -100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -100, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          >
+            <div className={classNames("rounded-2xl p-4 shadow-2xl border-2", neonBox(theme))}>
+              <div className="flex items-start gap-3">
+                <Bell className="w-6 h-6 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="font-semibold mb-1">Enable Notifications?</h3>
+                  <p className="text-sm opacity-70 mb-3">
+                    Get notified when you earn GCSD, redemptions are approved, and more!
+                  </p>
+                  <div className="flex gap-2">
+                    <motion.button
+                      className={classNames("flex-1 px-3 py-2 rounded-lg text-sm font-medium", neonBtn(theme, true))}
+                      onClick={async () => {
+                        haptic([30, 50, 30]);
+                        const permission = await Notification.requestPermission();
+                        if (permission === "granted") {
+                          setNotificationsEnabled(true);
+                          toast.success("🔔 Notifications enabled!");
+                          sendPushNotification("🎉 Notifications Enabled!", "You'll now receive updates from GCS Bank");
+                        }
+                        setShowNotifBanner(false);
+                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Enable
+                    </motion.button>
+                    <motion.button
+                      className="px-3 py-2 rounded-lg text-sm opacity-60 hover:opacity-100"
+                      onClick={() => {
+                        haptic(20);
+                        setShowNotifBanner(false);
+                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Later
+                    </motion.button>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    haptic(20);
+                    setShowNotifBanner(false);
+                  }}
+                  className="text-sm opacity-50 hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div
         className="sticky top-0 z-20 glass border-b border-white/20 dark:border-white/10 transition-colors duration-200"
@@ -3001,7 +3201,7 @@ export default function GCSDApp() {
                 }}
                 onOpenMeme={(txn) => {
                   const agentName = accounts.find(a => a.id === currentAgentId)?.name || "Agent";
-                  const memeData = txn.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null } | undefined;
+                  const memeData = txn.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number } | undefined;
                   setMemeModal({
                     open: true,
                     agentName,
@@ -3016,6 +3216,11 @@ export default function GCSDApp() {
                       ));
                     }
                   });
+                }}
+                onUpdateAccount={(updates) => {
+                  setAccounts(prev => prev.map(a => 
+                    a.id === currentAgentId ? { ...a, ...updates } : a
+                  ));
                 }}
               />
             </motion.div>
@@ -3189,7 +3394,8 @@ function Home({
   const leaderboard = useMemo(() => Array.from(nonSystemIds)
     .map((id) => {
       const balance = balances.get(id) || 0;
-      return { id, name: accounts.find((a) => a.id === id)?.name || "—", balance };
+      const account = accounts.find((a) => a.id === id);
+      return { id, name: account?.name || "—", balance, avatar: account?.avatar };
     })
     .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
@@ -3458,6 +3664,7 @@ function AgentPortal({
   onToggleWishlist: (prizeKey: string) => void;
   onOpenMeme: (txn: Transaction) => void;
   pins: Record<string, string>;
+  onUpdateAccount: (updates: Partial<Account>) => void;
 }) {
   const [agentTab, setAgentTab] = useState<"overview" | "purchases">("overview");
   const [purchasesPinVerified, setPurchasesPinVerified] = useState(false);
@@ -3509,6 +3716,27 @@ function AgentPortal({
     amount: number;
   } | null>(null);
 
+  // Avatar upload
+  const currentAgent = accounts.find(a => a.id === agentId);
+  const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error("Image too large! Max 2MB");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const avatarUrl = e.target?.result as string;
+        onUpdateAccount({ avatar: avatarUrl });
+        haptic([30, 20, 30]);
+        toast.success("✅ Profile picture updated!");
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div>
       {/* Tab Navigation */}
@@ -3519,7 +3747,10 @@ function AgentPortal({
         ].map((tab) => (
           <motion.button
             key={tab.key}
-            onClick={() => handleTabChange(tab.key as typeof agentTab)}
+            onClick={() => {
+              haptic(30);
+              handleTabChange(tab.key as typeof agentTab);
+            }}
             className={classNames(
               "flex items-center gap-2 px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all",
               agentTab === tab.key 
@@ -3578,8 +3809,31 @@ function AgentPortal({
               <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
                 <div className="text-sm opacity-70 mb-2">Agent</div>
                 <div className="flex items-center gap-3 mb-3">
-                  <Avatar name={name} size="lg" theme={theme} />
-                  <div className="text-xl font-semibold">{name}</div>
+                  <div className="relative">
+                    <Avatar name={name} size="lg" theme={theme} avatarUrl={currentAgent?.avatar} />
+                    <label 
+                      htmlFor="avatar-upload"
+                      className="absolute -bottom-1 -right-1 bg-purple-500 text-white rounded-full p-1.5 cursor-pointer hover:bg-purple-600 transition-all hover:scale-110 shadow-lg"
+                      title="Upload profile picture"
+                      onClick={() => haptic(20)}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </label>
+                    <input
+                      type="file"
+                      id="avatar-upload"
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xl font-semibold">{name}</div>
+                    <div className="text-xs opacity-60">Click camera to upload photo</div>
+                  </div>
                 </div>
                 <div className="grid sm:grid-cols-3 gap-3">
                   <TileRow label="Balance" value={balance} />
@@ -3595,7 +3849,7 @@ function AgentPortal({
                       <button 
                         className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
                         onClick={() => {
-                          if ('vibrate' in navigator) navigator.vibrate(30);
+                          haptic(50);
                           if (goalInput) onSetGoal(parseInt(goalInput, 10));
                         }}
                         title="PIN required to set goal"
@@ -3703,6 +3957,7 @@ function AgentPortal({
                               className="text-xl"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                haptic(20);
                                 onToggleWishlist(p.key);
                               }}
                               whileHover={{ scale: 1.2 }}
@@ -3721,7 +3976,10 @@ function AgentPortal({
                         <motion.button 
                           disabled={!can} 
                           className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} 
-                          onClick={() => onRedeem(p.key)}
+                          onClick={() => {
+                            haptic([40, 20, 60]);
+                            onRedeem(p.key);
+                          }}
                           whileHover={can ? { scale: 1.05 } : {}}
                           whileTap={can ? { scale: 0.95 } : {}}
                         >
@@ -3784,7 +4042,7 @@ function AgentPortal({
                     const receiptId = t.meta?.receiptId || "N/A";
                     const date = new Date(t.dateISO);
                     const isMeme = prizeKey === "meme_generator";
-                    const memeData = t.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null } | undefined;
+                    const memeData = t.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number } | undefined;
 
                     return (
                       <motion.div
@@ -3824,13 +4082,16 @@ function AgentPortal({
                           <div className="flex flex-col gap-2">
                             <motion.button
                               className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme, true))}
-                              onClick={() => setSelectedReceipt({
-                                id: receiptId,
-                                when: date.toLocaleString(),
-                                buyer: name,
-                                item: prizeLabel,
-                                amount: t.amount
-                              })}
+                              onClick={() => {
+                                haptic(30);
+                                setSelectedReceipt({
+                                  id: receiptId,
+                                  when: date.toLocaleString(),
+                                  buyer: name,
+                                  item: prizeLabel,
+                                  amount: t.amount
+                                });
+                              }}
                               whileHover={{ scale: 1.05 }}
                               whileTap={{ scale: 0.95 }}
                             >
@@ -3840,7 +4101,10 @@ function AgentPortal({
                             {isMeme && !memeData && (
                               <motion.button
                                 className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
-                                onClick={() => onOpenMeme(t)}
+                                onClick={() => {
+                                  haptic([30, 20, 40]);
+                                  onOpenMeme(t);
+                                }}
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                               >
@@ -3851,7 +4115,10 @@ function AgentPortal({
                             {isMeme && memeData && (
                               <motion.button
                                 className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
-                                onClick={() => onOpenMeme(t)}
+                                onClick={() => {
+                                  haptic(30);
+                                  onOpenMeme(t);
+                                }}
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                               >
@@ -5316,9 +5583,9 @@ function Picker({
           {accounts
             .filter((a) => a.role !== "system")
             .map((a, index) => (
-              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)} delay={Math.min(index * 0.01, 0.15)}>
+              <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={Math.min(index * 0.01, 0.15)}>
                 <div className="flex items-center gap-2 mb-1">
-                  <Avatar name={a.name} size="sm" theme={theme} />
+                  <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
                   <div className="font-medium flex-1 truncate">{a.name}</div>
                 </div>
                 <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
@@ -5359,8 +5626,9 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
   );
 }
 
-/* ===== Confetti (unchanged) ===== */
+/* ===== Confetti with haptic feedback ===== */
 function confettiBurst() {
+  haptic([50, 30, 100, 30, 50]); // Success pattern
   const el = document.createElement("div");
   el.style.position = "fixed";
   el.style.inset = "0";
