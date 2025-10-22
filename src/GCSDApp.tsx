@@ -2710,6 +2710,7 @@ export default function GCSDApp() {
   
   // Clean up duplicate agents - ONE-TIME FIX
   async function cleanupDuplicates() {
+    console.log("🧹 cleanupDuplicates function called");
     const confirmed = confirm("⚠️ This will remove duplicate agents and preserve the first occurrence of each. Continue?");
     if (!confirmed) return;
     
@@ -2743,6 +2744,7 @@ export default function GCSDApp() {
   
   // Emergency: Clear all KV storage and reset to fresh state
   async function emergencyReset() {
+    console.log("🚨 emergencyReset function called");
     const confirmed = confirm("⚠️ EMERGENCY RESET\n\nThis will:\n- Clear ALL corrupted data\n- Create fresh accounts for all agents\n- Reset vault to 8000 GCSD\n- LOSE all transaction history\n\nType 'RESET' to confirm");
     if (!confirmed) return;
     
