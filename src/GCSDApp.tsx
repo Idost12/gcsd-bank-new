@@ -3747,12 +3747,26 @@ function AgentPortal({
   };
   
   const saveAvatar = (croppedImageUrl: string) => {
-    console.log("Saving avatar for agent:", agentId, "URL length:", croppedImageUrl.length);
+    console.log("saveAvatar called!");
+    console.log("Agent ID:", agentId);
+    console.log("Cropped image URL length:", croppedImageUrl.length);
+    console.log("Cropped image preview:", croppedImageUrl.substring(0, 100));
+    
+    if (!croppedImageUrl || croppedImageUrl.length < 100) {
+      toast.error("Failed to create avatar image");
+      return;
+    }
+    
+    // Update the account with the new avatar
     onUpdateAccount({ avatar: croppedImageUrl });
-    haptic([30, 20, 30]);
-    toast.success("✅ Profile picture updated!");
+    
+    // Close the modal
     setShowAvatarCropper(false);
     setAvatarImageSrc(null);
+    
+    // Success feedback
+    haptic([30, 20, 30]);
+    toast.success("✅ Profile picture updated!");
   };
 
   return (
@@ -4199,30 +4213,57 @@ function AvatarCropperModal({
 }) {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [imageLoaded, setImageLoaded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   
   useEffect(() => {
     const img = new Image();
     img.onload = () => {
+      console.log("Image loaded successfully", img.width, "x", img.height);
       imageRef.current = img;
+      setImageLoaded(true);
+    };
+    img.onerror = () => {
+      console.error("Failed to load image");
+      toast.error("Failed to load image");
     };
     img.src = imageSrc;
   }, [imageSrc]);
 
   const handleCrop = () => {
-    if (!canvasRef.current || !imageRef.current) return;
+    console.log("handleCrop called");
+    
+    if (!imageRef.current) {
+      console.error("Image not loaded");
+      toast.error("Image not loaded yet, please wait...");
+      return;
+    }
+    
+    if (!canvasRef.current) {
+      console.error("Canvas ref not available");
+      toast.error("Canvas error");
+      return;
+    }
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.error("Could not get canvas context");
+      toast.error("Canvas error");
+      return;
+    }
+
+    const img = imageRef.current;
+    console.log("Image dimensions:", img.width, "x", img.height);
+    console.log("Scale:", scale, "Position:", position);
 
     // Set canvas to 300x300 for high quality avatar
     const size = 300;
     canvas.width = size;
     canvas.height = size;
 
-    // Clear canvas with circular clipping
+    // Clear canvas
     ctx.clearRect(0, 0, size, size);
     
     // Create circular clipping path
@@ -4232,17 +4273,17 @@ function AvatarCropperModal({
     ctx.closePath();
     ctx.clip();
 
-    // Calculate scaling to fit image in preview
-    const img = imageRef.current;
+    // Calculate dimensions to cover the circle (not contain)
     const imgAspect = img.width / img.height;
-    
     let drawWidth, drawHeight;
+    
+    // Always cover the canvas
     if (imgAspect > 1) {
-      // Landscape
+      // Landscape - make height = size, width proportional
       drawHeight = size;
       drawWidth = size * imgAspect;
     } else {
-      // Portrait or square
+      // Portrait or square - make width = size, height proportional  
       drawWidth = size;
       drawHeight = size / imgAspect;
     }
@@ -4255,6 +4296,8 @@ function AvatarCropperModal({
     const x = (size - drawWidth) / 2 + (position.x * 2);
     const y = (size - drawHeight) / 2 + (position.y * 2);
 
+    console.log("Drawing at:", x, y, "with size:", drawWidth, "x", drawHeight);
+
     // Draw image
     ctx.drawImage(img, x, y, drawWidth, drawHeight);
     
@@ -4262,23 +4305,39 @@ function AvatarCropperModal({
 
     // Get the cropped image as data URL
     const croppedImageUrl = canvas.toDataURL('image/jpeg', 0.92);
-    haptic(50);
+    
+    console.log("✅ Cropped image created!");
+    console.log("URL length:", croppedImageUrl.length);
+    console.log("First 100 chars:", croppedImageUrl.substring(0, 100));
+    
+    if (croppedImageUrl.length < 100) {
+      toast.error("Failed to create image");
+      return;
+    }
+    
+    console.log("Calling onSave with cropped image...");
     onSave(croppedImageUrl);
   };
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 glass grid place-items-center"
-      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ 
+        backdropFilter: 'blur(12px)', 
+        WebkitBackdropFilter: 'blur(12px)',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)'
+      }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      onClick={onClose}
     >
       <motion.div
-        className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-[min(500px,90vw)]", neonBox(theme))}
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
+        className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto", neonBox(theme))}
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -4295,64 +4354,78 @@ function AvatarCropperModal({
           {/* Main editing view */}
           <div>
           <div className="relative w-full aspect-square rounded-xl overflow-hidden border-4 border-dashed border-purple-400/50 bg-black/10">
-            <div 
-              className="absolute inset-0 flex items-center justify-center"
-              style={{
-                transform: `translate(${position.x}px, ${position.y}px)`
-              }}
-            >
-              <img
-                src={imageSrc}
-                alt="Preview"
-                className="max-w-full max-h-full object-contain"
-                style={{
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'center'
-                }}
-                draggable={false}
-              />
-            </div>
-            {/* Circular mask overlay */}
-            <div className="absolute inset-0 pointer-events-none">
-              <svg viewBox="0 0 100 100" className="w-full h-full">
-                <defs>
-                  <mask id="circle-mask">
-                    <rect width="100" height="100" fill="white"/>
-                    <circle cx="50" cy="50" r="45" fill="black"/>
-                  </mask>
-                </defs>
-                <rect width="100" height="100" fill="rgba(0,0,0,0.6)" mask="url(#circle-mask)"/>
-                <circle cx="50" cy="50" r="45" fill="none" stroke="white" strokeWidth="0.5" strokeDasharray="2,2"/>
-              </svg>
-            </div>
+            {!imageLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-4xl mb-2">⏳</div>
+                  <div className="text-sm opacity-70">Loading image...</div>
+                </div>
+              </div>
+            )}
+            {imageLoaded && (
+              <>
+                <div 
+                  className="absolute inset-0 flex items-center justify-center"
+                  style={{
+                    transform: `translate(${position.x}px, ${position.y}px)`
+                  }}
+                >
+                  <img
+                    src={imageSrc}
+                    alt="Preview"
+                    className="max-w-full max-h-full object-contain"
+                    style={{
+                      transform: `scale(${scale})`,
+                      transformOrigin: 'center'
+                    }}
+                    draggable={false}
+                  />
+                </div>
+                {/* Circular mask overlay */}
+                <div className="absolute inset-0 pointer-events-none">
+                  <svg viewBox="0 0 100 100" className="w-full h-full">
+                    <defs>
+                      <mask id="circle-mask">
+                        <rect width="100" height="100" fill="white"/>
+                        <circle cx="50" cy="50" r="45" fill="black"/>
+                      </mask>
+                    </defs>
+                    <rect width="100" height="100" fill="rgba(0,0,0,0.6)" mask="url(#circle-mask)"/>
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="white" strokeWidth="0.5" strokeDasharray="2,2"/>
+                  </svg>
+                </div>
+              </>
+            )}
           </div>
           <p className="text-xs opacity-70 mt-2 text-center">Drag sliders below to adjust • Circle shows cropped area</p>
           </div>
           
           {/* Final Preview Circle */}
-          <div className="flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-xs font-semibold mb-2">Final Preview:</p>
-              <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-purple-400 shadow-xl mx-auto bg-black/10">
-                <div 
-                  className="w-full h-full flex items-center justify-center"
-                  style={{
-                    transform: `translate(${position.x * 0.24}px, ${position.y * 0.24}px)`
-                  }}
-                >
-                  <img
-                    src={imageSrc}
-                    alt="Final preview"
-                    className="min-w-full min-h-full object-cover"
+          {imageLoaded && (
+            <div className="flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-xs font-semibold mb-2">Final Preview:</p>
+                <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-purple-400 shadow-xl mx-auto bg-black/10">
+                  <div 
+                    className="w-full h-full flex items-center justify-center"
                     style={{
-                      transform: `scale(${scale})`,
-                      transformOrigin: 'center'
+                      transform: `translate(${position.x * 0.24}px, ${position.y * 0.24}px)`
                     }}
-                  />
+                  >
+                    <img
+                      src={imageSrc}
+                      alt="Final preview"
+                      className="min-w-full min-h-full object-cover"
+                      style={{
+                        transform: `scale(${scale})`,
+                        transformOrigin: 'center'
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Controls */}
@@ -4421,16 +4494,36 @@ function AvatarCropperModal({
         {/* Actions */}
         <div className="flex gap-3">
           <motion.button
-            className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
-            onClick={handleCrop}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            disabled={!imageLoaded}
+            className={classNames(
+              "flex-1 px-4 py-3 rounded-xl font-semibold",
+              neonBtn(theme, true),
+              !imageLoaded && "opacity-50 cursor-not-allowed"
+            )}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!imageLoaded) {
+                toast.error("Please wait for image to load");
+                return;
+              }
+              console.log("Save button clicked!");
+              haptic([30, 20, 30]);
+              handleCrop();
+            }}
+            whileHover={imageLoaded ? { scale: 1.02 } : {}}
+            whileTap={imageLoaded ? { scale: 0.98 } : {}}
           >
-            ✅ Save Picture
+            {imageLoaded ? "✅ Save Picture" : "⏳ Loading..."}
           </motion.button>
           <motion.button
             className={classNames("px-4 py-3 rounded-xl", neonBtn(theme))}
-            onClick={onClose}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              haptic(20);
+              onClose();
+            }}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
