@@ -28,7 +28,7 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean; avatar?: string };
+type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean; avatar?: string; bio?: string };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
@@ -36,6 +36,19 @@ type AdminNotification = { id: string; when: string; type: "credit"|"debit"|"red
 type RedeemRequest = { id: string; agentId: string; agentName: string; prizeKey: string; prizeLabel: string; price: number; when: string; agentPinVerified: boolean };
 type AuditLog = { id: string; when: string; adminName: string; action: string; details: string; agentName?: string; amount?: number };
 type Wishlist = Record<string, string[]>; // agentId -> array of prizeKeys
+type Backup = { 
+  id: string; 
+  timestamp: string; 
+  label: string;
+  data: { 
+    accounts: Account[]; 
+    txns: Transaction[]; 
+    stock: Record<string, number>;
+    pins: Record<string, string>;
+    goals: Record<string, number>;
+    wishlist: Wishlist;
+  }; 
+};
 
 /** Metric reset epochs (admin control) */
 type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
@@ -352,8 +365,8 @@ const neonBtn = (theme: Theme, solid?: boolean) =>
   theme === "neon"
     ? "glass-btn rounded-xl px-4 py-2 font-medium text-orange-100 neon-theme transition-all"
     : solid
-      ? "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all"
-      : "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all";
+    ? "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all"
+    : "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all";
 
 const inputCls = (theme: Theme) =>
   theme === "neon"
@@ -362,18 +375,15 @@ const inputCls = (theme: Theme) =>
 
 function TypeLabel({ text }: { text: string }) {
   return (
-    <div aria-label={text} className="text-2xl font-semibold">
-      {text.split("").map((ch, i) => (
-        <motion.span
-          key={i}
+    <motion.div 
+      aria-label={text} 
+      className="text-2xl font-semibold"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: i * 0.05, duration: 0.2 }}
-        >
-          {ch}
-        </motion.span>
-      ))}
-    </div>
+      transition={{ duration: 0.2 }}
+    >
+      {text}
+    </motion.div>
   );
 }
 
@@ -409,10 +419,11 @@ function Avatar({ name, size = "md", theme, avatarUrl }: { name: string; size?: 
   return (
     <motion.div
       className={`${sizeClasses[size]} rounded-full ${!avatarUrl ? `bg-gradient-to-br ${colors[colorIndex]}` : 'bg-gray-200'} flex items-center justify-center font-bold text-white shadow-lg ring-2 ring-white/30 overflow-hidden`}
-      initial={{ scale: 0, rotate: -180 }}
-      animate={{ scale: 1, rotate: 0 }}
-      transition={{ type: "spring", stiffness: 200, damping: 15 }}
-      whileHover={{ scale: 1.1, rotate: avatarUrl ? 0 : 5 }}
+      initial={{ scale: 0.8, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+      whileHover={{ scale: 1.08 }}
+      style={{ willChange: "auto" }}
     >
       {avatarUrl ? (
         <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
@@ -490,9 +501,9 @@ function MilestonesCard({ balance, earned, txns, agentId, theme }: {
             className={`glass-card rounded-xl p-3 bg-gradient-to-br ${tierColors[milestone.tier]} relative overflow-hidden`}
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: Math.min(i * 0.02, 0.3), duration: 0.2, ease: "easeOut" }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
             whileHover={{ scale: 1.05, y: -2 }}
-            style={{ willChange: "transform" }}
+            style={{ willChange: "auto" }}
           >
             <div className="text-3xl mb-1">{milestone.emoji}</div>
             <div className="text-xs font-semibold text-white drop-shadow-lg">{milestone.title}</div>
@@ -783,7 +794,7 @@ function getBadge(position: number, balance: number): { emoji: string; title: st
   return null;
 }
 
-function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number; avatar?: string }>; theme: Theme }) {
+function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number; avatar?: string; bio?: string }>; theme: Theme }) {
   if (leaderboard.length === 0) return <div className="text-center text-sm opacity-60">No data yet</div>;
 
   const top3 = leaderboard.slice(0, 3);
@@ -830,6 +841,11 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
             <div className="text-center mb-2">
               <div className="font-bold text-lg">{agent.name}</div>
               <div className="text-sm opacity-70">{agent.balance.toLocaleString()} GCSD</div>
+              {agent.bio && (
+                <div className="text-xs opacity-60 italic mt-1 max-w-[120px] truncate">
+                  "{agent.bio}"
+                </div>
+              )}
               {(() => {
                 const badge = getBadge(position, agent.balance);
                 return badge ? (
@@ -1100,14 +1116,10 @@ function HoverCard({ children, onClick, delay = 0, theme }: { children: React.Re
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ 
-        duration: 0.15, 
-        delay: Math.min(delay, 0.15),
-        ease: "easeOut"
-      }}
+      transition={{ duration: 0.12, ease: "easeOut" }}
       whileHover={{ scale: 1.03, y: -2 }}
       whileTap={{ scale: 0.97 }}
-      style={{ willChange: delay < 0.1 ? "transform" : "auto" }}
+      style={{ willChange: "auto" }}
     >
       {children}
     </motion.button>
@@ -1190,6 +1202,16 @@ function MemeModal({
   };
 
   const confirmClose = () => {
+    // Auto-save the meme before closing
+    if (onSave && !readOnly) {
+      onSave({
+        topText,
+        bottomText,
+        uploadedImage,
+        textColor,
+        fontSize
+      });
+    }
     setShowCloseConfirm(false);
     onClose();
   };
@@ -1305,40 +1327,40 @@ function MemeModal({
 
           {/* Image Upload - disabled in read-only mode */}
           {!readOnly && (
-            <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">Upload Image (Optional):</label>
-              <div className="relative">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  id="image-upload"
-                />
-                <label
-                  htmlFor="image-upload"
-                  className={classNames(
-                    "block w-full px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all hover:scale-105",
-                    uploadedImage ? "border-emerald-500 bg-emerald-500/10" : "border-gray-400 hover:border-purple-500"
+          <div className="mb-4">
+            <label className="text-sm font-semibold mb-2 block">Upload Image (Optional):</label>
+            <div className="relative">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+                id="image-upload"
+              />
+              <label
+                htmlFor="image-upload"
+                className={classNames(
+                  "block w-full px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all hover:scale-105",
+                  uploadedImage ? "border-emerald-500 bg-emerald-500/10" : "border-gray-400 hover:border-purple-500"
+                )}
+              >
+                <div className="text-center">
+                  {uploadedImage ? (
+                    <div>
+                      <div className="text-emerald-500 font-semibold">✅ Image Uploaded!</div>
+                      <div className="text-xs opacity-70 mt-1">Click to change image</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="text-2xl mb-2">📸</div>
+                      <div className="font-semibold">Click to upload image</div>
+                      <div className="text-xs opacity-70 mt-1">Max 5MB • JPG, PNG, GIF</div>
+                    </div>
                   )}
-                >
-                  <div className="text-center">
-                    {uploadedImage ? (
-                      <div>
-                        <div className="text-emerald-500 font-semibold">✅ Image Uploaded!</div>
-                        <div className="text-xs opacity-70 mt-1">Click to change image</div>
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="text-2xl mb-2">📸</div>
-                        <div className="font-semibold">Click to upload image</div>
-                        <div className="text-xs opacity-70 mt-1">Max 5MB • JPG, PNG, GIF</div>
-                      </div>
-                    )}
-                  </div>
-                </label>
-              </div>
+                </div>
+              </label>
             </div>
+          </div>
           )}
 
           {/* Meme Preview */}
@@ -1383,28 +1405,28 @@ function MemeModal({
 
           {/* Text Inputs - disabled in read-only mode */}
           {!readOnly && (
-            <div className="space-y-3 mb-4">
-              <div>
-                <label className="text-sm font-semibold mb-1 block">Top Text:</label>
-                <input 
-                  type="text"
-                  value={topText}
-                  onChange={(e) => setTopText(e.target.value.toUpperCase())}
-                  placeholder="ENTER TOP TEXT"
-                  className={inputCls(theme)}
-                  maxLength={40}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-semibold mb-1 block">Bottom Text:</label>
-                <input 
-                  type="text"
-                  value={bottomText}
-                  onChange={(e) => setBottomText(e.target.value.toUpperCase())}
-                  placeholder="ENTER BOTTOM TEXT"
-                  className={inputCls(theme)}
-                  maxLength={40}
-                />
+          <div className="space-y-3 mb-4">
+            <div>
+              <label className="text-sm font-semibold mb-1 block">Top Text:</label>
+              <input 
+                type="text"
+                value={topText}
+                onChange={(e) => setTopText(e.target.value.toUpperCase())}
+                placeholder="ENTER TOP TEXT"
+                className={inputCls(theme)}
+                maxLength={40}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold mb-1 block">Bottom Text:</label>
+              <input 
+                type="text"
+                value={bottomText}
+                onChange={(e) => setBottomText(e.target.value.toUpperCase())}
+                placeholder="ENTER BOTTOM TEXT"
+                className={inputCls(theme)}
+                maxLength={40}
+              />
               </div>
               
               {/* Text Customization */}
@@ -1445,8 +1467,8 @@ function MemeModal({
                         />
                       ))}
                     </div>
-                  </div>
-                </div>
+            </div>
+          </div>
                 
                 <div>
                   <label className="text-sm font-semibold mb-2 block">📏 Font Size: {fontSize}px</label>
@@ -1473,18 +1495,55 @@ function MemeModal({
 
           {/* Actions */}
           <div className="flex gap-3">
+            {!readOnly && (
+              <motion.button
+                className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600")}
+                onClick={() => {
+                  // Save the meme data first
+                  if (onSave) {
+                    onSave({
+                      topText,
+                      bottomText,
+                      uploadedImage,
+                      textColor,
+                      fontSize
+                    });
+                    toast.success("✅ Meme saved successfully!");
+                    haptic([30, 20, 30]);
+                  }
+                  // Then close
+                  onClose();
+                }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                💾 Save & Close
+              </motion.button>
+            )}
             <motion.button
-              className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
-              onClick={downloadMemeAsJPEG}
+              className={classNames(readOnly ? "flex-1" : "", "px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
+              onClick={() => {
+                // Auto-save when downloading (if creating new meme)
+                if (onSave && !readOnly) {
+                  onSave({
+                    topText,
+                    bottomText,
+                    uploadedImage,
+                    textColor,
+                    fontSize
+                  });
+                }
+                downloadMemeAsJPEG();
+              }}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              📥 Download {readOnly ? "Meme" : "as JPEG"}
+              📥 Download {readOnly ? "Meme" : "JPEG"}
             </motion.button>
             {readOnly && (
-              <motion.button
+            <motion.button
                 className={classNames("px-4 py-3 rounded-xl font-semibold", neonBtn(theme))}
-                onClick={onClose}
+              onClick={onClose}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
@@ -1507,16 +1566,20 @@ function MemeModal({
               animate={{ scale: 1 }}
             >
               <h3 className="text-xl font-bold mb-3">Close Meme Generator?</h3>
-              <p className="text-sm opacity-70 mb-4">Are you sure you want to exit? Make sure you've downloaded your meme!</p>
+              <p className="text-sm opacity-70 mb-4">
+                {readOnly 
+                  ? "Are you sure you want to exit?" 
+                  : "Your meme will be auto-saved. You can view and download it anytime from My Purchases!"}
+              </p>
               <div className="flex gap-3">
                 <motion.button
                   className={classNames("flex-1 px-4 py-2 rounded-xl", neonBtn(theme, true))}
                   onClick={() => setShowCloseConfirm(false)}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  Cancel
-                </motion.button>
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              Cancel
+            </motion.button>
                 <motion.button
                   className="flex-1 px-4 py-2 rounded-xl bg-red-500 text-white font-semibold"
                   onClick={confirmClose}
@@ -1524,9 +1587,9 @@ function MemeModal({
                   whileTap={{ scale: 0.98 }}
                 >
                   Yes, Exit
-                </motion.button>
-              </div>
-            </motion.div>
+            </motion.button>
+          </div>
+        </motion.div>
           </motion.div>
         )}
       </motion.div>
@@ -1678,6 +1741,11 @@ export default function GCSDApp() {
   /** notification permission */
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
+  
+  /** backup system */
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
+  const [lastAutoBackup, setLastAutoBackup] = useState<string>("");
 
   // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
@@ -1745,6 +1813,9 @@ export default function GCSDApp() {
         setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
+        setBackups((await kvGet<Backup[]>("gcs-v4-backups")) ?? []);
+        setAutoBackupEnabled((await kvGet<boolean>("gcs-v4-auto-backup")) ?? true);
+        setLastAutoBackup((await kvGet<string>("gcs-v4-last-auto-backup")) ?? "");
         
         // CRITICAL: Theme is STRICTLY LOCAL - load from localStorage ONLY
         // NEVER from KV storage - each browser has its own theme
@@ -1788,6 +1859,9 @@ export default function GCSDApp() {
       if (key === "gcs-v4-wishlist") setWishlist(val ?? (await kvGet("gcs-v4-wishlist")) ?? {});
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
+      if (key === "gcs-v4-backups") setBackups(val ?? (await kvGet("gcs-v4-backups")) ?? []);
+      if (key === "gcs-v4-auto-backup") setAutoBackupEnabled(val ?? (await kvGet("gcs-v4-auto-backup")) ?? true);
+      if (key === "gcs-v4-last-auto-backup") setLastAutoBackup(val ?? (await kvGet("gcs-v4-last-auto-backup")) ?? "");
       
       // CRITICAL: Theme is NEVER synced via KV - ignore any theme-related KV changes
       // Each browser maintains its own theme in localStorage independently
@@ -1811,6 +1885,9 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-backups", backups);         }, [hydrated, backups]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-auto-backup", autoBackupEnabled); }, [hydrated, autoBackupEnabled]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-last-auto-backup", lastAutoBackup); }, [hydrated, lastAutoBackup]);
   
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
@@ -1853,6 +1930,46 @@ export default function GCSDApp() {
       }
     }
   }, [hydrated]);
+  
+  /* Auto-backup every 6 hours */
+  useEffect(() => {
+    if (!hydrated || !autoBackupEnabled) return;
+    
+    const performAutoBackup = () => {
+      const now = new Date();
+      const lastBackup = lastAutoBackup ? new Date(lastAutoBackup) : null;
+      
+      // Check if 6 hours have passed
+      if (!lastBackup || (now.getTime() - lastBackup.getTime()) > 6 * 60 * 60 * 1000) {
+        console.log("🔄 Performing auto-backup...");
+        
+        const backup: Backup = {
+          id: uid(),
+          timestamp: nowISO(),
+          label: `Auto-backup ${now.toLocaleString()}`,
+          data: {
+            accounts,
+            txns,
+            stock,
+            pins,
+            goals,
+            wishlist
+          }
+        };
+        
+        setBackups(prev => [backup, ...prev].slice(0, 20)); // Keep last 20 backups
+        setLastAutoBackup(nowISO());
+        console.log("✅ Auto-backup complete");
+      }
+    };
+    
+    // Run immediately on mount if needed
+    performAutoBackup();
+    
+    // Then check every hour
+    const interval = setInterval(performAutoBackup, 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [hydrated, autoBackupEnabled, accounts, txns, stock, pins, goals, wishlist, lastAutoBackup]);
   
   useEffect(()=> {
     if (!showIntro) return;
@@ -2622,6 +2739,36 @@ export default function GCSDApp() {
 
 
   // Backup all live data
+  // Restore from backup
+  function restoreFromBackup(backupId: string) {
+    const backup = backups.find(b => b.id === backupId);
+    if (!backup) {
+      toast.error("Backup not found");
+      return;
+    }
+    
+    const confirmMsg = `⚠️ RESTORE DATA FROM:\n${backup.label}\n\nThis will overwrite ALL current data!\n\nType 'RESTORE' to confirm:`;
+    const confirmation = prompt(confirmMsg);
+    
+    if (confirmation !== "RESTORE") {
+      toast.error("Restore cancelled");
+      return;
+    }
+    
+    // Restore all data
+    setAccounts(backup.data.accounts);
+    setTxns(backup.data.txns);
+    setStock(backup.data.stock);
+    setPins(backup.data.pins);
+    setGoals(backup.data.goals);
+    setWishlist(backup.data.wishlist);
+    
+    logAudit("Data Restored", `Restored from: ${backup.label}`);
+    toast.success("✅ Data restored successfully!");
+    haptic([100, 50, 100, 50, 100]);
+    confettiBurst();
+  }
+  
   async function backupAllData(){
     console.log("backupAllData called");
     
@@ -2669,10 +2816,27 @@ export default function GCSDApp() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
+      // Save to backup history for point-in-time restore
+      const backupEntry: Backup = {
+        id: uid(),
+        timestamp: nowISO(),
+        label: `Manual backup ${new Date().toLocaleString()}`,
+        data: {
+          accounts,
+          txns,
+          stock,
+          pins,
+          goals,
+          wishlist
+        }
+      };
+      setBackups(prev => [backupEntry, ...prev].slice(0, 50)); // Keep last 50 backups
+      
       // Log the backup
       logAudit("Data Backup", `Complete system backup created: ${filename}`);
       
       toast.success(`✅ Backup saved as ${filename}`);
+      haptic([50, 30, 50]);
       console.log("Backup completed:", backupData);
       
     } catch (error) {
@@ -3282,6 +3446,10 @@ export default function GCSDApp() {
                 onUnfreezeAgent={unfreezeAgent}
                 onApproveRedeem={approveRedeem}
                 onRejectRedeem={rejectRedeem}
+                backups={backups}
+                autoBackupEnabled={autoBackupEnabled}
+                onToggleAutoBackup={() => setAutoBackupEnabled(prev => !prev)}
+                onRestoreBackup={restoreFromBackup}
               />
             </motion.div>
           )}
@@ -3400,7 +3568,7 @@ function Home({
     .map((id) => {
       const balance = balances.get(id) || 0;
       const account = accounts.find((a) => a.id === id);
-      return { id, name: account?.name || "—", balance, avatar: account?.avatar };
+      return { id, name: account?.name || "—", balance, avatar: account?.avatar, bio: account?.bio };
     })
     .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
@@ -3727,6 +3895,11 @@ function AgentPortal({
   const [showAvatarCropper, setShowAvatarCropper] = useState(false);
   const [avatarImageSrc, setAvatarImageSrc] = useState<string | null>(null);
   
+  // Bio editing
+  const [editingBio, setEditingBio] = useState(false);
+  const [bioInput, setBioInput] = useState(currentAgent?.bio || "");
+  const [showBioPin, setShowBioPin] = useState(false);
+  
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -3780,6 +3953,20 @@ function AgentPortal({
     haptic([30, 20, 30]);
     toast.success("✅ Profile picture updated!");
     console.log("✅ Avatar save complete!");
+  };
+  
+  const saveBio = () => {
+    setShowBioPin(true);
+  };
+  
+  const handleBioSave = (pinValid: boolean) => {
+    if (pinValid) {
+      onUpdateAccount({ bio: bioInput.slice(0, 50) });
+      setEditingBio(false);
+      haptic([30, 20, 30]);
+      toast.success("✅ Bio updated!");
+    }
+    setShowBioPin(false);
   };
 
   return (
@@ -3849,11 +4036,11 @@ function AgentPortal({
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="grid lg:grid-cols-2 gap-4">
-              {/* Summary */}
-              <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-                <div className="text-sm opacity-70 mb-2">Agent</div>
-                <div className="flex items-center gap-3 mb-3">
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* Summary */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="text-sm opacity-70 mb-2">Agent</div>
+          <div className="flex items-center gap-3 mb-3">
                   <div className="relative">
                     <Avatar name={name} size="lg" theme={theme} avatarUrl={currentAgent?.avatar} />
                     <label 
@@ -3876,180 +4063,248 @@ function AgentPortal({
                     />
                   </div>
                   <div className="flex-1">
-                    <div className="text-xl font-semibold">{name}</div>
+            <div className="text-xl font-semibold">{name}</div>
                     <div className="text-xs opacity-60">Click camera to upload photo</div>
-                  </div>
+          </div>
                 </div>
-                <div className="grid sm:grid-cols-3 gap-3">
-                  <TileRow label="Balance" value={balance} />
-                  <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
-                  <TileRow label="Lifetime Spent" value={lifetimeSpend} />
-                </div>
-
-                <div className="mt-4">
-                  <div className="text-sm opacity-70 mb-2">Savings goal</div>
-                  <div className="rounded-xl border p-3">
-                    <div className="flex items-center gap-3">
-                      <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
-                      <button 
-                        className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
+                
+                {/* Bio Section */}
+                <div className="mt-3 p-3 rounded-xl border bg-black/5 dark:bg-white/5">
+                  {!editingBio ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="text-xs opacity-70 mb-1">Bio/Quote</div>
+                        <div className="text-sm italic">
+                          {currentAgent?.bio || "No bio yet - click edit to add one!"}
+                        </div>
+                      </div>
+                      <motion.button
+                        className={classNames("text-xs px-2 py-1 rounded-lg", neonBtn(theme))}
                         onClick={() => {
-                          haptic(50);
-                          if (goalInput) onSetGoal(parseInt(goalInput, 10));
+                          haptic(20);
+                          setBioInput(currentAgent?.bio || "");
+                          setEditingBio(true);
                         }}
-                        title="PIN required to set goal"
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
                       >
-                        <Check className="w-4 h-4 inline mr-1" /> Set goal
-                      </button>
+                        ✏️ Edit
+                      </motion.button>
                     </div>
-                    <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
-                    {goal > 0 && (
-                      <>
-                        <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
-                        <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                          <motion.div 
-                            className={classNames(
-                              "h-2 rounded-full",
-                              theme === "neon" ? "bg-orange-500" : "bg-emerald-500"
-                            )}
-                            initial={{ width: 0 }}
-                            animate={{ width: `${progress}%` }}
-                            transition={{ duration: 0.8, ease: "easeOut" }}
-                          />
-                        </div>
-                        {progress < 100 && (
-                          <div className="mt-2 text-xs opacity-70">
-                            💡 Need ~{Math.ceil((goal - balance) / 500)} more Full Evaluations to reach goal
-                            <div className="text-xs opacity-60 mt-1">
-                              (Current: {balance.toLocaleString()} / {goal.toLocaleString()} GCSD • Full Eval = 500 GCSD)
-                            </div>
-                          </div>
-                        )}
-                        {progress >= 100 && (
-                          <motion.div 
-                            className="mt-2 text-xs text-emerald-500 font-medium"
-                            animate={{ scale: [1, 1.05, 1] }}
-                            transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-xs opacity-70 mb-1">Edit Bio (max 50 characters)</div>
+                      <input
+                        type="text"
+                        value={bioInput}
+                        onChange={(e) => setBioInput(e.target.value)}
+                        maxLength={50}
+                        placeholder="Add a quote or personal message..."
+                        className={inputCls(theme)}
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs opacity-60">{bioInput.length}/50 characters</span>
+                        <div className="flex gap-2">
+                          <motion.button
+                            className={classNames("text-xs px-3 py-1.5 rounded-lg", neonBtn(theme, true))}
+                            onClick={() => {
+                              haptic(30);
+                              saveBio();
+                            }}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
                           >
-                            🎉 Goal achieved! Great job!
-                          </motion.div>
-                        )}
-                      </>
-                    )}
-                    {goal === 0 && (
-                      <div className="mt-3 text-sm opacity-70">No goal set</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="text-sm opacity-70 mb-2">Recent activity</div>
-                  <div className="space-y-2 max-h-56 overflow-auto pr-2">
-                    {agentTxns.slice(0, 60).map((t, i) => (
-                      <motion.div 
-                        key={t.id} 
-                        className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: Math.min(i * 0.01, 0.2), duration: 0.2, ease: "easeOut" }}
-                        whileHover={{ scale: 1.02, x: 4 }}
-                        style={{ willChange: i < 10 ? "transform" : "auto" }}
-                      >
-                        <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
-                        <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
-                          {t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                            💾 Save
+                          </motion.button>
+                          <motion.button
+                            className="text-xs px-3 py-1.5 rounded-lg opacity-60 hover:opacity-100"
+                            onClick={() => {
+                              haptic(20);
+                              setEditingBio(false);
+                              setBioInput(currentAgent?.bio || "");
+                            }}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                          >
+                            Cancel
+                          </motion.button>
                         </div>
-                      </motion.div>
-                    ))}
-                    {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
-                  </div>
+                      </div>
+                      <div className="text-xs opacity-70">🔒 PIN required to save</div>
+                    </div>
+                  )}
                 </div>
+                
+          <div className="grid sm:grid-cols-3 gap-3">
+            <TileRow label="Balance" value={balance} />
+            <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
+            <TileRow label="Lifetime Spent" value={lifetimeSpend} />
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Savings goal</div>
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center gap-3">
+                <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
+                <button 
+                  className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
+                  onClick={() => {
+                          haptic(50);
+                    if (goalInput) onSetGoal(parseInt(goalInput, 10));
+                  }}
+                  title="PIN required to set goal"
+                >
+                  <Check className="w-4 h-4 inline mr-1" /> Set goal
+                </button>
               </div>
+              <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
+              {goal > 0 && (
+                <>
+                  <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
+                  <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                    <motion.div 
+                      className={classNames(
+                        "h-2 rounded-full",
+                        theme === "neon" ? "bg-orange-500" : "bg-emerald-500"
+                      )}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                    />
+                  </div>
+                  {progress < 100 && (
+                    <div className="mt-2 text-xs opacity-70">
+                      💡 Need ~{Math.ceil((goal - balance) / 500)} more Full Evaluations to reach goal
+                      <div className="text-xs opacity-60 mt-1">
+                        (Current: {balance.toLocaleString()} / {goal.toLocaleString()} GCSD • Full Eval = 500 GCSD)
+                      </div>
+                    </div>
+                  )}
+                  {progress >= 100 && (
+                    <motion.div 
+                      className="mt-2 text-xs text-emerald-500 font-medium"
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+                    >
+                      🎉 Goal achieved! Great job!
+                    </motion.div>
+                  )}
+                </>
+              )}
+              {goal === 0 && (
+                <div className="mt-3 text-sm opacity-70">No goal set</div>
+              )}
+            </div>
+          </div>
 
-              {/* Shop */}
-              <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
-                  <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
-                </div>
-                <div className="relative">
-                  <div className="space-y-2 max-h-[560px] overflow-auto pr-2 scroll-smooth">
-                    {prizes.map((p, i) => {
-                    const left = stock[p.key] ?? 0;
-                    // Special prizes that bypass the 2-prize limit
-                    const unlimitedPrizes = ["meme_generator", "office_dj"];
-                    const isUnlimitedPrize = unlimitedPrizes.includes(p.key);
-                    const can = left > 0 && balance >= p.price && (isUnlimitedPrize || prizeCount < MAX_PRIZES_PER_AGENT);
-                    return (
-                      <motion.div 
-                        key={p.key} 
-                        className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: Math.min(i * 0.02, 0.3), duration: 0.2, ease: "easeOut" }}
-                        whileHover={{ scale: can ? 1.02 : 1, x: can ? -4 : 0 }}
-                        style={{ willChange: i < 10 ? "transform" : "auto" }}
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                          <div className="font-medium">{p.label}</div>
-                            {isUnlimitedPrize && (
-                              <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
-                                ∞ UNLIMITED
-                              </span>
-                            )}
-                            <motion.button
-                              className="text-xl"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                haptic(20);
-                                onToggleWishlist(p.key);
-                              }}
-                              whileHover={{ scale: 1.2 }}
-                              whileTap={{ scale: 0.9 }}
-                            >
-                              {wishlist.includes(p.key) ? "⭐" : "☆"}
-                            </motion.button>
-                          </div>
-                          <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
-                          {wishlist.includes(p.key) && balance < p.price && (
-                            <div className="text-xs text-blue-500 mt-1">
-                              🎯 {Math.ceil((p.price - balance) / 500)} Full Evals needed
-                            </div>
-                          )}
+          <div className="mt-4">
+            <div className="text-sm opacity-70 mb-2">Recent activity</div>
+            <div className="space-y-2 max-h-56 overflow-auto pr-2">
+              {agentTxns.slice(0, 60).map((t, i) => (
+                <motion.div 
+                  key={t.id} 
+                  className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                  whileHover={{ scale: 1.02, x: 4 }}
+                        style={{ willChange: "auto" }}
+                >
+                  <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
+                        <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                    {t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}
                         </div>
-                        <motion.button 
-                          disabled={!can} 
-                          className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} 
+                </motion.div>
+              ))}
+              {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Shop */}
+        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
+            <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
+          </div>
+          <div className="relative">
+            <div className="space-y-2 max-h-[560px] overflow-auto pr-2 scroll-smooth">
+              {prizes.map((p, i) => {
+              const left = stock[p.key] ?? 0;
+              // Special prizes that bypass the 2-prize limit
+              const unlimitedPrizes = ["meme_generator", "office_dj"];
+              const isUnlimitedPrize = unlimitedPrizes.includes(p.key);
+              const can = left > 0 && balance >= p.price && (isUnlimitedPrize || prizeCount < MAX_PRIZES_PER_AGENT);
+              return (
+                <motion.div 
+                  key={p.key} 
+                  className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
+                        initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                  whileHover={{ scale: can ? 1.02 : 1, x: can ? -4 : 0 }}
+                        style={{ willChange: "auto" }}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                    <div className="font-medium">{p.label}</div>
+                      {isUnlimitedPrize && (
+                        <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
+                          ∞ UNLIMITED
+                        </span>
+                      )}
+                      <motion.button
+                        className="text-xl"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                                haptic(20);
+                          onToggleWishlist(p.key);
+                        }}
+                        whileHover={{ scale: 1.2 }}
+                        whileTap={{ scale: 0.9 }}
+                      >
+                        {wishlist.includes(p.key) ? "⭐" : "☆"}
+                      </motion.button>
+                    </div>
+                    <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
+                    {wishlist.includes(p.key) && balance < p.price && (
+                      <div className="text-xs text-blue-500 mt-1">
+                        🎯 {Math.ceil((p.price - balance) / 500)} Full Evals needed
+                      </div>
+                    )}
+                  </div>
+                  <motion.button 
+                    disabled={!can} 
+                    className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} 
                           onClick={() => {
                             haptic([40, 20, 60]);
                             onRedeem(p.key);
                           }}
-                          whileHover={can ? { scale: 1.05 } : {}}
-                          whileTap={can ? { scale: 0.95 } : {}}
-                        >
-                          <Gift className="w-4 h-4 inline mr-1" /> Redeem
-                        </motion.button>
-                      </motion.div>
-                    );
-                  })}
-                  </div>
-                  {/* Fade effect at bottom */}
-                  <div className="absolute bottom-0 left-0 right-2 h-8 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
-                </div>
-              </div>
+                    whileHover={can ? { scale: 1.05 } : {}}
+                    whileTap={can ? { scale: 0.95 } : {}}
+                  >
+                    <Gift className="w-4 h-4 inline mr-1" /> Redeem
+                  </motion.button>
+                </motion.div>
+              );
+            })}
             </div>
+            {/* Fade effect at bottom */}
+            <div className="absolute bottom-0 left-0 right-2 h-8 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
+          </div>
+        </div>
+      </div>
 
-            {/* Milestones & Achievements */}
-            <div className="mt-4">
-              <MilestonesCard 
-                balance={balance}
-                earned={lifetimeEarn}
-                txns={txns}
-                agentId={agentId}
-                theme={theme}
-              />
-            </div>
+      {/* Milestones & Achievements */}
+      <div className="mt-4">
+        <MilestonesCard 
+          balance={balance}
+          earned={lifetimeEarn}
+          txns={txns}
+          agentId={agentId}
+          theme={theme}
+        />
+      </div>
           </motion.div>
         )}
 
@@ -4072,7 +4327,7 @@ function AgentPortal({
                   <Gift className="w-16 h-16 mx-auto mb-4 opacity-30" />
                   <p>No purchases yet</p>
                   <p className="text-sm mt-2">Start redeeming prizes to see them here!</p>
-                </div>
+    </div>
               ) : (
                 <>
                   <div className="mb-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/30">
@@ -4095,9 +4350,9 @@ function AgentPortal({
                         className={classNames("border rounded-xl p-4", neonBox(theme))}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: Math.min(i * 0.02, 0.2), duration: 0.2, ease: "easeOut" }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
                         whileHover={{ scale: 1.01 }}
-                        style={{ willChange: i < 5 ? "transform" : "auto" }}
+                        style={{ willChange: "auto" }}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1">
@@ -4194,6 +4449,30 @@ function AgentPortal({
               setShowAvatarCropper(false);
               setAvatarImageSrc(null);
             }}
+          />
+        )}
+      </AnimatePresence>
+      
+      {/* Bio PIN Modal */}
+      <AnimatePresence>
+        {showBioPin && (
+          <PinModal
+            open={showBioPin}
+            onClose={() => setShowBioPin(false)}
+            onCheck={(pin) => {
+              const agentPin = pins[agentId];
+              if (!agentPin) {
+                toast.error("No PIN set for this agent");
+                return false;
+              }
+              if (pin === agentPin) {
+                handleBioSave(true);
+                return true;
+              }
+              toast.error("❌ Incorrect PIN");
+              return false;
+            }}
+            theme={theme}
           />
         )}
       </AnimatePresence>
@@ -4666,6 +4945,10 @@ function AdminPortal({
   onUnfreezeAgent,
   onApproveRedeem,
   onRejectRedeem,
+  backups,
+  autoBackupEnabled,
+  onToggleAutoBackup,
+  onRestoreBackup,
 }: {
   theme: Theme;
   isAdmin: boolean;
@@ -4700,6 +4983,10 @@ function AdminPortal({
   onUnfreezeAgent: (agentId: string) => void;
   onApproveRedeem: (requestId: string) => void;
   onRejectRedeem: (requestId: string) => void;
+  backups: Backup[];
+  autoBackupEnabled: boolean;
+  onToggleAutoBackup: () => void;
+  onRestoreBackup: (backupId: string) => void;
 }) {
   const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests" | "audit" | "export">("dashboard");
   const [agentId, setAgentId] = useState("");
@@ -4910,9 +5197,9 @@ function AdminPortal({
                   className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: Math.min(i * 0.015, 0.2), duration: 0.2, ease: "easeOut" }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
                   whileHover={{ scale: 1.01, x: -2 }}
-                  style={{ willChange: i < 10 ? "transform" : "auto" }}
+                  style={{ willChange: "auto" }}
                 >
                   <div className="font-medium">{p.label}</div>
                   <div className="text-sm font-semibold">Stock: {stock[p.key] ?? 0}</div>
@@ -5127,8 +5414,8 @@ function AdminPortal({
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      transition={{ delay: Math.min(i * 0.01, 0.15), duration: 0.15, ease: "easeOut" }}
-                      style={{ willChange: i < 10 ? "transform" : "auto" }}
+                      transition={{ duration: 0.12, ease: "easeOut" }}
+                      style={{ willChange: "auto" }}
                     >
                       <div className="text-sm">
                         <div className="font-medium">{t.memo || "Credit"}</div>
@@ -5195,8 +5482,8 @@ function AdminPortal({
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 10 }}
-                        transition={{ delay: Math.min(i * 0.01, 0.15), duration: 0.15, ease: "easeOut" }}
-                      style={{ willChange: i < 10 ? "transform" : "auto" }}
+                        transition={{ duration: 0.12, ease: "easeOut" }}
+                      style={{ willChange: "auto" }}
                       >
                         <div className="text-sm">
                           <div>{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
@@ -5241,8 +5528,8 @@ function AdminPortal({
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      transition={{ delay: Math.min(i * 0.01, 0.15), duration: 0.15, ease: "easeOut" }}
-                      style={{ willChange: i < 10 ? "transform" : "auto" }}
+                      transition={{ duration: 0.12, ease: "easeOut" }}
+                      style={{ willChange: "auto" }}
                     >
                       <div className="text-sm">
                         <div className="font-medium">{t.memo}</div>
@@ -5759,6 +6046,79 @@ function AdminPortal({
             </div>
           </motion.div>
           
+          {/* Auto-Backup Settings & History */}
+          <motion.div 
+            className="glass-card rounded-xl p-4 mb-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h4 className="font-semibold mb-1">🔄 Auto-Backup System</h4>
+                <p className="text-xs opacity-70">Automatically backup every 6 hours</p>
+              </div>
+              <motion.button
+                className={classNames(
+                  "px-4 py-2 rounded-xl font-semibold transition-colors",
+                  autoBackupEnabled 
+                    ? "bg-emerald-500 text-white" 
+                    : "bg-gray-500 text-white opacity-50"
+                )}
+                onClick={onToggleAutoBackup}
+                whileTap={{ scale: 0.95 }}
+              >
+                {autoBackupEnabled ? "✅ Enabled" : "❌ Disabled"}
+              </motion.button>
+            </div>
+            
+            <div className="border-t pt-4 mt-4">
+              <h4 className="font-semibold mb-3 flex items-center gap-2">
+                <History className="w-4 h-4" />
+                Backup History (Point-in-Time Restore)
+              </h4>
+              
+              {backups.length === 0 ? (
+                <div className="text-center py-6 opacity-60">
+                  <p className="text-sm">No backups yet</p>
+                  <p className="text-xs mt-1">Create a manual backup or wait for auto-backup</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {backups.map((backup, idx) => (
+                    <motion.div
+                      key={backup.id}
+                      className="flex items-center justify-between p-3 rounded-lg bg-black/5 dark:bg-white/5 border"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                    >
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{backup.label}</div>
+                        <div className="text-xs opacity-60">
+                          {new Date(backup.timestamp).toLocaleString()}
+                        </div>
+                        <div className="text-xs opacity-50 mt-1">
+                          {backup.data.accounts.length} accounts • {backup.data.txns.length} transactions
+                        </div>
+                      </div>
+                      <motion.button
+                        className={classNames(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold",
+                          neonBtn(theme, true)
+                        )}
+                        onClick={() => onRestoreBackup(backup.id)}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        ⏮️ Restore
+                      </motion.button>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+          
           <div className="grid md:grid-cols-2 gap-4">
             <motion.div 
               className="glass-card rounded-xl p-4"
@@ -5980,7 +6340,7 @@ function Picker({
           {accounts
             .filter((a) => a.role !== "system")
             .map((a, index) => (
-              <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={Math.min(index * 0.01, 0.15)}>
+              <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={0}>
                 <div className="flex items-center gap-2 mb-1">
                   <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
                   <div className="font-medium flex-1 truncate">{a.name}</div>
@@ -6009,9 +6369,9 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
               className="text-sm border rounded-xl px-3 py-2"
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: Math.min(i * 0.01, 0.2), duration: 0.2, ease: "easeOut" }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
               whileHover={{ scale: 1.01, x: 4 }}
-              style={{ willChange: i < 10 ? "transform" : "auto" }}
+              style={{ willChange: "auto" }}
             >
               <div>{n.text}</div>
               <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
