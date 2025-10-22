@@ -249,10 +249,11 @@ function TileRow({ label, value }: { label: string; value: number }) {
   return (
     <motion.div 
       className="rounded-xl border p-3"
-      initial={{ opacity: 0, scale: 0.9 }}
+      initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       whileHover={{ scale: 1.02, y: -2 }}
+      style={{ willChange: "transform" }}
     >
       <div className="text-xs opacity-70 mb-1">{label}</div>
       <div className="text-2xl font-semibold"><NumberFlash value={value} /></div>
@@ -260,39 +261,25 @@ function TileRow({ label, value }: { label: string; value: number }) {
   );
 }
 function NumberFlash({ value }:{ value:number }) {
-  const [displayValue, setDisplayValue] = useState(value);
+  const prevValue = useRef(value);
+  const [isAnimating, setIsAnimating] = useState(false);
   
   useEffect(() => {
-    // Smooth number transition
-    const diff = value - displayValue;
-    if (Math.abs(diff) < 1) {
-      setDisplayValue(value);
-      return;
+    if (prevValue.current !== value) {
+      setIsAnimating(true);
+      const timer = setTimeout(() => setIsAnimating(false), 300);
+      prevValue.current = value;
+      return () => clearTimeout(timer);
     }
-    
-    const step = diff / 10;
-    const timer = setInterval(() => {
-      setDisplayValue(prev => {
-        const next = prev + step;
-        if (Math.abs(value - next) < Math.abs(step)) {
-          clearInterval(timer);
-          return value;
-        }
-        return next;
-      });
-    }, 30);
-    
-    return () => clearInterval(timer);
   }, [value]);
   
   return (
     <motion.span
-      key={value}
-      initial={{ scale: 1 }}
-      animate={{ scale: [1, 1.05, 1] }}
-      transition={{ duration: 0.3 }}
+      animate={isAnimating ? { scale: [1, 1.05, 1] } : { scale: 1 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      style={{ display: "inline-block" }}
     >
-      {Math.round(displayValue).toLocaleString()} GCSD
+      {value.toLocaleString()} GCSD
     </motion.span>
   );
 }
@@ -452,22 +439,17 @@ function MilestonesCard({ balance, earned, txns, agentId, theme }: {
           <motion.div
             key={milestone.id}
             className={`glass-card rounded-xl p-3 bg-gradient-to-br ${tierColors[milestone.tier]} relative overflow-hidden`}
-            initial={{ scale: 0, rotate: -10 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ delay: i * 0.05, type: "spring", stiffness: 200 }}
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: Math.min(i * 0.02, 0.3), duration: 0.2, ease: "easeOut" }}
             whileHover={{ scale: 1.05, y: -2 }}
+            style={{ willChange: "transform" }}
           >
             <div className="text-3xl mb-1">{milestone.emoji}</div>
             <div className="text-xs font-semibold text-white drop-shadow-lg">{milestone.title}</div>
             <div className="text-[10px] text-white/80 line-clamp-1">{milestone.description}</div>
             
-            {/* Shine effect */}
-            <motion.div
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
-              initial={{ x: "-100%" }}
-              animate={{ x: "200%" }}
-              transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
-            />
+            {/* Shine effect - disabled for better performance */}
           </motion.div>
         ))}
       </div>
@@ -1109,11 +1091,26 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
 }
 
 /* Meme Generator Modal */
-function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentName: string; onClose: () => void; theme: Theme }) {
-  const [topText, setTopText] = useState("");
-  const [bottomText, setBottomText] = useState("");
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+function MemeModal({ 
+  open, 
+  agentName, 
+  onClose, 
+  theme, 
+  initialData,
+  onSave 
+}: { 
+  open: boolean; 
+  agentName: string; 
+  onClose: () => void; 
+  theme: Theme;
+  initialData?: { topText: string; bottomText: string; uploadedImage: string | null };
+  onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null }) => void;
+}) {
+  const [topText, setTopText] = useState(initialData?.topText || "");
+  const [bottomText, setBottomText] = useState(initialData?.bottomText || "");
+  const [uploadedImage, setUploadedImage] = useState<string | null>(initialData?.uploadedImage || null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   
   const templates = [
     { key: "success", label: "Success Kid", emoji: "😎" },
@@ -1138,6 +1135,15 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleCloseAttempt = () => {
+    setShowCloseConfirm(true);
+  };
+
+  const confirmClose = () => {
+    setShowCloseConfirm(false);
+    onClose();
   };
 
   const downloadMemeAsJPEG = () => {
@@ -1211,7 +1217,11 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
     link.click();
     
     toast.success(`🎉 Meme downloaded! "${topText || 'Top Text'}" / "${bottomText || 'Bottom Text'}"`);
-    onClose();
+    
+    // Save meme data when downloading
+    if (onSave) {
+      onSave({ topText, bottomText, uploadedImage });
+    }
   };
 
   if (!open) return null;
@@ -1224,7 +1234,6 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
       >
         <motion.div 
           className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-[min(600px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
@@ -1235,11 +1244,11 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
         >
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold">🎨 Meme Generator</h2>
-            <button onClick={onClose} className="text-2xl opacity-60 hover:opacity-100">×</button>
+            <button onClick={handleCloseAttempt} className="text-2xl opacity-60 hover:opacity-100">×</button>
           </div>
           
           <div className="text-sm opacity-70 mb-4">
-            Congrats {agentName}! Create your custom meme! 🎉
+            {initialData ? `View or download your meme, ${agentName}! 🎉` : `Congrats ${agentName}! Create your custom meme! 🎉`}
           </div>
 
           {/* Image Upload */}
@@ -1340,16 +1349,44 @@ function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentNa
             >
               📥 Download as JPEG
             </motion.button>
-            <motion.button
-              className="px-4 py-3 rounded-xl opacity-60 hover:opacity-100"
-              onClick={onClose}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              Cancel
-            </motion.button>
           </div>
         </motion.div>
+
+        {/* Close Confirmation Dialog */}
+        {showCloseConfirm && (
+          <motion.div
+            className="absolute inset-0 flex items-center justify-center z-10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <motion.div
+              className={classNames("glass-card rounded-2xl shadow-2xl p-6 max-w-md mx-4", neonBox(theme))}
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+            >
+              <h3 className="text-xl font-bold mb-3">Close Meme Generator?</h3>
+              <p className="text-sm opacity-70 mb-4">Are you sure you want to exit? Make sure you've downloaded your meme!</p>
+              <div className="flex gap-3">
+                <motion.button
+                  className={classNames("flex-1 px-4 py-2 rounded-xl", neonBtn(theme, true))}
+                  onClick={() => setShowCloseConfirm(false)}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  Cancel
+                </motion.button>
+                <motion.button
+                  className="flex-1 px-4 py-2 rounded-xl bg-red-500 text-white font-semibold"
+                  onClick={confirmClose}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  Yes, Exit
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </motion.div>
     </AnimatePresence>
   );
@@ -1482,7 +1519,12 @@ export default function GCSDApp() {
 
   // Sandbox state removed
   const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
-  const [memeModal, setMemeModal] = useState<{open: boolean; agentName: string} | null>(null);
+  const [memeModal, setMemeModal] = useState<{
+    open: boolean; 
+    agentName: string; 
+    initialData?: { topText: string; bottomText: string; uploadedImage: string | null };
+    onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null }) => void;
+  } | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
   const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
@@ -1946,11 +1988,24 @@ export default function GCSDApp() {
     }
     
     // Process the redemption
-    postTxn({ kind:"debit", amount: request.price, fromId: request.agentId, memo:`Redeem: ${request.prizeLabel}` });
+    const txnId = uid();
+    const receiptId = "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase();
+    postTxn({ 
+      id: txnId,
+      kind:"debit", 
+      amount: request.price, 
+      fromId: request.agentId, 
+      memo:`Redeem: ${request.prizeLabel}`,
+      meta: { 
+        prizeKey: request.prizeKey, 
+        prizeLabel: request.prizeLabel,
+        receiptId: receiptId
+      }
+    });
     setStock(s=> ({...s, [request.prizeKey]: Math.max(0, (s[request.prizeKey] ?? 0) - 1)}));
     notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
       setReceipt({
-        id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
+        id: receiptId,
       when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price
     });
     
@@ -1975,7 +2030,18 @@ export default function GCSDApp() {
     // Special prize handling: Show meme generator for meme_generator prize
     if (request.prizeKey === "meme_generator") {
       setTimeout(() => {
-        setMemeModal({ open: true, agentName: request.agentName });
+        setMemeModal({ 
+          open: true, 
+          agentName: request.agentName,
+          onSave: (memeData) => {
+            // Save meme data to transaction meta
+            setTxns(prev => prev.map(t => 
+              t.id === txnId 
+                ? { ...t, meta: { ...t.meta, memeData } }
+                : t
+            ));
+          }
+        });
       }, 1000); // Delay to let confetti finish
     }
   }
@@ -2761,6 +2827,8 @@ export default function GCSDApp() {
           agentName={memeModal.agentName}
           onClose={() => setMemeModal(null)}
           theme={theme}
+          initialData={memeModal.initialData}
+          onSave={memeModal.onSave}
         />
       )}
 
@@ -2865,10 +2933,10 @@ export default function GCSDApp() {
           {portal==="home" && (
             <motion.div
               key="home"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
               <Home
                 theme={theme}
@@ -2884,10 +2952,10 @@ export default function GCSDApp() {
           {portal==="agent" && currentAgentId && (
             <motion.div
               key={`agent-${currentAgentId}`}
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
               <AgentPortal
                 theme={theme}
@@ -2910,6 +2978,23 @@ export default function GCSDApp() {
                     };
                   });
                 }}
+                onOpenMeme={(txn) => {
+                  const agentName = accounts.find(a => a.id === currentAgentId)?.name || "Agent";
+                  const memeData = txn.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null } | undefined;
+                  setMemeModal({
+                    open: true,
+                    agentName,
+                    initialData: memeData,
+                    onSave: (newMemeData) => {
+                      // Update the transaction with new meme data
+                      setTxns(prev => prev.map(t => 
+                        t.id === txn.id 
+                          ? { ...t, meta: { ...t.meta, memeData: newMemeData } }
+                          : t
+                      ));
+                    }
+                  });
+                }}
               />
             </motion.div>
           )}
@@ -2917,10 +3002,10 @@ export default function GCSDApp() {
           {portal==="admin" && isAdmin && (
             <motion.div
               key="admin"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
               <AdminPortal
                 theme={theme}
@@ -2972,10 +3057,10 @@ export default function GCSDApp() {
           {portal==="feed" && (
             <motion.div
               key="feed"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
               <FeedPage theme={theme} notifs={notifs} />
             </motion.div>
@@ -3335,6 +3420,7 @@ function AgentPortal({
   onSetGoal,
   onRedeem,
   onToggleWishlist,
+  onOpenMeme,
 }: {
   theme: Theme;
   agentId: string;
@@ -3347,7 +3433,10 @@ function AgentPortal({
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
   onToggleWishlist: (prizeKey: string) => void;
+  onOpenMeme: (txn: Transaction) => void;
 }) {
+  const [agentTab, setAgentTab] = useState<"overview" | "purchases">("overview");
+  
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
   const balance = txns.reduce((s, t) => {
     if (t.toId === agentId && t.kind === "credit") s += t.amount;
@@ -3367,185 +3456,302 @@ function AgentPortal({
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
   const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
 
+  // Get redeemed prizes (only active ones, not reversed)
+  const redeemedPrizes = agentTxns.filter((t) => G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns));
+
   return (
     <div>
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* Summary */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="text-sm opacity-70 mb-2">Agent</div>
-          <div className="flex items-center gap-3 mb-3">
-            <Avatar name={name} size="lg" theme={theme} />
-            <div className="text-xl font-semibold">{name}</div>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <TileRow label="Balance" value={balance} />
-            <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
-            <TileRow label="Lifetime Spent" value={lifetimeSpend} />
-          </div>
+      {/* Tab Navigation */}
+      <div className="mb-4 flex gap-2 overflow-x-auto pb-2">
+        {[
+          { key: "overview", label: "Overview", icon: Wallet },
+          { key: "purchases", label: "My Purchases", icon: Gift }
+        ].map((tab) => (
+          <motion.button
+            key={tab.key}
+            onClick={() => setAgentTab(tab.key as typeof agentTab)}
+            className={classNames(
+              "flex items-center gap-2 px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all",
+              agentTab === tab.key 
+                ? classNames(neonBtn(theme, true), "ring-2 ring-blue-400/50") 
+                : "glass opacity-70 hover:opacity-100"
+            )}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </motion.button>
+        ))}
+      </div>
 
-          <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Savings goal</div>
-            <div className="rounded-xl border p-3">
-              <div className="flex items-center gap-3">
-                <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
-                <button 
-                  className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
-                  onClick={() => {
-                    if ('vibrate' in navigator) navigator.vibrate(30);
-                    if (goalInput) onSetGoal(parseInt(goalInput, 10));
-                  }}
-                  title="PIN required to set goal"
-                >
-                  <Check className="w-4 h-4 inline mr-1" /> Set goal
-                </button>
-              </div>
-              <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
-              {goal > 0 && (
-                <>
-                  <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
-                  <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                    <motion.div 
-                      className={classNames(
-                        "h-2 rounded-full",
-                        theme === "neon" ? "bg-orange-500" : "bg-emerald-500"
-                      )}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${progress}%` }}
-                      transition={{ duration: 0.8, ease: "easeOut" }}
-                    />
-                  </div>
-                  {progress < 100 && (
-                    <div className="mt-2 text-xs opacity-70">
-                      💡 Need ~{Math.ceil((goal - balance) / 500)} more Full Evaluations to reach goal
-                      <div className="text-xs opacity-60 mt-1">
-                        (Current: {balance.toLocaleString()} / {goal.toLocaleString()} GCSD • Full Eval = 500 GCSD)
-                      </div>
-                    </div>
-                  )}
-                  {progress >= 100 && (
-                    <motion.div 
-                      className="mt-2 text-xs text-emerald-500 font-medium"
-                      animate={{ scale: [1, 1.05, 1] }}
-                      transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
-                    >
-                      🎉 Goal achieved! Great job!
-                    </motion.div>
-                  )}
-                </>
-              )}
-              {goal === 0 && (
-                <div className="mt-3 text-sm opacity-70">No goal set</div>
-              )}
-            </div>
-          </div>
+      {/* Tab Content */}
+      <AnimatePresence mode="wait">
+        {agentTab === "overview" && (
+          <motion.div
+            key="overview"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="grid lg:grid-cols-2 gap-4">
+              {/* Summary */}
+              <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+                <div className="text-sm opacity-70 mb-2">Agent</div>
+                <div className="flex items-center gap-3 mb-3">
+                  <Avatar name={name} size="lg" theme={theme} />
+                  <div className="text-xl font-semibold">{name}</div>
+                </div>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <TileRow label="Balance" value={balance} />
+                  <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
+                  <TileRow label="Lifetime Spent" value={lifetimeSpend} />
+                </div>
 
-          <div className="mt-4">
-            <div className="text-sm opacity-70 mb-2">Recent activity</div>
-            <div className="space-y-2 max-h-56 overflow-auto pr-2">
-              {agentTxns.slice(0, 60).map((t, i) => (
-                <motion.div 
-                  key={t.id} 
-                  className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.03, duration: 0.3 }}
-                  whileHover={{ scale: 1.02, x: 4 }}
-                >
-                  <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
-                  <motion.div 
-                    className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: i * 0.03 + 0.15, duration: 0.2 }}
-                  >
-                    {t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}
-                  </motion.div>
-                </motion.div>
-              ))}
-              {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
-            </div>
-          </div>
-        </div>
-
-        {/* Shop */}
-        <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
-            <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
-          </div>
-          <div className="relative">
-            <div className="space-y-2 max-h-[560px] overflow-auto pr-2 scroll-smooth">
-              {prizes.map((p, i) => {
-              const left = stock[p.key] ?? 0;
-              // Special prizes that bypass the 2-prize limit
-              const unlimitedPrizes = ["meme_generator", "office_dj"];
-              const isUnlimitedPrize = unlimitedPrizes.includes(p.key);
-              const can = left > 0 && balance >= p.price && (isUnlimitedPrize || prizeCount < MAX_PRIZES_PER_AGENT);
-              return (
-                <motion.div 
-                  key={p.key} 
-                  className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05, duration: 0.3 }}
-                  whileHover={{ scale: can ? 1.02 : 1, x: can ? -4 : 0 }}
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                    <div className="font-medium">{p.label}</div>
-                      {isUnlimitedPrize && (
-                        <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
-                          ∞ UNLIMITED
-                        </span>
-                      )}
-                      <motion.button
-                        className="text-xl"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggleWishlist(p.key);
+                <div className="mt-4">
+                  <div className="text-sm opacity-70 mb-2">Savings goal</div>
+                  <div className="rounded-xl border p-3">
+                    <div className="flex items-center gap-3">
+                      <input className={inputCls(theme)} placeholder="Amount" value={goalInput} onChange={(e) => setGoalInput(e.target.value.replace(/[^\d]/g, ""))} />
+                      <button 
+                        className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
+                        onClick={() => {
+                          if ('vibrate' in navigator) navigator.vibrate(30);
+                          if (goalInput) onSetGoal(parseInt(goalInput, 10));
                         }}
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.9 }}
+                        title="PIN required to set goal"
                       >
-                        {wishlist.includes(p.key) ? "⭐" : "☆"}
-                      </motion.button>
+                        <Check className="w-4 h-4 inline mr-1" /> Set goal
+                      </button>
                     </div>
-                    <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
-                    {wishlist.includes(p.key) && balance < p.price && (
-                      <div className="text-xs text-blue-500 mt-1">
-                        🎯 {Math.ceil((p.price - balance) / 500)} Full Evals needed
-                      </div>
+                    <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
+                    {goal > 0 && (
+                      <>
+                        <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
+                        <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                          <motion.div 
+                            className={classNames(
+                              "h-2 rounded-full",
+                              theme === "neon" ? "bg-orange-500" : "bg-emerald-500"
+                            )}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${progress}%` }}
+                            transition={{ duration: 0.8, ease: "easeOut" }}
+                          />
+                        </div>
+                        {progress < 100 && (
+                          <div className="mt-2 text-xs opacity-70">
+                            💡 Need ~{Math.ceil((goal - balance) / 500)} more Full Evaluations to reach goal
+                            <div className="text-xs opacity-60 mt-1">
+                              (Current: {balance.toLocaleString()} / {goal.toLocaleString()} GCSD • Full Eval = 500 GCSD)
+                            </div>
+                          </div>
+                        )}
+                        {progress >= 100 && (
+                          <motion.div 
+                            className="mt-2 text-xs text-emerald-500 font-medium"
+                            animate={{ scale: [1, 1.05, 1] }}
+                            transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+                          >
+                            🎉 Goal achieved! Great job!
+                          </motion.div>
+                        )}
+                      </>
+                    )}
+                    {goal === 0 && (
+                      <div className="mt-3 text-sm opacity-70">No goal set</div>
                     )}
                   </div>
-                  <motion.button 
-                    disabled={!can} 
-                    className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} 
-                    onClick={() => onRedeem(p.key)}
-                    whileHover={can ? { scale: 1.05 } : {}}
-                    whileTap={can ? { scale: 0.95 } : {}}
-                  >
-                    <Gift className="w-4 h-4 inline mr-1" /> Redeem
-                  </motion.button>
-                </motion.div>
-              );
-            })}
-            </div>
-            {/* Fade effect at bottom */}
-            <div className="absolute bottom-0 left-0 right-2 h-8 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
-          </div>
-        </div>
-      </div>
+                </div>
 
-      {/* Milestones & Achievements */}
-      <div className="mt-4">
-        <MilestonesCard 
-          balance={balance}
-          earned={lifetimeEarn}
-          txns={txns}
-          agentId={agentId}
-          theme={theme}
-        />
-      </div>
+                <div className="mt-4">
+                  <div className="text-sm opacity-70 mb-2">Recent activity</div>
+                  <div className="space-y-2 max-h-56 overflow-auto pr-2">
+                    {agentTxns.slice(0, 60).map((t, i) => (
+                      <motion.div 
+                        key={t.id} 
+                        className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: Math.min(i * 0.01, 0.2), duration: 0.2, ease: "easeOut" }}
+                        whileHover={{ scale: 1.02, x: 4 }}
+                        style={{ willChange: i < 10 ? "transform" : "auto" }}
+                      >
+                        <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
+                        <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                          {t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}
+                        </div>
+                      </motion.div>
+                    ))}
+                    {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Shop */}
+              <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm opacity-70">Shop (limit {MAX_PRIZES_PER_AGENT}, you have {prizeCount})</div>
+                  <div className="text-xs opacity-70">Balance: {balance.toLocaleString()} GCSD</div>
+                </div>
+                <div className="relative">
+                  <div className="space-y-2 max-h-[560px] overflow-auto pr-2 scroll-smooth">
+                    {prizes.map((p, i) => {
+                    const left = stock[p.key] ?? 0;
+                    // Special prizes that bypass the 2-prize limit
+                    const unlimitedPrizes = ["meme_generator", "office_dj"];
+                    const isUnlimitedPrize = unlimitedPrizes.includes(p.key);
+                    const can = left > 0 && balance >= p.price && (isUnlimitedPrize || prizeCount < MAX_PRIZES_PER_AGENT);
+                    return (
+                      <motion.div 
+                        key={p.key} 
+                        className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(i * 0.02, 0.3), duration: 0.2, ease: "easeOut" }}
+                        whileHover={{ scale: can ? 1.02 : 1, x: can ? -4 : 0 }}
+                        style={{ willChange: i < 10 ? "transform" : "auto" }}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                          <div className="font-medium">{p.label}</div>
+                            {isUnlimitedPrize && (
+                              <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
+                                ∞ UNLIMITED
+                              </span>
+                            )}
+                            <motion.button
+                              className="text-xl"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleWishlist(p.key);
+                              }}
+                              whileHover={{ scale: 1.2 }}
+                              whileTap={{ scale: 0.9 }}
+                            >
+                              {wishlist.includes(p.key) ? "⭐" : "☆"}
+                            </motion.button>
+                          </div>
+                          <div className="text-xs opacity-70">{p.price.toLocaleString()} GCSD • Stock {left}</div>
+                          {wishlist.includes(p.key) && balance < p.price && (
+                            <div className="text-xs text-blue-500 mt-1">
+                              🎯 {Math.ceil((p.price - balance) / 500)} Full Evals needed
+                            </div>
+                          )}
+                        </div>
+                        <motion.button 
+                          disabled={!can} 
+                          className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} 
+                          onClick={() => onRedeem(p.key)}
+                          whileHover={can ? { scale: 1.05 } : {}}
+                          whileTap={can ? { scale: 0.95 } : {}}
+                        >
+                          <Gift className="w-4 h-4 inline mr-1" /> Redeem
+                        </motion.button>
+                      </motion.div>
+                    );
+                  })}
+                  </div>
+                  {/* Fade effect at bottom */}
+                  <div className="absolute bottom-0 left-0 right-2 h-8 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Milestones & Achievements */}
+            <div className="mt-4">
+              <MilestonesCard 
+                balance={balance}
+                earned={lifetimeEarn}
+                txns={txns}
+                agentId={agentId}
+                theme={theme}
+              />
+            </div>
+          </motion.div>
+        )}
+
+        {agentTab === "purchases" && (
+          <motion.div
+            key="purchases"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <Gift className="w-6 h-6" />
+                My Purchases
+              </h3>
+              
+              {redeemedPrizes.length === 0 ? (
+                <div className="text-center py-12 opacity-70">
+                  <Gift className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                  <p>No purchases yet</p>
+                  <p className="text-sm mt-2">Start redeeming prizes to see them here!</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {redeemedPrizes.map((t, i) => {
+                    const prizeLabel = t.meta?.prizeLabel || t.memo?.replace("Redeem: ", "") || "Prize";
+                    const prizeKey = t.meta?.prizeKey;
+                    const receiptId = t.meta?.receiptId || "N/A";
+                    const date = new Date(t.dateISO);
+                    const isMeme = prizeKey === "meme_generator";
+                    const memeData = t.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null } | undefined;
+
+                    return (
+                      <motion.div
+                        key={t.id}
+                        className={classNames("border rounded-xl p-4", neonBox(theme))}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(i * 0.02, 0.2), duration: 0.2, ease: "easeOut" }}
+                        whileHover={{ scale: 1.01 }}
+                        style={{ willChange: i < 5 ? "transform" : "auto" }}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h4 className="font-semibold text-lg">{prizeLabel}</h4>
+                              {isMeme && (
+                                <span className="px-2 py-0.5 text-xs bg-purple-500 text-white rounded-full font-semibold">
+                                  🎨 MEME
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-sm opacity-70 space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Receipt:</span>
+                                <code className="px-2 py-0.5 bg-black/10 dark:bg-white/10 rounded">{receiptId}</code>
+                              </div>
+                              <div><span className="font-medium">Date:</span> {date.toLocaleString()}</div>
+                              <div><span className="font-medium">Amount:</span> <span className="text-rose-500">−{t.amount.toLocaleString()} GCSD</span></div>
+                            </div>
+                          </div>
+                          
+                          {isMeme && (
+                            <motion.button
+                              className={classNames("px-4 py-2 rounded-xl font-semibold", neonBtn(theme, true))}
+                              onClick={() => onOpenMeme(t)}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              🎨 {memeData ? "View Meme" : "Create Meme"}
+                            </motion.button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -3829,8 +4035,9 @@ function AdminPortal({
                   className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.03 }}
+                  transition={{ delay: Math.min(i * 0.015, 0.2), duration: 0.2, ease: "easeOut" }}
                   whileHover={{ scale: 1.01, x: -2 }}
+                  style={{ willChange: i < 10 ? "transform" : "auto" }}
                 >
                   <div className="font-medium">{p.label}</div>
                   <div className="text-sm font-semibold">Stock: {stock[p.key] ?? 0}</div>
@@ -4045,7 +4252,8 @@ function AdminPortal({
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      transition={{ delay: i * 0.03, duration: 0.2 }}
+                      transition={{ delay: Math.min(i * 0.01, 0.15), duration: 0.15, ease: "easeOut" }}
+                      style={{ willChange: i < 10 ? "transform" : "auto" }}
                     >
                       <div className="text-sm">
                         <div className="font-medium">{t.memo || "Credit"}</div>
@@ -4112,7 +4320,8 @@ function AdminPortal({
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 10 }}
-                        transition={{ delay: i * 0.03, duration: 0.2 }}
+                        transition={{ delay: Math.min(i * 0.01, 0.15), duration: 0.15, ease: "easeOut" }}
+                      style={{ willChange: i < 10 ? "transform" : "auto" }}
                       >
                         <div className="text-sm">
                           <div>{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
@@ -4157,7 +4366,8 @@ function AdminPortal({
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      transition={{ delay: i * 0.03, duration: 0.2 }}
+                      transition={{ delay: Math.min(i * 0.01, 0.15), duration: 0.15, ease: "easeOut" }}
+                      style={{ willChange: i < 10 ? "transform" : "auto" }}
                     >
                       <div className="text-sm">
                         <div className="font-medium">{t.memo}</div>
@@ -4920,10 +5130,11 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
             <motion.div 
               key={n.id} 
               className="text-sm border rounded-xl px-3 py-2"
-              initial={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.03, duration: 0.3 }}
+              transition={{ delay: Math.min(i * 0.01, 0.2), duration: 0.2, ease: "easeOut" }}
               whileHover={{ scale: 1.01, x: 4 }}
+              style={{ willChange: i < 10 ? "transform" : "auto" }}
             >
               <div>{n.text}</div>
               <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
