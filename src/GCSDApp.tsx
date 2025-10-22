@@ -2741,6 +2741,123 @@ export default function GCSDApp() {
     haptic([50, 30, 50]);
   }
   
+  // Emergency: Clear all KV storage and reset to fresh state
+  async function emergencyReset() {
+    const confirmed = confirm("⚠️ EMERGENCY RESET\n\nThis will:\n- Clear ALL corrupted data\n- Create fresh accounts for all agents\n- Reset vault to 8000 GCSD\n- LOSE all transaction history\n\nType 'RESET' to confirm");
+    if (!confirmed) return;
+    
+    try {
+      // Clear all KV storage
+      await kvSet("gcs-v4-core", null);
+      await kvSet("gcs-v4-stock", null);
+      await kvSet("gcs-v4-pins", null);
+      await kvSet("gcs-v4-goals", null);
+      await kvSet("gcs-v4-notifs", null);
+      await kvSet("gcs-v4-admin-notifs", null);
+      await kvSet("gcs-v4-redeem-requests", null);
+      await kvSet("gcs-v4-audit-logs", null);
+      await kvSet("gcs-v4-wishlist", null);
+      await kvSet("gcs-v4-epochs", null);
+      await kvSet("gcs-v4-metrics", null);
+      await kvSet("gcs-v4-backups", null);
+      
+      // Create fresh data
+      const freshAccounts: Account[] = [
+        { id: uid(), name: "Bank Vault", role: "system" },
+        ...AGENT_NAMES.map(n => ({ id: uid(), name: n, role: "agent" as const })),
+      ];
+      
+      const vaultId = freshAccounts[0].id;
+      const freshTxns: Transaction[] = [
+        { id: uid(), kind: "credit", amount: 8000, memo: "Mint", dateISO: nowISO(), toId: vaultId },
+      ];
+      
+      // Save fresh data
+      await kvSet("gcs-v4-core", { accounts: freshAccounts, txns: freshTxns });
+      await kvSet("gcs-v4-stock", INITIAL_STOCK);
+      
+      // Update state
+      setAccounts(freshAccounts);
+      setTxns(freshTxns);
+      setStock(INITIAL_STOCK);
+      setPins({});
+      setGoals({});
+      setNotifs([]);
+      setAdminNotifs([]);
+      setRedeemRequests([]);
+      setAuditLogs([]);
+      setWishlist({});
+      setEpochs({});
+      setMetrics({});
+      setBackups([]);
+      
+      toast.success("✅ Emergency reset complete! All data restored to fresh state");
+      haptic([100, 50, 100]);
+      confettiBurst();
+    } catch (error) {
+      console.error("Emergency reset failed:", error);
+      toast.error("❌ Reset failed");
+    }
+  }
+  
+  // Import backup from JSON file
+  async function importBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      const text = await file.text();
+      const backupData = JSON.parse(text);
+      
+      // Validate backup data
+      if (!backupData.accounts || !backupData.transactions) {
+        toast.error("❌ Invalid backup file format");
+        return;
+      }
+      
+      // Restore all data from backup
+      const restoredAccounts = backupData.accounts;
+      const restoredTxns = backupData.transactions;
+      
+      setAccounts(restoredAccounts);
+      setTxns(restoredTxns);
+      setStock(backupData.stock || INITIAL_STOCK);
+      setPins(backupData.pins || {});
+      setGoals(backupData.goals || {});
+      setNotifs(backupData.notifications || []);
+      setAdminNotifs(backupData.adminNotifications || []);
+      setRedeemRequests(backupData.redeemRequests || []);
+      setAuditLogs(backupData.auditLogs || []);
+      setWishlist(backupData.wishlist || {});
+      setEpochs(backupData.epochs || {});
+      setMetrics(backupData.metrics || {});
+      
+      // Save to KV storage
+      await kvSet("gcs-v4-core", { accounts: restoredAccounts, txns: restoredTxns });
+      await kvSet("gcs-v4-stock", backupData.stock || INITIAL_STOCK);
+      await kvSet("gcs-v4-pins", backupData.pins || {});
+      await kvSet("gcs-v4-goals", backupData.goals || {});
+      await kvSet("gcs-v4-notifs", backupData.notifications || []);
+      await kvSet("gcs-v4-admin-notifs", backupData.adminNotifications || []);
+      await kvSet("gcs-v4-redeem-requests", backupData.redeemRequests || []);
+      await kvSet("gcs-v4-audit-logs", backupData.auditLogs || []);
+      await kvSet("gcs-v4-wishlist", backupData.wishlist || {});
+      await kvSet("gcs-v4-epochs", backupData.epochs || {});
+      await kvSet("gcs-v4-metrics", backupData.metrics || {});
+      
+      logAudit("Backup Imported", `Restored from file: ${file.name} (${backupData.timestamp || 'unknown date'})`);
+      toast.success("✅ Backup restored successfully!");
+      haptic([100, 50, 100, 50, 100]);
+      confettiBurst();
+      
+      // Clear the file input
+      event.target.value = '';
+    } catch (error) {
+      console.error("Import failed:", error);
+      toast.error("❌ Failed to import backup - invalid file");
+    }
+  }
+  
   async function backupAllData(){
     console.log("backupAllData called");
     
