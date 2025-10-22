@@ -2108,7 +2108,19 @@ export default function GCSDApp() {
           setTxns(seedTxns);
           await kvSet("gcs-v4-core", { accounts: seedAccounts, txns: seedTxns });
         }
-        setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
+        const savedStock = await kvGet<Record<string, number>>("gcs-v4-stock");
+        if (!savedStock) {
+          setStock(INITIAL_STOCK);
+        } else {
+          // Check if all stock values are 0 (corrupted state)
+          const allZero = Object.values(savedStock).every(val => val === 0);
+          if (allZero) {
+            setStock(INITIAL_STOCK);
+            await kvSet("gcs-v4-stock", INITIAL_STOCK);
+          } else {
+            setStock(savedStock);
+          }
+        }
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         // Load notifications from KV storage instead of starting empty
@@ -4343,12 +4355,26 @@ function AgentPortal({
             transition={{ duration: 0.2 }}
           >
       {/* Milestone Alerts */}
-      {(() => {
-        const rank = Array.from(new Map(txns.reduce((map, t) => {
-          if (t.kind === 'credit' && t.toId) map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
-          if (t.kind === 'debit' && t.fromId) map.set(t.fromId, (map.get(t.fromId) || 0) - t.amount);
-          return map;
-        }, new Map<string, number>())).entries())
+      {useMemo(() => {
+        // Calculate rank including ALL agents (even those with 0 balance)
+        const agentBalances = new Map<string, number>();
+        
+        // Initialize all agents with 0 balance
+        accounts.filter(a => a.role === 'agent').forEach(a => {
+          agentBalances.set(a.id, 0);
+        });
+        
+        // Add transaction amounts
+        txns.forEach(t => {
+          if (t.kind === 'credit' && t.toId) {
+            agentBalances.set(t.toId, (agentBalances.get(t.toId) || 0) + t.amount);
+          }
+          if (t.kind === 'debit' && t.fromId) {
+            agentBalances.set(t.fromId, (agentBalances.get(t.fromId) || 0) - t.amount);
+          }
+        });
+        
+        const rank = Array.from(agentBalances.entries())
           .sort(([, a], [, b]) => b - a)
           .findIndex(([id]) => id === agentId) + 1;
         
@@ -4394,7 +4420,7 @@ function AgentPortal({
             ))}
           </motion.div>
         );
-      })()}
+      }, [agentId, balance, goal, accounts, txns])}
       
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Summary */}
@@ -4520,7 +4546,7 @@ function AgentPortal({
               <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
               
               {/* Goal Suggestions */}
-              {goal === 0 && (() => {
+              {goal === 0 && useMemo(() => {
                 const suggestions = suggestGoal(agentId, txns);
                 return (
                   <div className="mt-3 p-3 rounded-lg bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
@@ -4566,12 +4592,12 @@ function AgentPortal({
                     <div className="text-xs opacity-60 mt-2">Based on your 30-day average</div>
                   </div>
                 );
-              })()}
+              }, [agentId, txns, goal])}
               
               {goal > 0 && (
                 <>
                   {/* Goal Difficulty Indicator */}
-                  {(() => {
+                  {useMemo(() => {
                     const difficulty = assessGoalDifficulty(goal, agentId, txns);
                     return (
                       <div className="mt-3 p-3 rounded-lg bg-black/5 dark:bg-white/5 border">
@@ -4592,7 +4618,7 @@ function AgentPortal({
                         )}
                       </div>
                     );
-                  })()}
+                  }, [goal, agentId, txns])}
                   
                   <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
                   <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
@@ -5559,7 +5585,7 @@ function AdminPortal({
           </div>
 
           {/* Sales Forecasting Card */}
-          {(() => {
+          {useMemo(() => {
             const forecast = calculateSalesForecast(txns, accounts);
             return (
               <motion.div
@@ -5630,10 +5656,10 @@ function AdminPortal({
                 </div>
               </motion.div>
             );
-          })()}
+          }, [txns, accounts, theme])}
 
           {/* Inactivity Alerts */}
-          {(() => {
+          {useMemo(() => {
             const inactiveAgents = accounts
               .filter(a => a.role === 'agent')
               .map(a => ({ ...a, inactivity: checkInactivity(a.id, txns) }))
@@ -5673,7 +5699,7 @@ function AdminPortal({
                 </div>
               </motion.div>
             );
-          })()}
+          }, [accounts, txns, theme])}
 
           {/* Agent Balances with Freeze Controls */}
           <div className="grid md:grid-cols-3 gap-4">
@@ -6894,17 +6920,19 @@ function Picker({
             <div className="text-xs opacity-70 mt-1">PIN required</div>
           </HoverCard>
 
-          {accounts
-            .filter((a) => a.role !== "system")
-            .map((a, index) => (
-              <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={0}>
-                <div className="flex items-center gap-2 mb-1">
-                  <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
-                  <div className="font-medium flex-1 truncate">{a.name}</div>
-                </div>
-                <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
-              </HoverCard>
-            ))}
+          {useMemo(() => 
+            accounts
+              .filter((a) => a.role !== "system")
+              .map((a, index) => (
+                <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={0}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
+                    <div className="font-medium flex-1 truncate">{a.name}</div>
+                  </div>
+                  <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
+                </HoverCard>
+              )), [accounts, balances, theme, onChooseAgent]
+          )}
         </div>
       </motion.div>
     </motion.div>
