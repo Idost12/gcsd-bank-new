@@ -3419,6 +3419,8 @@ export default function GCSDApp() {
                 onApproveRedeem={approveRedeem}
                 onRejectRedeem={rejectRedeem}
                 onCleanupDuplicates={cleanupDuplicates}
+                onEmergencyReset={emergencyReset}
+                onImportBackup={importBackup}
                 backups={backups}
                 autoBackupEnabled={autoBackupEnabled}
                 onToggleAutoBackup={() => setAutoBackupEnabled(prev => !prev)}
