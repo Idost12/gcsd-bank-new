@@ -28,7 +28,7 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean; avatar?: string };
+type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
@@ -36,19 +36,6 @@ type AdminNotification = { id: string; when: string; type: "credit"|"debit"|"red
 type RedeemRequest = { id: string; agentId: string; agentName: string; prizeKey: string; prizeLabel: string; price: number; when: string; agentPinVerified: boolean };
 type AuditLog = { id: string; when: string; adminName: string; action: string; details: string; agentName?: string; amount?: number };
 type Wishlist = Record<string, string[]>; // agentId -> array of prizeKeys
-type Backup = { 
-  id: string; 
-  timestamp: string; 
-  label: string;
-  data: { 
-    accounts: Account[]; 
-    txns: Transaction[]; 
-    stock: Record<string, number>;
-    pins: Record<string, string>;
-    goals: Record<string, number>;
-    wishlist: Wishlist;
-  }; 
-};
 
 /** Metric reset epochs (admin control) */
 type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
@@ -114,45 +101,33 @@ const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
-// Haptic feedback helper - more comprehensive
-const haptic = (pattern: number | number[] = 30) => {
-  if ('vibrate' in navigator) {
-    if (Array.isArray(pattern)) {
-      navigator.vibrate(pattern);
-    } else {
-      navigator.vibrate(pattern);
-    }
+// merge transactions by id (prevents realtime from overwriting local adds)
+function mergeTxns(local: Transaction[], remote: Transaction[]) {
+  const map = new Map<string, Transaction>();
+  for (const t of remote) map.set(t.id, t);
+  for (const t of local) map.set(t.id, t); // local wins on conflict
+  const all = Array.from(map.values());
+  all.sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
+  return all;
+}
+function mergeAccounts(local: Account[], remote: Account[]) {
+  const map = new Map<string, Account>();
+  // Remote takes precedence to avoid duplication
+  for (const a of remote) map.set(a.id, a);
+  // Only add local accounts that don't exist remotely
+  for (const a of local) {
+    if (!map.has(a.id)) map.set(a.id, a);
   }
-};
+  return Array.from(map.values());
+}
 
-// Push notification helper
-const sendPushNotification = async (title: string, body: string, icon?: string) => {
-  if (!("Notification" in window)) {
-    console.log("This browser does not support notifications");
-    return;
-  }
-
-  if (Notification.permission === "granted") {
-    new Notification(title, {
-      body,
-      icon: icon || LOGO_URL,
-      badge: LOGO_URL,
-      tag: uid(),
-      requireInteraction: false,
-      silent: false
-    });
-  } else if (Notification.permission !== "denied") {
-    const permission = await Notification.requestPermission();
-    if (permission === "granted") {
-      new Notification(title, {
-        body,
-        icon: icon || LOGO_URL,
-        badge: LOGO_URL
-      });
-    }
-  }
-};
-
+// Helper to check if accounts are the same (by name and role)
+function accountsAreEqual(a1: Account[], a2: Account[]): boolean {
+  if (a1.length !== a2.length) return false;
+  const names1 = a1.map(a => `${a.name}-${a.role}`).sort();
+  const names2 = a2.map(a => `${a.name}-${a.role}`).sort();
+  return names1.join(',') === names2.join(',');
+}
 
 /** Compute balances map for all accounts - properly handles reversals and allows negative balances */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
@@ -274,11 +249,10 @@ function TileRow({ label, value }: { label: string; value: number }) {
   return (
     <motion.div 
       className="rounded-xl border p-3"
-      initial={{ opacity: 0, scale: 0.95 }}
+      initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      transition={{ duration: 0.3 }}
       whileHover={{ scale: 1.02, y: -2 }}
-      style={{ willChange: "transform" }}
     >
       <div className="text-xs opacity-70 mb-1">{label}</div>
       <div className="text-2xl font-semibold"><NumberFlash value={value} /></div>
@@ -286,25 +260,39 @@ function TileRow({ label, value }: { label: string; value: number }) {
   );
 }
 function NumberFlash({ value }:{ value:number }) {
-  const prevValue = useRef(value);
-  const [isAnimating, setIsAnimating] = useState(false);
+  const [displayValue, setDisplayValue] = useState(value);
   
   useEffect(() => {
-    if (prevValue.current !== value) {
-      setIsAnimating(true);
-      const timer = setTimeout(() => setIsAnimating(false), 300);
-      prevValue.current = value;
-      return () => clearTimeout(timer);
+    // Smooth number transition
+    const diff = value - displayValue;
+    if (Math.abs(diff) < 1) {
+      setDisplayValue(value);
+      return;
     }
+    
+    const step = diff / 10;
+    const timer = setInterval(() => {
+      setDisplayValue(prev => {
+        const next = prev + step;
+        if (Math.abs(value - next) < Math.abs(step)) {
+          clearInterval(timer);
+          return value;
+        }
+        return next;
+      });
+    }, 30);
+    
+    return () => clearInterval(timer);
   }, [value]);
   
   return (
     <motion.span
-      animate={isAnimating ? { scale: [1, 1.05, 1] } : { scale: 1 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      style={{ display: "inline-block" }}
+      key={value}
+      initial={{ scale: 1 }}
+      animate={{ scale: [1, 1.05, 1] }}
+      transition={{ duration: 0.3 }}
     >
-      {value.toLocaleString()} GCSD
+      {Math.round(displayValue).toLocaleString()} GCSD
     </motion.span>
   );
 }
@@ -330,38 +318,35 @@ function classNames(...x: (string | false | undefined | null)[]) {
 
 /** Liquid Glass containers/buttons/inputs with theme awareness */
 const neonBox = (theme: Theme) =>
-  theme === "neon" 
-    ? "glass-card rounded-xl text-orange-100 neon-theme" 
-    : "glass-card rounded-xl text-slate-800 dark:text-slate-100";
+  "glass-card rounded-xl text-slate-800 dark:text-slate-100";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
-  theme === "neon"
-    ? "glass-btn rounded-xl px-4 py-2 font-medium text-orange-100 neon-theme transition-all"
-    : solid
+  solid
     ? "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all"
     : "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all";
 
 const inputCls = (theme: Theme) =>
-  theme === "neon"
-    ? "glass border-none rounded-xl px-4 py-2.5 w-full text-orange-100 placeholder-orange-200/60 focus:ring-2 focus:ring-orange-400/50 transition-all neon-theme"
-    : "glass border-none rounded-xl px-4 py-2.5 w-full text-slate-900 dark:text-white placeholder-slate-600 dark:placeholder-slate-300 focus:ring-2 focus:ring-blue-400/50 dark:focus:ring-purple-500/50 transition-all";
+  "glass border-none rounded-xl px-4 py-2.5 w-full text-slate-900 dark:text-white placeholder-slate-600 dark:placeholder-slate-300 focus:ring-2 focus:ring-blue-400/50 dark:focus:ring-purple-500/50 transition-all";
 
 function TypeLabel({ text }: { text: string }) {
   return (
-    <motion.div 
-      aria-label={text} 
-      className="text-2xl font-semibold"
+    <div aria-label={text} className="text-2xl font-semibold">
+      {text.split("").map((ch, i) => (
+        <motion.span
+          key={i}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
-    >
-      {text}
-    </motion.div>
+          transition={{ delay: i * 0.05, duration: 0.2 }}
+        >
+          {ch}
+        </motion.span>
+      ))}
+    </div>
   );
 }
 
-/* Avatar Component with Initials or Custom Image */
-function Avatar({ name, size = "md", theme, avatarUrl }: { name: string; size?: "sm" | "md" | "lg"; theme?: Theme; avatarUrl?: string }) {
+/* Avatar Component with Initials */
+function Avatar({ name, size = "md", theme }: { name: string; size?: "sm" | "md" | "lg"; theme?: Theme }) {
   const getInitials = (fullName: string) => {
     const parts = fullName.trim().split(/\s+/);
     if (parts.length >= 2) {
@@ -391,18 +376,13 @@ function Avatar({ name, size = "md", theme, avatarUrl }: { name: string; size?: 
 
   return (
     <motion.div
-      className={`${sizeClasses[size]} rounded-full ${!avatarUrl ? `bg-gradient-to-br ${colors[colorIndex]}` : 'bg-gray-200'} flex items-center justify-center font-bold text-white shadow-lg ring-2 ring-white/30 overflow-hidden`}
-      initial={{ scale: 0.8, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 0.15, ease: "easeOut" }}
-      whileHover={{ scale: 1.08 }}
-      style={{ willChange: "auto" }}
+      className={`${sizeClasses[size]} rounded-full bg-gradient-to-br ${colors[colorIndex]} flex items-center justify-center font-bold text-white shadow-lg ring-2 ring-white/30`}
+      initial={{ scale: 0, rotate: -180 }}
+      animate={{ scale: 1, rotate: 0 }}
+      transition={{ type: "spring", stiffness: 200, damping: 15 }}
+      whileHover={{ scale: 1.1, rotate: 5 }}
     >
-      {avatarUrl ? (
-        <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
-      ) : (
-        getInitials(name)
-      )}
+      {getInitials(name)}
     </motion.div>
   );
 }
@@ -472,17 +452,22 @@ function MilestonesCard({ balance, earned, txns, agentId, theme }: {
           <motion.div
             key={milestone.id}
             className={`glass-card rounded-xl p-3 bg-gradient-to-br ${tierColors[milestone.tier]} relative overflow-hidden`}
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
+            initial={{ scale: 0, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ delay: i * 0.05, type: "spring", stiffness: 200 }}
             whileHover={{ scale: 1.05, y: -2 }}
-            style={{ willChange: "auto" }}
           >
             <div className="text-3xl mb-1">{milestone.emoji}</div>
             <div className="text-xs font-semibold text-white drop-shadow-lg">{milestone.title}</div>
             <div className="text-[10px] text-white/80 line-clamp-1">{milestone.description}</div>
             
-            {/* Shine effect - disabled for better performance */}
+            {/* Shine effect */}
+            <motion.div
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+              initial={{ x: "-100%" }}
+              animate={{ x: "200%" }}
+              transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+            />
           </motion.div>
         ))}
       </div>
@@ -540,7 +525,6 @@ function RaceToRedeemBoard({
       .filter(a => a.role === "agent")
       .map(a => ({
         name: a.name,
-        avatar: a.avatar,
         balance: balances.get(a.id) || 0,
         progress: Math.min(100, Math.round(((balances.get(a.id) || 0) / prize.price) * 100)),
         remaining: Math.max(0, prize.price - (balances.get(a.id) || 0))
@@ -686,7 +670,7 @@ function RaceToRedeemBoard({
                           </div>
 
                           {/* Avatar */}
-                          <Avatar name={racer.name} size="sm" theme={theme} avatarUrl={racer.avatar} />
+                          <Avatar name={racer.name} size="sm" theme={theme} />
 
                           {/* Info */}
                           <div className="flex-1 min-w-0">
@@ -767,7 +751,7 @@ function getBadge(position: number, balance: number): { emoji: string; title: st
   return null;
 }
 
-function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number; avatar?: string; bio?: string }>; theme: Theme }) {
+function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: string; balance: number }>; theme: Theme }) {
   if (leaderboard.length === 0) return <div className="text-center text-sm opacity-60">No data yet</div>;
 
   const top3 = leaderboard.slice(0, 3);
@@ -792,7 +776,7 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
           >
             {/* Avatar with Medal Badge */}
             <div className="relative mb-2">
-              <Avatar name={agent.name} size={position === 1 ? "lg" : "md"} theme={theme} avatarUrl={agent.avatar} />
+              <Avatar name={agent.name} size={position === 1 ? "lg" : "md"} theme={theme} />
             <motion.div 
                 className="absolute -top-1 -right-1 text-2xl"
               animate={position === 1 ? { 
@@ -1073,7 +1057,9 @@ function NotificationsBell({ theme, unread, onOpenFeed }: { theme: Theme; unread
 function HoverCard({ children, onClick, delay = 0, theme }: { children: React.ReactNode; onClick: () => void; delay?: number; theme: Theme }) {
   const handleClick = () => {
     // Haptic feedback for mobile
-    haptic(40);
+    if ('vibrate' in navigator) {
+      navigator.vibrate(30);
+    }
     onClick();
   };
 
@@ -1081,13 +1067,16 @@ function HoverCard({ children, onClick, delay = 0, theme }: { children: React.Re
     <motion.button 
       onClick={handleClick} 
       className={classNames("border rounded-2xl px-3 py-3 text-left haptic-feedback", neonBox(theme))}
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.12, ease: "easeOut" }}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -5 }}
+      transition={{ 
+        duration: 0.2, 
+        delay: delay,
+        ease: "easeOut"
+      }}
       whileHover={{ scale: 1.03, y: -2 }}
       whileTap={{ scale: 0.97 }}
-      style={{ willChange: "auto" }}
     >
       {children}
     </motion.button>
@@ -1101,10 +1090,7 @@ function FancySelect({ value, onChange, children, theme, placeholder }: { value:
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={classNames(
-          "appearance-none w-full px-3 py-2.5 pr-8 rounded-xl focus:outline-none focus:ring-2 bg-transparent",
-          theme === "neon" ? "text-orange-100 focus:ring-orange-400/50" : "text-slate-900 dark:text-white focus:ring-blue-400/50 dark:focus:ring-purple-500/50"
-        )}
+        className="appearance-none w-full px-3 py-2.5 pr-8 rounded-xl focus:outline-none focus:ring-2 bg-transparent text-slate-900 dark:text-white focus:ring-blue-400/50 dark:focus:ring-purple-500/50"
         style={theme === "neon" || document.documentElement.classList.contains("dark") ? { colorScheme: "dark" } : {}}
       >
         {placeholder && <option value="">{placeholder}</option>}
@@ -1123,30 +1109,19 @@ function PinModal({ open, onClose, onCheck, theme }: { open: boolean; onClose: (
 }
 
 /* Meme Generator Modal */
-function MemeModal({ 
-  open, 
-  agentName, 
-  onClose, 
-  theme, 
-  initialData,
-  onSave,
-  readOnly = false
-}: { 
-  open: boolean; 
-  agentName: string; 
-  onClose: () => void; 
-  theme: Theme;
-  initialData?: { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number };
-  onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null; textColor: string; fontSize: number }) => void;
-  readOnly?: boolean;
-}) {
-  const [topText, setTopText] = useState(initialData?.topText || "");
-  const [bottomText, setBottomText] = useState(initialData?.bottomText || "");
-  const [uploadedImage, setUploadedImage] = useState<string | null>(initialData?.uploadedImage || null);
+function MemeModal({ open, agentName, onClose, theme }: { open: boolean; agentName: string; onClose: () => void; theme: Theme }) {
+  const [topText, setTopText] = useState("");
+  const [bottomText, setBottomText] = useState("");
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
-  const [textColor, setTextColor] = useState(initialData?.textColor || "#ffffff");
-  const [fontSize, setFontSize] = useState(initialData?.fontSize || 48);
+  
+  const templates = [
+    { key: "success", label: "Success Kid", emoji: "😎" },
+    { key: "drake", label: "Drake Meme", emoji: "🦆" },
+    { key: "thinking", label: "Thinking", emoji: "🤔" },
+    { key: "stonks", label: "Stonks", emoji: "📈" },
+    { key: "celebration", label: "Celebration", emoji: "🎉" }
+  ];
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1163,25 +1138,6 @@ function MemeModal({
       };
       reader.readAsDataURL(file);
     }
-  };
-
-  const handleCloseAttempt = () => {
-    setShowCloseConfirm(true);
-  };
-
-  const confirmClose = () => {
-    // Auto-save the meme before closing
-    if (onSave && !readOnly) {
-      onSave({
-        topText,
-        bottomText,
-        uploadedImage,
-        textColor,
-        fontSize
-      });
-    }
-    setShowCloseConfirm(false);
-    onClose();
   };
 
   const downloadMemeAsJPEG = () => {
@@ -1227,22 +1183,22 @@ function MemeModal({
 
   const addTextToCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     // Configure text style
-    ctx.fillStyle = textColor;
+    ctx.fillStyle = 'white';
     ctx.strokeStyle = 'black';
-    ctx.lineWidth = Math.max(3, fontSize / 12);
+    ctx.lineWidth = 4;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     // Top text
     if (topText) {
-      ctx.font = `bold ${fontSize}px Arial`;
+      ctx.font = 'bold 48px Arial';
       ctx.strokeText(topText.toUpperCase(), canvas.width / 2, 100);
       ctx.fillText(topText.toUpperCase(), canvas.width / 2, 100);
     }
 
     // Bottom text
     if (bottomText) {
-      ctx.font = `bold ${fontSize}px Arial`;
+      ctx.font = 'bold 48px Arial';
       ctx.strokeText(bottomText.toUpperCase(), canvas.width / 2, canvas.height - 100);
       ctx.fillText(bottomText.toUpperCase(), canvas.width / 2, canvas.height - 100);
     }
@@ -1255,11 +1211,7 @@ function MemeModal({
     link.click();
     
     toast.success(`🎉 Meme downloaded! "${topText || 'Top Text'}" / "${bottomText || 'Bottom Text'}"`);
-    
-    // Save meme data when downloading (only if not read-only)
-    if (onSave && !readOnly) {
-      onSave({ topText, bottomText, uploadedImage, textColor, fontSize });
-    }
+    onClose();
   };
 
   if (!open) return null;
@@ -1272,6 +1224,7 @@ function MemeModal({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        onClick={onClose}
       >
         <motion.div 
           className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-[min(600px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
@@ -1281,20 +1234,15 @@ function MemeModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">{readOnly ? "👁️ View Meme" : "🎨 Meme Generator"}</h2>
-            <button onClick={readOnly ? onClose : handleCloseAttempt} className="text-2xl opacity-60 hover:opacity-100">×</button>
+            <h2 className="text-2xl font-bold">🎨 Meme Generator</h2>
+            <button onClick={onClose} className="text-2xl opacity-60 hover:opacity-100">×</button>
           </div>
           
           <div className="text-sm opacity-70 mb-4">
-            {readOnly 
-              ? `Your meme, ${agentName}! Download it anytime. 🎉` 
-              : initialData 
-                ? `View or download your meme, ${agentName}! 🎉` 
-                : `Congrats ${agentName}! Create your custom meme! 🎉`}
+            Congrats {agentName}! Create your custom meme! 🎉
           </div>
 
-          {/* Image Upload - disabled in read-only mode */}
-          {!readOnly && (
+          {/* Image Upload */}
           <div className="mb-4">
             <label className="text-sm font-semibold mb-2 block">Upload Image (Optional):</label>
             <div className="relative">
@@ -1329,7 +1277,6 @@ function MemeModal({
               </label>
             </div>
           </div>
-          )}
 
           {/* Meme Preview */}
           <div className="relative rounded-xl aspect-square mb-4 flex flex-col justify-between p-6 text-white font-bold text-center shadow-xl overflow-hidden">
@@ -1346,33 +1293,18 @@ function MemeModal({
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500 to-pink-500"></div>
             )}
             
-            <div 
-              className="relative z-10 drop-shadow-lg" 
-              style={{ 
-                textShadow: "2px 2px 4px rgba(0,0,0,0.8)", 
-                fontSize: `${fontSize * 0.625}px`,
-                color: textColor
-              }}
-            >
+            <div className="relative z-10 text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
               {topText || "TOP TEXT"}
             </div>
-            <div className="relative z-10">
-              {/* Emoji removed for cleaner memes */}
+            <div className="relative z-10 text-6xl">
+              {uploadedImage ? "🎨" : (templates.find(t => t.key === "success")?.emoji || "😎")}
             </div>
-            <div 
-              className="relative z-10 drop-shadow-lg" 
-              style={{ 
-                textShadow: "2px 2px 4px rgba(0,0,0,0.8)", 
-                fontSize: `${fontSize * 0.625}px`,
-                color: textColor
-              }}
-            >
+            <div className="relative z-10 text-3xl drop-shadow-lg" style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}>
               {bottomText || "BOTTOM TEXT"}
             </div>
           </div>
 
-          {/* Text Inputs - disabled in read-only mode */}
-          {!readOnly && (
+          {/* Text Inputs */}
           <div className="space-y-3 mb-4">
             <div>
               <label className="text-sm font-semibold mb-1 block">Top Text:</label>
@@ -1395,171 +1327,29 @@ function MemeModal({
                 className={inputCls(theme)}
                 maxLength={40}
               />
-              </div>
-              
-              {/* Text Customization */}
-              <div className="space-y-3">
-                <div>
-                  <label className="text-sm font-semibold mb-2 block">🎨 Text Color:</label>
-                  <div className="flex gap-2 items-center">
-                    <input 
-                      type="color"
-                      value={textColor}
-                      onChange={(e) => setTextColor(e.target.value)}
-                      className="w-14 h-14 rounded-xl cursor-pointer border-2 border-white/30"
-                      title="Custom color picker"
-                    />
-                    <div className="flex gap-2 flex-wrap flex-1">
-                      {[
-                        { color: '#ffffff', name: 'White' },
-                        { color: '#000000', name: 'Black' },
-                        { color: '#ffff00', name: 'Yellow' },
-                        { color: '#ff00ff', name: 'Magenta' },
-                        { color: '#00ffff', name: 'Cyan' },
-                        { color: '#ff0000', name: 'Red' },
-                        { color: '#00ff00', name: 'Green' },
-                        { color: '#0000ff', name: 'Blue' },
-                        { color: '#ffa500', name: 'Orange' },
-                      ].map(({ color, name }) => (
-                        <motion.button
-                          key={color}
-                          onClick={() => setTextColor(color)}
-                          className={classNames(
-                            "w-10 h-10 rounded-lg border-2 transition-all",
-                            textColor === color ? "border-purple-500 scale-110 ring-2 ring-purple-400" : "border-white/30"
-                          )}
-                          style={{ backgroundColor: color }}
-                          title={name}
-                          whileHover={{ scale: 1.15 }}
-                          whileTap={{ scale: 0.95 }}
-                        />
-                      ))}
-                    </div>
             </div>
           </div>
-                
-                <div>
-                  <label className="text-sm font-semibold mb-2 block">📏 Font Size: {fontSize}px</label>
-                  <input 
-                    type="range"
-                    min="24"
-                    max="80"
-                    value={fontSize}
-                    onChange={(e) => setFontSize(Number(e.target.value))}
-                    className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-                    style={{
-                      background: `linear-gradient(to right, #8B5CF6 0%, #EC4899 100%)`
-                    }}
-                  />
-                  <div className="flex justify-between text-xs opacity-60 mt-1">
-                    <span>24px</span>
-                    <span>52px</span>
-                    <span>80px</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Actions */}
           <div className="flex gap-3">
-            {!readOnly && (
             <motion.button
-                className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600")}
-                onClick={() => {
-                  // Save the meme data first
-                  if (onSave) {
-                    onSave({
-                      topText,
-                      bottomText,
-                      uploadedImage,
-                      textColor,
-                      fontSize
-                    });
-                    toast.success("✅ Meme saved successfully!");
-                    haptic([30, 20, 30]);
-                  }
-                  // Then close
-                  onClose();
-                }}
+              className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
+              onClick={downloadMemeAsJPEG}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-                💾 Save & Close
+              📥 Download as JPEG
             </motion.button>
-            )}
             <motion.button
-              className={classNames(readOnly ? "flex-1" : "", "px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
-              onClick={() => {
-                // Auto-save when downloading (if creating new meme)
-                if (onSave && !readOnly) {
-                  onSave({
-                    topText,
-                    bottomText,
-                    uploadedImage,
-                    textColor,
-                    fontSize
-                  });
-                }
-                downloadMemeAsJPEG();
-              }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              📥 Download {readOnly ? "Meme" : "JPEG"}
-            </motion.button>
-            {readOnly && (
-            <motion.button
-                className={classNames("px-4 py-3 rounded-xl font-semibold", neonBtn(theme))}
+              className="px-4 py-3 rounded-xl opacity-60 hover:opacity-100"
               onClick={onClose}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                Close
-              </motion.button>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Close Confirmation Dialog */}
-        {showCloseConfirm && (
-          <motion.div
-            className="absolute inset-0 flex items-center justify-center z-10"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            <motion.div
-              className={classNames("glass-card rounded-2xl shadow-2xl p-6 max-w-md mx-4", neonBox(theme))}
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-            >
-              <h3 className="text-xl font-bold mb-3">Close Meme Generator?</h3>
-              <p className="text-sm opacity-70 mb-4">
-                {readOnly 
-                  ? "Are you sure you want to exit?" 
-                  : "Your meme will be auto-saved. You can view and download it anytime from My Purchases!"}
-              </p>
-              <div className="flex gap-3">
-                <motion.button
-                  className={classNames("flex-1 px-4 py-2 rounded-xl", neonBtn(theme, true))}
-                  onClick={() => setShowCloseConfirm(false)}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
               Cancel
             </motion.button>
-                <motion.button
-                  className="flex-1 px-4 py-2 rounded-xl bg-red-500 text-white font-semibold"
-                  onClick={confirmClose}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  Yes, Exit
-            </motion.button>
           </div>
         </motion.div>
-          </motion.div>
-        )}
       </motion.div>
     </AnimatePresence>
   );
@@ -1691,30 +1481,14 @@ export default function GCSDApp() {
   const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
   // Sandbox state removed
-  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number; buyerId:string} | null>(null);
-  const [memeModal, setMemeModal] = useState<{
-    open: boolean; 
-    agentName: string; 
-    initialData?: { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number };
-    onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null; textColor: string; fontSize: number }) => void;
-    readOnly?: boolean;
-  } | null>(null);
+  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
+  const [memeModal, setMemeModal] = useState<{open: boolean; agentName: string} | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
-  const [epochs, setEpochs] = useState<Record<string,string>>({}); // for "erase history from" timestamps
+  const [epochs, setEpochs] = useState<Record<string,string>>({}); // for “erase history from” timestamps
 
   /** metric epochs */
   const [metrics, setMetrics] = useState<MetricsEpoch>({});
-  
-  /** notification permission */
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [showNotifBanner, setShowNotifBanner] = useState(false);
-  
-  /** backup system */
-  const [backups, setBackups] = useState<Backup[]>([]);
-  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
-  const [lastAutoBackup, setLastAutoBackup] = useState<string>("");
-  
 
   // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
@@ -1730,16 +1504,43 @@ export default function GCSDApp() {
     (async () => {
       try {
         const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>("gcs-v4-core");
-        
-        console.log("📦 Loading data from storage...", core);
-        
-        // Check if we have valid data
-        if (core?.accounts && Array.isArray(core.accounts) && core.accounts.length > 0 && core?.txns && Array.isArray(core.txns)) {
-          console.log("✅ Found valid data:", core.accounts.length, "accounts,", core.txns.length, "transactions");
-          setAccounts(core.accounts);
+        if (core?.accounts && core?.txns) {
+          // Clean up duplicates and ensure only valid agents exist
+          const vault = core.accounts.find(a => a.role === "system") || seedAccounts[0];
+          const existingAgents = core.accounts.filter(a => a.role === "agent");
+          
+          // Remove duplicates and only keep agents from AGENT_NAMES
+          const cleanedAgents: Account[] = [];
+          const seenNames = new Set<string>();
+          
+          // First, keep existing agents that are in AGENT_NAMES (no duplicates)
+          for (const agent of existingAgents) {
+            const normalizedName = agent.name.trim().toLowerCase();
+            if (AGENT_NAMES.some(n => n.toLowerCase() === normalizedName) && !seenNames.has(normalizedName)) {
+              cleanedAgents.push(agent);
+              seenNames.add(normalizedName);
+            }
+          }
+          
+          // Add any missing agents from AGENT_NAMES
+          for (const name of AGENT_NAMES) {
+            const normalizedName = name.toLowerCase();
+            if (!seenNames.has(normalizedName)) {
+              cleanedAgents.push({ id: uid(), name, role: "agent" });
+              seenNames.add(normalizedName);
+            }
+          }
+          
+          const cleanedAccounts = [vault, ...cleanedAgents];
+          
+          // Save cleaned accounts back to database
+          if (cleanedAccounts.length !== core.accounts.length) {
+            await kvSet("gcs-v4-core", { accounts: cleanedAccounts, txns: core.txns });
+          }
+          
+          setAccounts(cleanedAccounts);
           setTxns(core.txns);
         } else {
-          console.log("⚠️ No valid data found, using seed data");
           setAccounts(seedAccounts);
           setTxns(seedTxns);
           await kvSet("gcs-v4-core", { accounts: seedAccounts, txns: seedTxns });
@@ -1755,9 +1556,6 @@ export default function GCSDApp() {
         setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-        setBackups((await kvGet<Backup[]>("gcs-v4-backups")) ?? []);
-        setAutoBackupEnabled((await kvGet<boolean>("gcs-v4-auto-backup")) ?? true);
-        setLastAutoBackup((await kvGet<string>("gcs-v4-last-auto-backup")) ?? "");
         
         // CRITICAL: Theme is STRICTLY LOCAL - load from localStorage ONLY
         // NEVER from KV storage - each browser has its own theme
@@ -1778,13 +1576,16 @@ export default function GCSDApp() {
         const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
         if (!remote) return;
         
-        // Use remote data directly - simpler and more reliable
-        if (remote.accounts && remote.accounts.length > 0) {
-          setAccounts(remote.accounts);
-        }
-        if (remote.txns && remote.txns.length > 0) {
-          setTxns(remote.txns);
-        }
+        // Check if this is a complete reset by comparing account names
+        setAccounts(prev => {
+          const merged = mergeAccounts(prev, remote.accounts || []);
+          // If remote has significantly different accounts (like after reset), use remote completely
+          if (remote.accounts && remote.accounts.length > 0 && !accountsAreEqual(prev, remote.accounts)) {
+            return remote.accounts;
+          }
+          return merged;
+        });
+        setTxns(prev => mergeTxns(prev, remote.txns || []));
         return;
       }
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
@@ -1798,9 +1599,6 @@ export default function GCSDApp() {
       if (key === "gcs-v4-wishlist") setWishlist(val ?? (await kvGet("gcs-v4-wishlist")) ?? {});
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
-      if (key === "gcs-v4-backups") setBackups(val ?? (await kvGet("gcs-v4-backups")) ?? []);
-      if (key === "gcs-v4-auto-backup") setAutoBackupEnabled(val ?? (await kvGet("gcs-v4-auto-backup")) ?? true);
-      if (key === "gcs-v4-last-auto-backup") setLastAutoBackup(val ?? (await kvGet("gcs-v4-last-auto-backup")) ?? "");
       
       // CRITICAL: Theme is NEVER synced via KV - ignore any theme-related KV changes
       // Each browser maintains its own theme in localStorage independently
@@ -1824,9 +1622,6 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-backups", backups);         }, [hydrated, backups]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-auto-backup", autoBackupEnabled); }, [hydrated, autoBackupEnabled]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-last-auto-backup", lastAutoBackup); }, [hydrated, lastAutoBackup]);
   
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
@@ -1856,60 +1651,6 @@ export default function GCSDApp() {
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [mobileMenuOpen]);
-  
-  /* Check notification permission on mount */
-  useEffect(() => {
-    if ("Notification" in window && hydrated) {
-      const permission = Notification.permission;
-      setNotificationsEnabled(permission === "granted");
-      
-      // Show banner if not granted and not denied
-      if (permission === "default") {
-        setTimeout(() => setShowNotifBanner(true), 5000);
-      }
-    }
-  }, [hydrated]);
-  
-  /* Auto-backup every 6 hours */
-  useEffect(() => {
-    if (!hydrated || !autoBackupEnabled) return;
-    
-    const performAutoBackup = () => {
-      const now = new Date();
-      const lastBackup = lastAutoBackup ? new Date(lastAutoBackup) : null;
-      
-      // Check if 6 hours have passed
-      if (!lastBackup || (now.getTime() - lastBackup.getTime()) > 6 * 60 * 60 * 1000) {
-        console.log("🔄 Performing auto-backup...");
-        
-        const backup: Backup = {
-          id: uid(),
-          timestamp: nowISO(),
-          label: `Auto-backup ${now.toLocaleString()}`,
-          data: {
-            accounts,
-            txns,
-            stock,
-            pins,
-            goals,
-            wishlist
-          }
-        };
-        
-        setBackups(prev => [backup, ...prev].slice(0, 20)); // Keep last 20 backups
-        setLastAutoBackup(nowISO());
-        console.log("✅ Auto-backup complete");
-      }
-    };
-    
-    // Run immediately on mount if needed
-    performAutoBackup();
-    
-    // Then check every hour
-    const interval = setInterval(performAutoBackup, 60 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [hydrated, autoBackupEnabled, accounts, txns, stock, pins, goals, wishlist, lastAutoBackup]);
-  
   useEffect(()=> {
     if (!showIntro) return;
     const timer = setTimeout(()=> setShowIntro(false), 2500);
@@ -2039,14 +1780,9 @@ export default function GCSDApp() {
     }
   };
   
-  const notify = (text:string, pushTitle?: string) => {
+  const notify = (text:string) => {
     setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
     setUnread(c => c + 1);
-    
-    // Send push notification if enabled
-    if (notificationsEnabled && pushTitle) {
-      sendPushNotification(pushTitle, text);
-    }
   };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
@@ -2081,9 +1817,8 @@ export default function GCSDApp() {
     if (amount > 1000000) return toast.error("Amount too large (max 1,000,000 GCSD)");
     
     postTxn({ kind:"credit", amount, toId: agentId, memo:`${rule.label}${qty>1?` x${qty}`:""}`, meta:{product:rule.key, qty} });
-    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`, `💰 GCSD Earned!`);
+    notify(`➕ ${getName(agentId)} credited +${amount} GCSD for ${rule.label}${qty>1?` ×${qty}`:""}`);
     toast.success(`Added ${amount} GCSD to ${getName(agentId)}`);
-    haptic(50);
     logAudit("Credit Added", `${rule.label}${qty>1?` x${qty}`:""}`, getName(agentId), amount);
     
     // Update metrics when new sale is added
@@ -2211,25 +1946,12 @@ export default function GCSDApp() {
     }
     
     // Process the redemption
-    const txnId = uid();
-    const receiptId = "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase();
-    postTxn({ 
-      id: txnId,
-      kind:"debit", 
-      amount: request.price, 
-      fromId: request.agentId, 
-      memo:`Redeem: ${request.prizeLabel}`,
-      meta: { 
-        prizeKey: request.prizeKey, 
-        prizeLabel: request.prizeLabel,
-        receiptId: receiptId
-      }
-    });
+    postTxn({ kind:"debit", amount: request.price, fromId: request.agentId, memo:`Redeem: ${request.prizeLabel}` });
     setStock(s=> ({...s, [request.prizeKey]: Math.max(0, (s[request.prizeKey] ?? 0) - 1)}));
-    notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`, `🎁 Prize Approved!`);
+    notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
       setReceipt({
-        id: receiptId,
-      when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price, buyerId: request.agentId
+        id: "ORD-" + Math.random().toString(36).slice(2,7).toUpperCase(),
+      when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price
     });
     
     // Create admin notification
@@ -2250,8 +1972,12 @@ export default function GCSDApp() {
     toast.success(`Redemption approved for ${request.agentName}!`);
     confettiBurst();
     
-    // Note: Meme generator can only be accessed from "My Purchases" tab
-    // Users need to pay each time to generate a new meme
+    // Special prize handling: Show meme generator for meme_generator prize
+    if (request.prizeKey === "meme_generator") {
+      setTimeout(() => {
+        setMemeModal({ open: true, agentName: request.agentName });
+      }, 1000); // Delay to let confetti finish
+    }
   }
 
   // Reject redeem request
@@ -2678,69 +2404,6 @@ export default function GCSDApp() {
 
 
   // Backup all live data
-  // Restore from backup
-  function restoreFromBackup(backupId: string) {
-    const backup = backups.find(b => b.id === backupId);
-    if (!backup) {
-      toast.error("Backup not found");
-      return;
-    }
-    
-    const confirmMsg = `⚠️ RESTORE DATA FROM:\n${backup.label}\n\nThis will overwrite ALL current data!\n\nType 'RESTORE' to confirm:`;
-    const confirmation = prompt(confirmMsg);
-    
-    if (confirmation !== "RESTORE") {
-      toast.error("Restore cancelled");
-      return;
-    }
-    
-    // Restore all data
-    setAccounts(backup.data.accounts);
-    setTxns(backup.data.txns);
-    setStock(backup.data.stock);
-    setPins(backup.data.pins);
-    setGoals(backup.data.goals);
-    setWishlist(backup.data.wishlist);
-    
-    logAudit("Data Restored", `Restored from: ${backup.label}`);
-    toast.success("✅ Data restored successfully!");
-    haptic([100, 50, 100, 50, 100]);
-    confettiBurst();
-  }
-  
-  // Clean up duplicate agents - ONE-TIME FIX
-  async function cleanupDuplicates() {
-    const confirmed = confirm("⚠️ This will remove duplicate agents and preserve the first occurrence of each. Continue?");
-    if (!confirmed) return;
-    
-    const vault = accounts.find(a => a.role === "system");
-    if (!vault) {
-      toast.error("System error: vault not found");
-      return;
-    }
-    
-    const seenNames = new Set<string>();
-    const cleanedAgents: Account[] = [];
-    
-    // Keep first occurrence of each agent
-    accounts.filter(a => a.role === "agent").forEach(agent => {
-      const normalizedName = agent.name.trim().toLowerCase();
-      if (!seenNames.has(normalizedName)) {
-        cleanedAgents.push(agent);
-        seenNames.add(normalizedName);
-      }
-    });
-    
-    const cleanedAccounts = [vault, ...cleanedAgents];
-    
-    setAccounts(cleanedAccounts);
-    await kvSet("gcs-v4-core", { accounts: cleanedAccounts, txns });
-    
-    logAudit("Cleanup Duplicates", `Removed ${accounts.length - cleanedAccounts.length} duplicate agents`);
-    toast.success(`✅ Cleaned up! Removed ${accounts.length - cleanedAccounts.length} duplicates`);
-    haptic([50, 30, 50]);
-  }
-  
   async function backupAllData(){
     console.log("backupAllData called");
     
@@ -2788,27 +2451,10 @@ export default function GCSDApp() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      // Save to backup history for point-in-time restore
-      const backupEntry: Backup = {
-        id: uid(),
-        timestamp: nowISO(),
-        label: `Manual backup ${new Date().toLocaleString()}`,
-        data: {
-          accounts,
-          txns,
-          stock,
-          pins,
-          goals,
-          wishlist
-        }
-      };
-      setBackups(prev => [backupEntry, ...prev].slice(0, 50)); // Keep last 50 backups
-      
       // Log the backup
       logAudit("Data Backup", `Complete system backup created: ${filename}`);
       
       toast.success(`✅ Backup saved as ${filename}`);
-      haptic([50, 30, 50]);
       console.log("Backup completed:", backupData);
       
     } catch (error) {
@@ -2843,10 +2489,7 @@ export default function GCSDApp() {
   /* ============================ render ============================ */
   return (
     <div
-      className={classNames(
-        "min-h-screen overflow-x-hidden transition-colors duration-200 swipe-container",
-        theme === "neon" ? "text-orange-100" : "text-slate-900 dark:text-slate-100"
-      )}
+      className="min-h-screen overflow-x-hidden text-slate-900 dark:text-slate-100 transition-colors duration-200 swipe-container"
     >
       <Toaster position="top-center" richColors />
 
@@ -2925,70 +2568,6 @@ export default function GCSDApp() {
               >
                 Press Enter to continue
             </motion.div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Notification Permission Banner */}
-      <AnimatePresence>
-        {showNotifBanner && !notificationsEnabled && (
-          <motion.div
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md mx-4"
-            initial={{ y: -100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -100, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          >
-            <div className={classNames("rounded-2xl p-4 shadow-2xl border-2", neonBox(theme))}>
-              <div className="flex items-start gap-3">
-                <Bell className="w-6 h-6 text-blue-500 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-semibold mb-1">Enable Notifications?</h3>
-                  <p className="text-sm opacity-70 mb-3">
-                    Get notified when you earn GCSD, redemptions are approved, and more!
-                  </p>
-                  <div className="flex gap-2">
-                    <motion.button
-                      className={classNames("flex-1 px-3 py-2 rounded-lg text-sm font-medium", neonBtn(theme, true))}
-                      onClick={async () => {
-                        haptic([30, 50, 30]);
-                        const permission = await Notification.requestPermission();
-                        if (permission === "granted") {
-                          setNotificationsEnabled(true);
-                          toast.success("🔔 Notifications enabled!");
-                          sendPushNotification("🎉 Notifications Enabled!", "You'll now receive updates from GCS Bank");
-                        }
-                        setShowNotifBanner(false);
-                      }}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      Enable
-                    </motion.button>
-                    <motion.button
-                      className="px-3 py-2 rounded-lg text-sm opacity-60 hover:opacity-100"
-                      onClick={() => {
-                        haptic(20);
-                        setShowNotifBanner(false);
-                      }}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      Later
-                    </motion.button>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    haptic(20);
-                    setShowNotifBanner(false);
-                  }}
-                  className="text-sm opacity-50 hover:opacity-100"
-                >
-                  ✕
-                </button>
-              </div>
             </div>
           </motion.div>
         )}
@@ -3182,9 +2761,6 @@ export default function GCSDApp() {
           agentName={memeModal.agentName}
           onClose={() => setMemeModal(null)}
           theme={theme}
-          initialData={memeModal.initialData}
-          onSave={memeModal.onSave}
-          readOnly={memeModal.readOnly}
         />
       )}
 
@@ -3223,9 +2799,9 @@ export default function GCSDApp() {
         theme={theme}
       />
 
-      {/* Receipt - only show for the buyer or if viewing as that agent */}
+      {/* Receipt */}
       <AnimatePresence>
-        {receipt && (portal === "agent" && currentAgentId === receipt.buyerId) && (
+        {receipt && (
           <motion.div 
             className="fixed inset-0 z-50 bg-black/40 grid place-items-center"
             initial={{ opacity: 0 }}
@@ -3289,10 +2865,10 @@ export default function GCSDApp() {
           {portal==="home" && (
             <motion.div
               key="home"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <Home
                 theme={theme}
@@ -3308,10 +2884,10 @@ export default function GCSDApp() {
           {portal==="agent" && currentAgentId && (
             <motion.div
               key={`agent-${currentAgentId}`}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <AgentPortal
                 theme={theme}
@@ -3322,7 +2898,6 @@ export default function GCSDApp() {
                 prizes={PRIZE_ITEMS}
                 goals={goals}
                 wishlist={wishlist[currentAgentId] || []}
-                pins={pins}
                 onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
                 onRedeem={(k)=>redeemPrize(currentAgentId, k)}
                 onToggleWishlist={(prizeKey) => {
@@ -3335,34 +2910,6 @@ export default function GCSDApp() {
                     };
                   });
                 }}
-                onOpenMeme={(txn) => {
-                  const agentName = accounts.find(a => a.id === currentAgentId)?.name || "Agent";
-                  const memeData = txn.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number } | undefined;
-                  setMemeModal({
-                    open: true,
-                    agentName,
-                    initialData: memeData,
-                    readOnly: !!memeData, // Read-only if meme already exists
-                    onSave: (newMemeData) => {
-                      // Update the transaction with new meme data (only when creating for first time)
-                      setTxns(prev => prev.map(t => 
-                        t.id === txn.id 
-                          ? { ...t, meta: { ...t.meta, memeData: newMemeData } }
-                          : t
-                      ));
-                    }
-                  });
-                }}
-                onUpdateAccount={(updates) => {
-                  console.log("Updating account:", currentAgentId, "with updates:", updates);
-                  setAccounts(prev => {
-                    const updated = prev.map(a => 
-                      a.id === currentAgentId ? { ...a, ...updates } : a
-                    );
-                    console.log("Updated accounts:", updated.find(a => a.id === currentAgentId));
-                    return updated;
-                  });
-                }}
               />
             </motion.div>
           )}
@@ -3370,10 +2917,10 @@ export default function GCSDApp() {
           {portal==="admin" && isAdmin && (
             <motion.div
               key="admin"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <AdminPortal
                 theme={theme}
@@ -3418,13 +2965,6 @@ export default function GCSDApp() {
                 onUnfreezeAgent={unfreezeAgent}
                 onApproveRedeem={approveRedeem}
                 onRejectRedeem={rejectRedeem}
-                onCleanupDuplicates={cleanupDuplicates}
-                onEmergencyReset={emergencyReset}
-                onImportBackup={importBackup}
-                backups={backups}
-                autoBackupEnabled={autoBackupEnabled}
-                onToggleAutoBackup={() => setAutoBackupEnabled(prev => !prev)}
-                onRestoreBackup={restoreFromBackup}
               />
             </motion.div>
           )}
@@ -3432,10 +2972,10 @@ export default function GCSDApp() {
           {portal==="feed" && (
             <motion.div
               key="feed"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
             >
               <FeedPage theme={theme} notifs={notifs} />
             </motion.div>
@@ -3542,8 +3082,7 @@ function Home({
   const leaderboard = useMemo(() => Array.from(nonSystemIds)
     .map((id) => {
       const balance = balances.get(id) || 0;
-      const account = accounts.find((a) => a.id === id);
-      return { id, name: account?.name || "—", balance, avatar: account?.avatar };
+      return { id, name: accounts.find((a) => a.id === id)?.name || "—", balance };
     })
     .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
@@ -3796,9 +3335,6 @@ function AgentPortal({
   onSetGoal,
   onRedeem,
   onToggleWishlist,
-  onOpenMeme,
-  pins,
-  onUpdateAccount,
 }: {
   theme: Theme;
   agentId: string;
@@ -3811,30 +3347,8 @@ function AgentPortal({
   onSetGoal: (n: number) => void;
   onRedeem: (k: string) => void;
   onToggleWishlist: (prizeKey: string) => void;
-  onOpenMeme: (txn: Transaction) => void;
-  pins: Record<string, string>;
-  onUpdateAccount: (updates: Partial<Account>) => void;
 }) {
-  const [agentTab, setAgentTab] = useState<"overview" | "purchases">("overview");
-  const [purchasesPinVerified, setPurchasesPinVerified] = useState(false);
-  const [showPurchasesPin, setShowPurchasesPin] = useState(false);
-  
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
-  
-  // Handle tab switch - require PIN for purchases
-  const handleTabChange = (tab: "overview" | "purchases") => {
-    if (tab === "purchases" && !purchasesPinVerified) {
-      setShowPurchasesPin(true);
-    } else {
-      setAgentTab(tab);
-    }
-  };
-  
-  // Reset PIN verification when agent changes
-  useEffect(() => {
-    setPurchasesPinVerified(false);
-    setAgentTab("overview");
-  }, [agentId]);
   const balance = txns.reduce((s, t) => {
     if (t.toId === agentId && t.kind === "credit") s += t.amount;
     if (t.fromId === agentId && t.kind === "debit") s -= t.amount;
@@ -3853,180 +3367,16 @@ function AgentPortal({
   const [goalInput, setGoalInput] = useState(goal ? String(goal) : "");
   const progress = goal > 0 ? Math.min(100, Math.round((balance / goal) * 100)) : 0;
 
-  // Get redeemed prizes (only active ones, not reversed)
-  const redeemedPrizes = agentTxns.filter((t) => G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns));
-
-  // Receipt modal state
-  const [selectedReceipt, setSelectedReceipt] = useState<{
-    id: string;
-    when: string;
-    buyer: string;
-    item: string;
-    amount: number;
-  } | null>(null);
-
-  // Avatar upload
-  const currentAgent = accounts.find(a => a.id === agentId);
-  const [showAvatarCropper, setShowAvatarCropper] = useState(false);
-  const [avatarImageSrc, setAvatarImageSrc] = useState<string | null>(null);
-  
-  
-  const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Image too large! Max 5MB");
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageUrl = e.target?.result as string;
-        setAvatarImageSrc(imageUrl);
-        setShowAvatarCropper(true);
-      };
-      reader.readAsDataURL(file);
-    }
-    // Reset input so same file can be selected again
-    event.target.value = '';
-  };
-  
-  const saveAvatar = (croppedImageUrl: string) => {
-    console.log("🔵 saveAvatar called!");
-    console.log("🔵 Agent ID:", agentId);
-    console.log("🔵 Cropped image URL length:", croppedImageUrl.length);
-    console.log("🔵 Cropped image preview:", croppedImageUrl.substring(0, 100));
-    
-    if (!croppedImageUrl || croppedImageUrl.length < 100) {
-      console.error("❌ Invalid image data");
-      toast.error("Failed to create avatar image");
-      return;
-    }
-    
-    console.log("🔵 About to call onUpdateAccount...");
-    
-    try {
-      // Update the account with the new avatar
-      onUpdateAccount({ avatar: croppedImageUrl });
-      console.log("✅ onUpdateAccount called successfully");
-    } catch (error) {
-      console.error("❌ Error calling onUpdateAccount:", error);
-      toast.error("Failed to update account");
-      return;
-    }
-    
-    // Close the modal
-    console.log("🔵 Closing modal...");
-    setShowAvatarCropper(false);
-    setAvatarImageSrc(null);
-    
-    // Success feedback
-    haptic([30, 20, 30]);
-    toast.success("✅ Profile picture updated!");
-    console.log("✅ Avatar save complete!");
-  };
-  
-
   return (
     <div>
-      {/* Tab Navigation */}
-      <div className="mb-4 flex gap-2 overflow-x-auto pb-2">
-        {[
-          { key: "overview", label: "Overview", icon: Wallet },
-          { key: "purchases", label: "My Purchases", icon: Gift }
-        ].map((tab) => (
-          <motion.button
-            key={tab.key}
-            onClick={() => {
-              haptic(30);
-              handleTabChange(tab.key as typeof agentTab);
-            }}
-            className={classNames(
-              "flex items-center gap-2 px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all",
-              agentTab === tab.key 
-                ? classNames(neonBtn(theme, true), "ring-2 ring-blue-400/50") 
-                : "glass opacity-70 hover:opacity-100"
-            )}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-            {tab.key === "purchases" && <Lock className="w-3 h-3 opacity-50" />}
-          </motion.button>
-        ))}
-      </div>
-      
-      {/* PIN Modal for Purchases */}
-      <AnimatePresence>
-        {showPurchasesPin && (
-          <PinModal
-            open={showPurchasesPin}
-            onClose={() => setShowPurchasesPin(false)}
-            onCheck={(pin) => {
-              const agentPin = pins[agentId];
-              if (!agentPin) {
-                toast.error("No PIN set for this agent");
-                return false;
-              }
-              if (pin === agentPin) {
-                setPurchasesPinVerified(true);
-                setAgentTab("purchases");
-                setShowPurchasesPin(false);
-                toast.success("✅ Access granted");
-                return true;
-              }
-              toast.error("❌ Incorrect PIN");
-              return false;
-            }}
-            theme={theme}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Tab Content */}
-      <AnimatePresence mode="wait">
-        {agentTab === "overview" && (
-          <motion.div
-            key="overview"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-          >
-      
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Summary */}
         <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
           <div className="text-sm opacity-70 mb-2">Agent</div>
           <div className="flex items-center gap-3 mb-3">
-                  <div className="relative">
-                    <Avatar name={name} size="lg" theme={theme} avatarUrl={currentAgent?.avatar} />
-                    <label 
-                      htmlFor="avatar-upload"
-                      className="absolute -bottom-1 -right-1 bg-purple-500 text-white rounded-full p-1.5 cursor-pointer hover:bg-purple-600 transition-all hover:scale-110 shadow-lg"
-                      title="Upload profile picture"
-                      onClick={() => haptic(20)}
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    </label>
-                    <input
-                      type="file"
-                      id="avatar-upload"
-                      accept="image/*"
-                      onChange={handleAvatarUpload}
-                      className="hidden"
-                    />
-                  </div>
-                  <div className="flex-1">
+            <Avatar name={name} size="lg" theme={theme} />
             <div className="text-xl font-semibold">{name}</div>
-                    <div className="text-xs opacity-60">Click camera to upload photo</div>
           </div>
-                </div>
-                
           <div className="grid sm:grid-cols-3 gap-3">
             <TileRow label="Balance" value={balance} />
             <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
@@ -4041,7 +3391,7 @@ function AgentPortal({
                 <button 
                   className={classNames("px-3 py-1.5 rounded-xl haptic-feedback", neonBtn(theme, true))} 
                   onClick={() => {
-                          haptic(50);
+                    if ('vibrate' in navigator) navigator.vibrate(30);
                     if (goalInput) onSetGoal(parseInt(goalInput, 10));
                   }}
                   title="PIN required to set goal"
@@ -4050,11 +3400,8 @@ function AgentPortal({
                 </button>
               </div>
               <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
-              
-              
               {goal > 0 && (
                 <>
-                  
                   <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
                   <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
                     <motion.div 
@@ -4101,14 +3448,18 @@ function AgentPortal({
                   className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.15, ease: "easeOut" }}
+                  transition={{ delay: i * 0.03, duration: 0.3 }}
                   whileHover={{ scale: 1.02, x: 4 }}
-                        style={{ willChange: "auto" }}
                 >
                   <div className="text-sm">{t.memo || (t.kind === "credit" ? "Credit" : "Debit")}</div>
-                        <div className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}>
+                  <motion.div 
+                    className={classNames("text-sm", t.kind === "credit" ? "text-emerald-500" : "text-rose-500")}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: i * 0.03 + 0.15, duration: 0.2 }}
+                  >
                     {t.kind === "credit" ? "+" : "−"}{t.amount.toLocaleString()}
-                        </div>
+                  </motion.div>
                 </motion.div>
               ))}
               {agentTxns.length === 0 && <div className="text-sm opacity-70">No activity yet.</div>}
@@ -4134,11 +3485,10 @@ function AgentPortal({
                 <motion.div 
                   key={p.key} 
                   className={classNames("flex items-center justify-between border rounded-xl px-3 py-2", neonBox(theme))}
-                        initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.15, ease: "easeOut" }}
+                  transition={{ delay: i * 0.05, duration: 0.3 }}
                   whileHover={{ scale: can ? 1.02 : 1, x: can ? -4 : 0 }}
-                        style={{ willChange: "auto" }}
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -4152,7 +3502,6 @@ function AgentPortal({
                         className="text-xl"
                         onClick={(e) => {
                           e.stopPropagation();
-                                haptic(20);
                           onToggleWishlist(p.key);
                         }}
                         whileHover={{ scale: 1.2 }}
@@ -4171,10 +3520,7 @@ function AgentPortal({
                   <motion.button 
                     disabled={!can} 
                     className={classNames("px-3 py-1.5 rounded-xl disabled:opacity-50", neonBtn(theme, true))} 
-                          onClick={() => {
-                            haptic([40, 20, 60]);
-                            onRedeem(p.key);
-                          }}
+                    onClick={() => onRedeem(p.key)}
                     whileHover={can ? { scale: 1.05 } : {}}
                     whileTap={can ? { scale: 0.95 } : {}}
                   >
@@ -4200,585 +3546,7 @@ function AgentPortal({
           theme={theme}
         />
       </div>
-          </motion.div>
-        )}
-
-        {agentTab === "purchases" && (
-          <motion.div
-            key="purchases"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-          >
-            <div className={classNames("rounded-2xl border p-4 shadow-sm", neonBox(theme))}>
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <Gift className="w-6 h-6" />
-                My Purchases
-              </h3>
-              
-              {redeemedPrizes.length === 0 ? (
-                <div className="text-center py-12 opacity-70">
-                  <Gift className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                  <p>No purchases yet</p>
-                  <p className="text-sm mt-2">Start redeeming prizes to see them here!</p>
     </div>
-              ) : (
-                <>
-                  <div className="mb-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/30">
-                    <p className="text-sm opacity-80">
-                      💡 <strong>Meme Generator:</strong> Each purchase allows creating ONE meme. Buy again to create more!
-                    </p>
-                  </div>
-                <div className="space-y-3">
-                  {redeemedPrizes.map((t, i) => {
-                    const prizeLabel = t.meta?.prizeLabel || t.memo?.replace("Redeem: ", "") || "Prize";
-                    const prizeKey = t.meta?.prizeKey;
-                    const receiptId = t.meta?.receiptId || "N/A";
-                    const date = new Date(t.dateISO);
-                    const isMeme = prizeKey === "meme_generator";
-                    const memeData = t.meta?.memeData as { topText: string; bottomText: string; uploadedImage: string | null; textColor?: string; fontSize?: number } | undefined;
-
-                    return (
-                      <motion.div
-                        key={t.id}
-                        className={classNames("border rounded-xl p-4", neonBox(theme))}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.15, ease: "easeOut" }}
-                        whileHover={{ scale: 1.01 }}
-                        style={{ willChange: "auto" }}
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <h4 className="font-semibold text-lg">{prizeLabel}</h4>
-                              {isMeme && !memeData && (
-                                <span className="px-2 py-0.5 text-xs bg-purple-500 text-white rounded-full font-semibold">
-                                  🎨 MEME
-                                </span>
-                              )}
-                              {isMeme && memeData && (
-                                <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
-                                  ✅ CREATED
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-sm opacity-70 space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">Receipt:</span>
-                                <code className="px-2 py-0.5 bg-black/10 dark:bg-white/10 rounded">{receiptId}</code>
-                              </div>
-                              <div><span className="font-medium">Date:</span> {date.toLocaleString()}</div>
-                              <div><span className="font-medium">Amount:</span> <span className="text-rose-500">−{t.amount.toLocaleString()} GCSD</span></div>
-                            </div>
-                          </div>
-                          
-                          <div className="flex flex-col gap-2">
-                            <motion.button
-                              className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme, true))}
-                              onClick={() => {
-                                haptic(30);
-                                setSelectedReceipt({
-                                  id: receiptId,
-                                  when: date.toLocaleString(),
-                                  buyer: name,
-                                  item: prizeLabel,
-                                  amount: t.amount
-                                });
-                              }}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
-                            >
-                              📄 View Receipt
-                            </motion.button>
-                            
-                            {isMeme && !memeData && (
-                              <motion.button
-                                className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
-                                onClick={() => {
-                                  haptic([30, 20, 40]);
-                                  onOpenMeme(t);
-                                }}
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                              >
-                                🎨 Create Meme
-                              </motion.button>
-                            )}
-                            
-                            {isMeme && memeData && (
-                              <motion.button
-                                className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
-                                onClick={() => {
-                                  haptic(30);
-                                  onOpenMeme(t);
-                                }}
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                              >
-                                👁️ View Meme
-                              </motion.button>
-                            )}
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-                </>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Avatar Cropper Modal */}
-      <AnimatePresence>
-        {showAvatarCropper && avatarImageSrc && (
-          <AvatarCropperModal
-            imageSrc={avatarImageSrc}
-            theme={theme}
-            onSave={saveAvatar}
-            onClose={() => {
-              setShowAvatarCropper(false);
-              setAvatarImageSrc(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
-      
-      
-      {/* Receipt Modal */}
-      <AnimatePresence>
-        {selectedReceipt && (
-          <ReceiptModal
-            receipt={selectedReceipt}
-            theme={theme}
-            onClose={() => setSelectedReceipt(null)}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/** Avatar Cropper Modal */
-function AvatarCropperModal({ 
-  imageSrc, 
-  theme, 
-  onSave, 
-  onClose 
-}: { 
-  imageSrc: string; 
-  theme: Theme; 
-  onSave: (croppedImage: string) => void; 
-  onClose: () => void;
-}) {
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  
-  useEffect(() => {
-    const img = new Image();
-    img.onload = () => {
-      console.log("Image loaded successfully", img.width, "x", img.height);
-      imageRef.current = img;
-      setImageLoaded(true);
-    };
-    img.onerror = () => {
-      console.error("Failed to load image");
-      toast.error("Failed to load image");
-    };
-    img.src = imageSrc;
-  }, [imageSrc]);
-
-  const handleCrop = () => {
-    console.log("handleCrop called");
-    
-    if (!imageRef.current) {
-      console.error("Image not loaded");
-      toast.error("Image not loaded yet, please wait...");
-      return;
-    }
-    
-    if (!canvasRef.current) {
-      console.error("Canvas ref not available");
-      toast.error("Canvas error");
-      return;
-    }
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.error("Could not get canvas context");
-      toast.error("Canvas error");
-      return;
-    }
-
-    const img = imageRef.current;
-    console.log("Image dimensions:", img.width, "x", img.height);
-    console.log("Scale:", scale, "Position:", position);
-
-    // Set canvas to 300x300 for high quality avatar
-    const size = 300;
-    canvas.width = size;
-    canvas.height = size;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, size, size);
-    
-    // Create circular clipping path
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
-
-    // Calculate dimensions to cover the circle (not contain)
-    const imgAspect = img.width / img.height;
-    let drawWidth, drawHeight;
-    
-    // Always cover the canvas
-    if (imgAspect > 1) {
-      // Landscape - make height = size, width proportional
-      drawHeight = size;
-      drawWidth = size * imgAspect;
-    } else {
-      // Portrait or square - make width = size, height proportional  
-      drawWidth = size;
-      drawHeight = size / imgAspect;
-    }
-    
-    // Apply user scale
-    drawWidth *= scale;
-    drawHeight *= scale;
-    
-    // Center and apply position offset
-    const x = (size - drawWidth) / 2 + (position.x * 2);
-    const y = (size - drawHeight) / 2 + (position.y * 2);
-
-    console.log("Drawing at:", x, y, "with size:", drawWidth, "x", drawHeight);
-
-    // Draw image
-    ctx.drawImage(img, x, y, drawWidth, drawHeight);
-    
-    ctx.restore();
-
-    // Get the cropped image as data URL
-    const croppedImageUrl = canvas.toDataURL('image/jpeg', 0.92);
-    
-    console.log("✅ Cropped image created!");
-    console.log("URL length:", croppedImageUrl.length);
-    console.log("First 100 chars:", croppedImageUrl.substring(0, 100));
-    
-    if (croppedImageUrl.length < 100) {
-      toast.error("Failed to create image");
-      return;
-    }
-    
-    console.log("Calling onSave with cropped image...");
-    onSave(croppedImageUrl);
-  };
-
-  return (
-    <motion.div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      style={{ 
-        backdropFilter: 'blur(12px)', 
-        WebkitBackdropFilter: 'blur(12px)',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)'
-      }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onClose}
-    >
-      <motion.div
-        className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto", neonBox(theme))}
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold">📸 Crop Profile Picture</h2>
-          <button onClick={onClose} className="text-2xl opacity-60 hover:opacity-100">×</button>
-        </div>
-        
-        <div className="text-sm opacity-70 mb-4">
-          Adjust the position and zoom to frame your photo perfectly. It will appear as a circle.
-        </div>
-
-        {/* Preview Area */}
-        <div className="mb-4 grid gap-4">
-          {/* Main editing view */}
-          <div>
-          <div className="relative w-full aspect-square rounded-xl overflow-hidden border-4 border-dashed border-purple-400/50 bg-black/10">
-            {!imageLoaded && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">⏳</div>
-                  <div className="text-sm opacity-70">Loading image...</div>
-                </div>
-              </div>
-            )}
-            {imageLoaded && (
-              <>
-                <div 
-                  className="absolute inset-0 flex items-center justify-center"
-                  style={{
-                    transform: `translate(${position.x}px, ${position.y}px)`
-                  }}
-                >
-                  <img
-                    src={imageSrc}
-                    alt="Preview"
-                    className="max-w-full max-h-full object-contain"
-                    style={{
-                      transform: `scale(${scale})`,
-                      transformOrigin: 'center'
-                    }}
-                    draggable={false}
-                  />
-                </div>
-                {/* Circular mask overlay */}
-                <div className="absolute inset-0 pointer-events-none">
-                  <svg viewBox="0 0 100 100" className="w-full h-full">
-                    <defs>
-                      <mask id="circle-mask">
-                        <rect width="100" height="100" fill="white"/>
-                        <circle cx="50" cy="50" r="45" fill="black"/>
-                      </mask>
-                    </defs>
-                    <rect width="100" height="100" fill="rgba(0,0,0,0.6)" mask="url(#circle-mask)"/>
-                    <circle cx="50" cy="50" r="45" fill="none" stroke="white" strokeWidth="0.5" strokeDasharray="2,2"/>
-                  </svg>
-                </div>
-              </>
-            )}
-          </div>
-          <p className="text-xs opacity-70 mt-2 text-center">Drag sliders below to adjust • Circle shows cropped area</p>
-          </div>
-          
-          {/* Final Preview Circle */}
-          {imageLoaded && (
-            <div className="flex items-center justify-center">
-              <div className="text-center">
-                <p className="text-xs font-semibold mb-2">Final Preview:</p>
-                <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-purple-400 shadow-xl mx-auto bg-black/10">
-                  <div 
-                    className="w-full h-full flex items-center justify-center"
-                    style={{
-                      transform: `translate(${position.x * 0.24}px, ${position.y * 0.24}px)`
-                    }}
-                  >
-                    <img
-                      src={imageSrc}
-                      alt="Final preview"
-                      className="min-w-full min-h-full object-cover"
-                      style={{
-                        transform: `scale(${scale})`,
-                        transformOrigin: 'center'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Controls */}
-        <div className="space-y-4 mb-4">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-semibold">🔍 Zoom: {Math.round(scale * 100)}%</label>
-              <motion.button
-                className={classNames("text-xs px-2 py-1 rounded", neonBtn(theme))}
-                onClick={() => {
-                  setScale(1);
-                  setPosition({ x: 0, y: 0 });
-                  haptic(20);
-                  toast.success("Reset to center");
-                }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                ↺ Reset
-              </motion.button>
-            </div>
-            <input
-              type="range"
-              min="0.5"
-              max="3"
-              step="0.05"
-              value={scale}
-              onChange={(e) => setScale(Number(e.target.value))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs opacity-60 mt-1">
-              <span>50%</span>
-              <span>300%</span>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-semibold mb-2 block">↔️ Horizontal</label>
-              <input
-                type="range"
-                min="-100"
-                max="100"
-                value={position.x}
-                onChange={(e) => setPosition(prev => ({ ...prev, x: Number(e.target.value) }))}
-                className="w-full"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-semibold mb-2 block">↕️ Vertical</label>
-              <input
-                type="range"
-                min="-100"
-                max="100"
-                value={position.y}
-                onChange={(e) => setPosition(prev => ({ ...prev, y: Number(e.target.value) }))}
-                className="w-full"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Hidden canvas for cropping */}
-        <canvas ref={canvasRef} className="hidden" />
-
-        {/* Actions */}
-        <div className="flex gap-3">
-          <button
-            type="button"
-            disabled={!imageLoaded}
-            className={classNames(
-              "flex-1 px-4 py-3 rounded-xl font-semibold transition-transform active:scale-95 hover:scale-102",
-              neonBtn(theme, true),
-              !imageLoaded && "opacity-50 cursor-not-allowed"
-            )}
-            onClick={(e) => {
-              console.log("🟢 Button clicked event fired!");
-              e.preventDefault();
-              e.stopPropagation();
-              if (!imageLoaded) {
-                console.log("⚠️ Image not loaded yet");
-                toast.error("Please wait for image to load");
-                return;
-              }
-              console.log("🟢 Calling handleCrop...");
-              haptic([30, 20, 30]);
-              handleCrop();
-            }}
-          >
-            {imageLoaded ? "✅ Save Picture" : "⏳ Loading..."}
-          </button>
-          <motion.button
-            className={classNames("px-4 py-3 rounded-xl", neonBtn(theme))}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              haptic(20);
-              onClose();
-            }}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            Cancel
-          </motion.button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/** Receipt Modal Component */
-function ReceiptModal({ receipt, theme, onClose }: { receipt: { id: string; when: string; buyer: string; item: string; amount: number }; theme: Theme; onClose: () => void }) {
-  return (
-    <motion.div
-      className="fixed inset-0 z-50 glass grid place-items-center"
-      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onClose}
-    >
-      <motion.div
-        className={classNames("glass-card rounded-3xl shadow-2xl p-8 w-[min(500px,90vw)]", neonBox(theme))}
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="text-center mb-6">
-          <div className="text-4xl mb-3">🧾</div>
-          <h2 className="text-2xl font-bold mb-1">{APP_NAME}</h2>
-          <p className="text-sm opacity-70">Purchase Receipt</p>
-        </div>
-
-        {/* Receipt Details */}
-        <div className="space-y-4 mb-6">
-          <div className="border-b border-dashed pb-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm opacity-70">Receipt ID</span>
-              <code className="font-mono font-semibold">{receipt.id}</code>
-            </div>
-          </div>
-
-          <div className="border-b border-dashed pb-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm opacity-70">Date & Time</span>
-              <span className="font-medium">{receipt.when}</span>
-            </div>
-          </div>
-
-          <div className="border-b border-dashed pb-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm opacity-70">Customer</span>
-              <span className="font-medium">{receipt.buyer}</span>
-            </div>
-          </div>
-
-          <div className="border-b border-dashed pb-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm opacity-70">Item</span>
-              <span className="font-medium">{receipt.item}</span>
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <div className="flex justify-between items-center text-lg">
-              <span className="font-bold">Total Amount</span>
-              <span className="font-bold text-rose-500">{receipt.amount.toLocaleString()} GCSD</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center text-xs opacity-50 mb-4">
-          Thank you for your purchase! ✨
-        </div>
-
-        {/* Close Button */}
-        <motion.button
-          className={classNames("w-full px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
-          onClick={onClose}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          Close
-        </motion.button>
-      </motion.div>
-    </motion.div>
   );
 }
 
@@ -4817,10 +3585,6 @@ function AdminPortal({
   onUnfreezeAgent,
   onApproveRedeem,
   onRejectRedeem,
-  backups,
-  autoBackupEnabled,
-  onToggleAutoBackup,
-  onRestoreBackup,
 }: {
   theme: Theme;
   isAdmin: boolean;
@@ -4855,11 +3619,6 @@ function AdminPortal({
   onUnfreezeAgent: (agentId: string) => void;
   onApproveRedeem: (requestId: string) => void;
   onRejectRedeem: (requestId: string) => void;
-  backups: Backup[];
-  autoBackupEnabled: boolean;
-  onToggleAutoBackup: () => void;
-  onRestoreBackup: (backupId: string) => void;
-  onCleanupDuplicates: () => void;
 }) {
   const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests" | "audit" | "export">("dashboard");
   const [agentId, setAgentId] = useState("");
@@ -4997,7 +3756,6 @@ function AdminPortal({
             </motion.div>
           </div>
 
-
           {/* Agent Balances with Freeze Controls */}
           <div className="grid md:grid-cols-3 gap-4">
           <motion.div 
@@ -5071,9 +3829,8 @@ function AdminPortal({
                   className={classNames("border rounded-xl px-3 py-2 flex items-center justify-between", neonBox(theme))}
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  transition={{ delay: i * 0.03 }}
                   whileHover={{ scale: 1.01, x: -2 }}
-                  style={{ willChange: "auto" }}
                 >
                   <div className="font-medium">{p.label}</div>
                   <div className="text-sm font-semibold">Stock: {stock[p.key] ?? 0}</div>
@@ -5288,8 +4045,7 @@ function AdminPortal({
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      transition={{ duration: 0.12, ease: "easeOut" }}
-                      style={{ willChange: "auto" }}
+                      transition={{ delay: i * 0.03, duration: 0.2 }}
                     >
                       <div className="text-sm">
                         <div className="font-medium">{t.memo || "Credit"}</div>
@@ -5356,8 +4112,7 @@ function AdminPortal({
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 10 }}
-                        transition={{ duration: 0.12, ease: "easeOut" }}
-                      style={{ willChange: "auto" }}
+                        transition={{ delay: i * 0.03, duration: 0.2 }}
                       >
                         <div className="text-sm">
                           <div>{t.memo!.replace(/^Redeem:\s*/, "")} • −{t.amount.toLocaleString()} GCSD</div>
@@ -5402,8 +4157,7 @@ function AdminPortal({
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 10 }}
-                      transition={{ duration: 0.12, ease: "easeOut" }}
-                      style={{ willChange: "auto" }}
+                      transition={{ delay: i * 0.03, duration: 0.2 }}
                     >
                       <div className="text-sm">
                         <div className="font-medium">{t.memo}</div>
@@ -5901,25 +4655,6 @@ function AdminPortal({
         >
           <h3 className="text-lg font-semibold mb-4">📥 Export Data</h3>
           
-          {/* Cleanup Duplicates - ONE-TIME FIX */}
-          <motion.div 
-            className="glass-card rounded-xl p-4 mb-6 border-2 border-orange-500/50 bg-orange-500/5"
-            whileHover={{ scale: 1.02 }}
-          >
-            <h4 className="font-semibold mb-2 text-orange-500">🧹 Clean Up Duplicates</h4>
-            <p className="text-sm opacity-70 mb-3">Remove duplicate agents and restore clean data (one-time fix)</p>
-            <motion.button
-              className="w-full px-4 py-3 rounded-xl bg-orange-500 text-white hover:bg-orange-600 font-semibold"
-              onClick={onCleanupDuplicates}
-              whileTap={{ scale: 0.95 }}
-            >
-              🧹 Remove Duplicate Agents
-            </motion.button>
-            <div className="text-xs opacity-60 mt-2 text-center">
-              This will keep the first occurrence of each agent and remove duplicates
-            </div>
-          </motion.div>
-          
           {/* Complete System Backup */}
           <motion.div 
             className="glass-card rounded-xl p-4 mb-6 border-2 border-emerald-500/50 bg-emerald-500/5"
@@ -5936,79 +4671,6 @@ function AdminPortal({
             </motion.button>
             <div className="text-xs opacity-60 mt-2 text-center">
               This creates a JSON file with everything - use for disaster recovery
-            </div>
-          </motion.div>
-          
-          {/* Auto-Backup Settings & History */}
-          <motion.div 
-            className="glass-card rounded-xl p-4 mb-6"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h4 className="font-semibold mb-1">🔄 Auto-Backup System</h4>
-                <p className="text-xs opacity-70">Automatically backup every 6 hours</p>
-              </div>
-              <motion.button
-                className={classNames(
-                  "px-4 py-2 rounded-xl font-semibold transition-colors",
-                  autoBackupEnabled 
-                    ? "bg-emerald-500 text-white" 
-                    : "bg-gray-500 text-white opacity-50"
-                )}
-                onClick={onToggleAutoBackup}
-                whileTap={{ scale: 0.95 }}
-              >
-                {autoBackupEnabled ? "✅ Enabled" : "❌ Disabled"}
-              </motion.button>
-            </div>
-            
-            <div className="border-t pt-4 mt-4">
-              <h4 className="font-semibold mb-3 flex items-center gap-2">
-                <History className="w-4 h-4" />
-                Backup History (Point-in-Time Restore)
-              </h4>
-              
-              {backups.length === 0 ? (
-                <div className="text-center py-6 opacity-60">
-                  <p className="text-sm">No backups yet</p>
-                  <p className="text-xs mt-1">Create a manual backup or wait for auto-backup</p>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {backups.map((backup, idx) => (
-                    <motion.div
-                      key={backup.id}
-                      className="flex items-center justify-between p-3 rounded-lg bg-black/5 dark:bg-white/5 border"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                    >
-                      <div className="flex-1">
-                        <div className="font-medium text-sm">{backup.label}</div>
-                        <div className="text-xs opacity-60">
-                          {new Date(backup.timestamp).toLocaleString()}
-                        </div>
-                        <div className="text-xs opacity-50 mt-1">
-                          {backup.data.accounts.length} accounts • {backup.data.txns.length} transactions
-                        </div>
-                      </div>
-                      <motion.button
-                        className={classNames(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold",
-                          neonBtn(theme, true)
-                        )}
-                        onClick={() => onRestoreBackup(backup.id)}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        ⏮️ Restore
-                      </motion.button>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
             </div>
           </motion.div>
           
@@ -6194,20 +4856,18 @@ function Picker({
   return (
     <motion.div 
       className="fixed inset-0 z-40 glass grid place-items-center"
-      style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
+      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.12 }}
-      onClick={onClose}
+      transition={{ duration: 0.15 }}
     >
       <motion.div 
         className={classNames("glass-card rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
-        transition={{ duration: 0.15, ease: "easeOut" }}
-        onClick={(e) => e.stopPropagation()}
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 10 }}
+        transition={{ type: "spring", stiffness: 400, damping: 30 }}
       >
         <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
@@ -6233,9 +4893,9 @@ function Picker({
           {accounts
             .filter((a) => a.role !== "system")
             .map((a, index) => (
-              <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={0}>
+              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)} delay={0.02 * (index + 1)}>
                 <div className="flex items-center gap-2 mb-1">
-                  <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
+                  <Avatar name={a.name} size="sm" theme={theme} />
                   <div className="font-medium flex-1 truncate">{a.name}</div>
                 </div>
                 <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
@@ -6260,11 +4920,10 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
             <motion.div 
               key={n.id} 
               className="text-sm border rounded-xl px-3 py-2"
-              initial={{ opacity: 0, x: -10 }}
+              initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.12, ease: "easeOut" }}
+              transition={{ delay: i * 0.03, duration: 0.3 }}
               whileHover={{ scale: 1.01, x: 4 }}
-              style={{ willChange: "auto" }}
             >
               <div>{n.text}</div>
               <div className="text-xs opacity-70">{new Date(n.when).toLocaleString()}</div>
@@ -6276,9 +4935,8 @@ function FeedPage({ theme, notifs }: { theme: Theme; notifs: Notification[] }) {
   );
 }
 
-/* ===== Confetti with haptic feedback ===== */
+/* ===== Confetti (unchanged) ===== */
 function confettiBurst() {
-  haptic([50, 30, 100, 30, 50]); // Success pattern
   const el = document.createElement("div");
   el.style.position = "fixed";
   el.style.inset = "0";
