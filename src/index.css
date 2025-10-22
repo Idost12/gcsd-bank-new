@@ -94,8 +94,8 @@ body {
 /* Optimized Glass Effects with Reflective Edges */
 .glass {
   background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(4px) saturate(130%);
-  -webkit-backdrop-filter: blur(4px) saturate(130%);
+  backdrop-filter: blur(8px) saturate(150%);
+  -webkit-backdrop-filter: blur(8px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.3);
   box-shadow: 
     0 4px 16px 0 rgba(31, 38, 135, 0.1),
@@ -120,8 +120,8 @@ body {
 
 .dark .glass {
   background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(4px) saturate(130%);
-  -webkit-backdrop-filter: blur(4px) saturate(130%);
+  backdrop-filter: blur(8px) saturate(150%);
+  -webkit-backdrop-filter: blur(8px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 
     0 4px 16px 0 rgba(0, 0, 0, 0.2),
@@ -135,8 +135,8 @@ body {
 
 .neon-theme .glass {
   background: rgba(42, 42, 42, 0.5);
-  backdrop-filter: blur(4px) saturate(130%);
-  -webkit-backdrop-filter: blur(4px) saturate(130%);
+  backdrop-filter: blur(8px) saturate(150%);
+  -webkit-backdrop-filter: blur(8px) saturate(150%);
   border: 1px solid rgba(249, 115, 22, 0.4);
   box-shadow: 
     0 4px 16px 0 rgba(249, 115, 22, 0.15),
@@ -151,13 +151,16 @@ body {
 /* Glass button variant with reflective edges */
 .glass-btn {
   background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(3px) saturate(120%);
-  -webkit-backdrop-filter: blur(3px) saturate(120%);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
   border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: 0 2px 12px 0 rgba(31, 38, 135, 0.15);
+  box-shadow: 
+    0 2px 12px 0 rgba(31, 38, 135, 0.15),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.08);
   position: relative;
   transform: translateZ(0);
-  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .glass-btn::before {
@@ -176,16 +179,20 @@ body {
 .glass-btn:hover {
   background: rgba(255, 255, 255, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 16px 0 rgba(31, 38, 135, 0.2);
+  box-shadow: 
+    0 8px 24px 0 rgba(31, 38, 135, 0.3),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.1);
   transform: translateY(-1px) translateZ(0);
 }
 
 .dark .glass-btn {
   background: rgba(30, 41, 59, 0.5);
-  backdrop-filter: blur(3px) saturate(120%);
-  -webkit-backdrop-filter: blur(3px) saturate(120%);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.4);
+  box-shadow: 
+    0 4px 16px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.2);
 }
 
 .dark .glass-btn::before {
@@ -195,15 +202,19 @@ body {
 .dark .glass-btn:hover {
   background: rgba(30, 41, 59, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 
+    0 8px 24px 0 rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.2);
 }
 
 .neon-theme .glass-btn {
   background: rgba(42, 42, 42, 0.6);
-  backdrop-filter: blur(3px) saturate(120%);
-  -webkit-backdrop-filter: blur(3px) saturate(120%);
   border: 1px solid rgba(249, 115, 22, 0.5);
-  box-shadow: 0 4px 16px 0 rgba(249, 115, 22, 0.3);
+  box-shadow: 
+    0 4px 16px 0 rgba(249, 115, 22, 0.3),
+    inset 0 1px 0 0 rgba(249, 115, 22, 0.5),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.2);
 }
 
 .neon-theme .glass-btn::before {
@@ -213,19 +224,24 @@ body {
 .neon-theme .glass-btn:hover {
   background: rgba(42, 42, 42, 0.8);
   border: 1px solid rgba(251, 146, 60, 0.6);
-  box-shadow: 0 4px 20px 0 rgba(249, 115, 22, 0.4);
+  box-shadow: 
+    0 8px 24px 0 rgba(249, 115, 22, 0.4),
+    inset 0 1px 0 0 rgba(249, 115, 22, 0.6),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.2);
 }
 
 /* Glass card variant with reflective edges */
 .glass-card {
   background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(5px) saturate(135%);
-  -webkit-backdrop-filter: blur(5px) saturate(135%);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 20px 0 rgba(31, 38, 135, 0.08);
+  box-shadow: 
+    0 4px 20px 0 rgba(31, 38, 135, 0.08),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.08);
   position: relative;
   transform: translateZ(0);
-  contain: layout style paint;
 }
 
 .glass-card::before {
@@ -243,10 +259,11 @@ body {
 
 .dark .glass-card {
   background: rgba(15, 23, 42, 0.35);
-  backdrop-filter: blur(5px) saturate(135%);
-  -webkit-backdrop-filter: blur(5px) saturate(135%);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.15),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.05);
 }
 
 .dark .glass-card::before {
@@ -255,10 +272,11 @@ body {
 
 .neon-theme .glass-card {
   background: rgba(42, 42, 42, 0.45);
-  backdrop-filter: blur(5px) saturate(135%);
-  -webkit-backdrop-filter: blur(5px) saturate(135%);
   border: 1px solid rgba(249, 115, 22, 0.35);
-  box-shadow: 0 8px 32px 0 rgba(249, 115, 22, 0.15);
+  box-shadow: 
+    0 8px 32px 0 rgba(249, 115, 22, 0.15),
+    inset 0 1px 0 0 rgba(249, 115, 22, 0.4),
+    inset 0 -1px 0 0 rgba(249, 115, 22, 0.1);
 }
 
 .neon-theme .glass-card::before {
@@ -286,42 +304,24 @@ body {
   /* Force GPU acceleration only on glass elements */
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  perspective: 1000px;
-  -webkit-perspective: 1000px;
-}
-
-/* Disable expensive pseudo-elements for better performance */
-@media (max-width: 1024px) {
-  .glass::before,
-  .glass-btn::before,
-  .glass-card::before {
-    display: none;
-  }
 }
 
 /* Mobile performance optimizations */
 @media (max-width: 768px) {
-  /* Minimal blur for 60fps on mobile */
+  /* Reduce blur for 60fps on mobile */
   .glass {
-    backdrop-filter: blur(2px) saturate(110%);
-    -webkit-backdrop-filter: blur(2px) saturate(110%);
+    backdrop-filter: blur(5px) saturate(130%);
+    -webkit-backdrop-filter: blur(5px) saturate(130%);
   }
   
   .glass-btn {
-    backdrop-filter: blur(1px) saturate(105%);
-    -webkit-backdrop-filter: blur(1px) saturate(105%);
+    backdrop-filter: blur(4px) saturate(130%);
+    -webkit-backdrop-filter: blur(4px) saturate(130%);
   }
   
   .glass-card {
-    backdrop-filter: blur(2px) saturate(115%);
-    -webkit-backdrop-filter: blur(2px) saturate(115%);
-  }
-  
-  /* Reduce shadow complexity on mobile */
-  .glass, .glass-btn, .glass-card {
-    box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(6px) saturate(140%);
+    -webkit-backdrop-filter: blur(6px) saturate(140%);
   }
   
   /* Slower animations on mobile to reduce CPU */
@@ -354,7 +354,8 @@ body {
 
 /* Enhanced hover effects - optimized */
 .hover-lift {
-  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .hover-lift:hover {
@@ -363,12 +364,8 @@ body {
 
 /* Smooth transitions for interactive elements - optimized */
 button, input, select, textarea, .clickable {
-  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Add CSS containment for better performance */
-.glass-card, .rounded-2xl, .rounded-xl {
-  contain: layout style;
+  will-change: transform;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* small helpers */
@@ -416,74 +413,6 @@ button, input, select, textarea, .clickable {
   .mobile-full {
     width: 100%;
   }
-}
-
-/* Range slider styling */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-input[type="range"]::-webkit-slider-track {
-  height: 8px;
-  border-radius: 4px;
-}
-
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: white;
-  border: 2px solid #8B5CF6;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-
-input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-
-input[type="range"]::-moz-range-track {
-  height: 8px;
-  border-radius: 4px;
-}
-
-input[type="range"]::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: white;
-  border: 2px solid #8B5CF6;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-
-/* Color picker styling */
-input[type="color"] {
-  -webkit-appearance: none;
-  appearance: none;
-  border: none;
-  cursor: pointer;
-}
-
-input[type="color"]::-webkit-color-swatch-wrapper {
-  padding: 0;
-  border-radius: 8px;
-}
-
-input[type="color"]::-webkit-color-swatch {
-  border: none;
-  border-radius: 8px;
-}
-
-input[type="color"]::-moz-color-swatch {
-  border: none;
-  border-radius: 8px;
 }
 
 /* Custom scrollbar styling */
@@ -574,12 +503,7 @@ body:has(.neon-theme) button:hover,
   border-color: #fb923c !important;
 }
 
-/* Neon theme text visibility - comprehensive fixes */
-body:has(.neon-theme),
-.neon-theme {
-  color: #fed7aa !important;
-}
-
+/* Neon theme text visibility */
 body:has(.neon-theme) .text-slate-600,
 .neon-theme .text-slate-600 {
   color: #fed7aa !important;
@@ -591,71 +515,9 @@ body:has(.neon-theme) .text-slate-500,
   opacity: 0.8;
 }
 
-body:has(.neon-theme) .text-slate-700,
-.neon-theme .text-slate-700 {
-  color: #fed7aa !important;
-}
-
-body:has(.neon-theme) .text-slate-800,
-.neon-theme .text-slate-800 {
-  color: #fed7aa !important;
-}
-
-body:has(.neon-theme) .text-slate-900,
-.neon-theme .text-slate-900 {
-  color: #fed7aa !important;
-}
-
-body:has(.neon-theme) .text-black,
-.neon-theme .text-black {
-  color: #fed7aa !important;
-}
-
 body:has(.neon-theme) .opacity-70,
 .neon-theme .opacity-70 {
   opacity: 0.9 !important;
-}
-
-body:has(.neon-theme) .opacity-60,
-.neon-theme .opacity-60 {
-  opacity: 0.85 !important;
-}
-
-body:has(.neon-theme) .opacity-50,
-.neon-theme .opacity-50 {
-  opacity: 0.8 !important;
-}
-
-/* Neon theme - ensure white/light text colors */
-body:has(.neon-theme) .text-white,
-.neon-theme .text-white {
-  color: #fed7aa !important;
-}
-
-/* Neon theme - override colored text for visibility */
-body:has(.neon-theme) .text-emerald-500,
-.neon-theme .text-emerald-500 {
-  color: #6ee7b7 !important;
-}
-
-body:has(.neon-theme) .text-rose-500,
-.neon-theme .text-rose-500 {
-  color: #fb7185 !important;
-}
-
-body:has(.neon-theme) .text-blue-500,
-.neon-theme .text-blue-500 {
-  color: #60a5fa !important;
-}
-
-body:has(.neon-theme) .text-purple-500,
-.neon-theme .text-purple-500 {
-  color: #c084fc !important;
-}
-
-body:has(.neon-theme) .text-yellow-500,
-.neon-theme .text-yellow-500 {
-  color: #fbbf24 !important;
 }
 
 /* Ensure inputs are visible in all modes */
@@ -671,9 +533,4 @@ input::placeholder {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-/* Ensure modals are always on top */
-.z-\[60\] {
-  z-index: 60 !important;
 }
