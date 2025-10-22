@@ -28,7 +28,7 @@ type Transaction = {
   toId?: string;
   meta?: Record<string, any>;
 };
-type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean; avatar?: string; bio?: string };
+type Account = { id: string; name: string; role?: "system"|"agent"; frozen?: boolean; avatar?: string };
 type ProductRule = { key: string; label: string; gcsd: number };
 type PrizeItem   = { key: string; label: string; price: number };
 type Notification = { id: string; when: string; text: string };
@@ -36,19 +36,6 @@ type AdminNotification = { id: string; when: string; type: "credit"|"debit"|"red
 type RedeemRequest = { id: string; agentId: string; agentName: string; prizeKey: string; prizeLabel: string; price: number; when: string; agentPinVerified: boolean };
 type AuditLog = { id: string; when: string; adminName: string; action: string; details: string; agentName?: string; amount?: number };
 type Wishlist = Record<string, string[]>; // agentId -> array of prizeKeys
-type Backup = { 
-  id: string; 
-  timestamp: string; 
-  label: string;
-  data: { 
-    accounts: Account[]; 
-    txns: Transaction[]; 
-    stock: Record<string, number>;
-    pins: Record<string, string>;
-    goals: Record<string, number>;
-    wishlist: Wishlist;
-  }; 
-};
 
 /** Metric reset epochs (admin control) */
 type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
@@ -112,20 +99,6 @@ const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const nowISO = () => new Date().toISOString();
 const fmtTime = (d: Date) => [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,"0")).join(":");
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, {year:"numeric", month:"short", day:"2-digit" });
-const fmtDateTime = (isoString: string) => {
-  const d = new Date(isoString);
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  return `${time} · ${date}`;
-};
-const timeAgo = (isoString: string) => {
-  const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} mins ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
-  return new Date(isoString).toLocaleDateString();
-};
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
 
 // Haptic feedback helper - more comprehensive
@@ -358,298 +331,6 @@ function sumInRange(txns: Transaction[], day: Date, spanDays: number, pred: (t: 
   return txns
     .filter((t) => pred(t) && new Date(t.dateISO) >= start && new Date(t.dateISO) < end)
     .reduce((a, b) => a + b.amount, 0);
-}
-
-/* ===========================
-   Smart Analytics & Predictions
-   =========================== */
-
-/** Calculate sales forecast based on recent trends */
-function calculateSalesForecast(txns: Transaction[], accounts: Account[]) {
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const daysInMonth = monthEnd.getDate();
-  const daysElapsed = now.getDate();
-  const daysRemaining = daysInMonth - daysElapsed;
-  
-  // Get this month's credits
-  const thisMonthTxns = txns.filter(t => {
-    const txDate = new Date(t.dateISO);
-    return txDate >= monthStart && txDate <= now && t.kind === 'credit' && t.toId && accounts.find(a => a.id === t.toId && a.role === 'agent');
-  });
-  
-  const totalDistributed = thisMonthTxns.reduce((sum, t) => sum + t.amount, 0);
-  const dailyAverage = daysElapsed > 0 ? totalDistributed / daysElapsed : 0;
-  const projectedMonthEnd = totalDistributed + (dailyAverage * daysRemaining);
-  
-  // Get last month for comparison
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-  const lastMonthTxns = txns.filter(t => {
-    const txDate = new Date(t.dateISO);
-    return txDate >= lastMonthStart && txDate <= lastMonthEnd && t.kind === 'credit' && t.toId && accounts.find(a => a.id === t.toId && a.role === 'agent');
-  });
-  const lastMonthTotal = lastMonthTxns.reduce((sum, t) => sum + t.amount, 0);
-  
-  return {
-    daysElapsed,
-    daysInMonth,
-    daysRemaining,
-    totalDistributed,
-    dailyAverage: Math.round(dailyAverage),
-    projectedMonthEnd: Math.round(projectedMonthEnd),
-    lastMonthTotal,
-    difference: Math.round(projectedMonthEnd - lastMonthTotal),
-    percentChange: lastMonthTotal > 0 ? Math.round(((projectedMonthEnd - lastMonthTotal) / lastMonthTotal) * 100) : 0,
-    confidence: daysElapsed >= 7 ? 'High' : daysElapsed >= 3 ? 'Medium' : 'Low'
-  };
-}
-
-/** Assess goal difficulty for an agent */
-function assessGoalDifficulty(goalAmount: number, agentId: string, txns: Transaction[]) {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  
-  // Calculate 30-day average earnings
-  const recentEarnings = txns.filter(t => 
-    t.kind === 'credit' && 
-    t.toId === agentId && 
-    new Date(t.dateISO) >= thirtyDaysAgo
-  );
-  
-  const totalEarned = recentEarnings.reduce((sum, t) => sum + t.amount, 0);
-  const avgPerMonth = totalEarned; // Already 30 days
-  
-  if (avgPerMonth === 0) {
-    return { 
-      difficulty: 'Unknown', 
-      color: '🟤', 
-      bgClass: 'bg-gray-500', 
-      reason: 'No recent activity to assess',
-      percentAboveAverage: 0,
-      probability: 0
-    };
-  }
-  
-  const percentAboveAverage = ((goalAmount - avgPerMonth) / avgPerMonth) * 100;
-  
-  // Get best month ever
-  const allMonths = new Map<string, number>();
-  txns.filter(t => t.kind === 'credit' && t.toId === agentId).forEach(t => {
-    const month = monthKey(new Date(t.dateISO));
-    allMonths.set(month, (allMonths.get(month) || 0) + t.amount);
-  });
-  const bestMonth = Math.max(...Array.from(allMonths.values()), 0);
-  
-  let difficulty = '';
-  let color = '';
-  let bgClass = '';
-  let probability = 0;
-  
-  if (percentAboveAverage < -10) {
-    difficulty = 'Easy';
-    color = '🟢';
-    bgClass = 'bg-emerald-500';
-    probability = 90;
-  } else if (percentAboveAverage < 10) {
-    difficulty = 'Balanced';
-    color = '🟡';
-    bgClass = 'bg-yellow-500';
-    probability = 70;
-  } else if (percentAboveAverage < 30) {
-    difficulty = 'Challenging';
-    color = '🟠';
-    bgClass = 'bg-orange-500';
-    probability = 50;
-  } else if (percentAboveAverage < 60) {
-    difficulty = 'Hard';
-    color = '🔴';
-    bgClass = 'bg-red-500';
-    probability = 30;
-  } else {
-    difficulty = 'Nearly Impossible';
-    color = '⚫';
-    bgClass = 'bg-gray-900';
-    probability = 10;
-  }
-  
-  return {
-    difficulty,
-    color,
-    bgClass,
-    percentAboveAverage: Math.round(percentAboveAverage),
-    avgPerMonth: Math.round(avgPerMonth),
-    bestMonth: Math.round(bestMonth),
-    probability,
-    reason: percentAboveAverage > 0 
-      ? `Requires +${Math.round(percentAboveAverage)}% above your average`
-      : `Below your ${Math.round(avgPerMonth)} GCSD average`
-  };
-}
-
-/** Suggest optimal goal for an agent */
-function suggestGoal(agentId: string, txns: Transaction[]) {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const recentEarnings = txns.filter(t => 
-    t.kind === 'credit' && 
-    t.toId === agentId && 
-    new Date(t.dateISO) >= thirtyDaysAgo
-  );
-  
-  const totalEarned = recentEarnings.reduce((sum, t) => sum + t.amount, 0);
-  const avg = Math.round(totalEarned);
-  
-  if (avg === 0) {
-    return {
-      safe: 500,
-      balanced: 1000,
-      stretch: 1500,
-      ambitious: 2000
-    };
-  }
-  
-  return {
-    safe: Math.round(avg * 0.85),
-    balanced: avg,
-    stretch: Math.round(avg * 1.2),
-    ambitious: Math.round(avg * 1.5)
-  };
-}
-
-/** Detect approaching milestones */
-function detectMilestones(agentId: string, balance: number, goal: number | undefined, rank: number, txns: Transaction[]) {
-  const milestones: { type: string; message: string; progress: number; icon: string }[] = [];
-  
-  // Goal milestone
-  if (goal && goal > balance) {
-    const remaining = goal - balance;
-    const progress = (balance / goal) * 100;
-    if (progress >= 90) {
-      milestones.push({
-        type: 'goal',
-        message: `Only ${remaining} GCSD until your goal! (${Math.round(progress)}%)`,
-        progress,
-        icon: '🎯'
-      });
-    }
-  }
-  
-  // Rank milestone (if within 500 GCSD of next rank)
-  if (rank > 1) {
-    milestones.push({
-      type: 'rank',
-      message: `You're #${rank}! Keep pushing for #${rank - 1}!`,
-      progress: 0,
-      icon: '🏆'
-    });
-  }
-  
-  // Round number milestones
-  const nextRoundNumber = Math.ceil(balance / 1000) * 1000;
-  if (nextRoundNumber - balance <= 200 && nextRoundNumber > balance) {
-    const progress = (balance / nextRoundNumber) * 100;
-    milestones.push({
-      type: 'milestone',
-      message: `Almost at ${nextRoundNumber.toLocaleString()} GCSD! (${nextRoundNumber - balance} away)`,
-      progress,
-      icon: '💎'
-    });
-  }
-  
-  return milestones;
-}
-
-/** Check for inactivity */
-function checkInactivity(agentId: string, txns: Transaction[], lastLogin?: string) {
-  const now = Date.now();
-  const fiveDaysAgo = now - 5 * 24 * 60 * 60 * 1000;
-  const tenDaysAgo = now - 10 * 24 * 60 * 60 * 1000;
-  
-  // Check last earning
-  const agentTxns = txns.filter(t => t.kind === 'credit' && t.toId === agentId);
-  if (agentTxns.length === 0) {
-    return { inactive: false, days: 0, severity: 'none' };
-  }
-  
-  const lastTxn = agentTxns.sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime())[0];
-  const lastActivity = new Date(lastTxn.dateISO).getTime();
-  const daysSinceActivity = Math.floor((now - lastActivity) / (24 * 60 * 60 * 1000));
-  
-  if (lastActivity < tenDaysAgo) {
-    return { inactive: true, days: daysSinceActivity, severity: 'critical' as const, lastDate: lastTxn.dateISO };
-  } else if (lastActivity < fiveDaysAgo) {
-    return { inactive: true, days: daysSinceActivity, severity: 'warning' as const, lastDate: lastTxn.dateISO };
-  }
-  
-  return { inactive: false, days: daysSinceActivity, severity: 'none' as const };
-}
-
-/** Recommend prizes based on balance and earning trends */
-function recommendPrizes(agentId: string, balance: number, txns: Transaction[], prizes: PrizeItem[], wishlist: string[]) {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const recentEarnings = txns.filter(t => 
-    t.kind === 'credit' && 
-    t.toId === agentId && 
-    new Date(t.dateISO) >= thirtyDaysAgo
-  );
-  
-  const totalEarned = recentEarnings.reduce((sum, t) => sum + t.amount, 0);
-  const daysUntilMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
-  const avgPerDay = recentEarnings.length > 0 ? totalEarned / 30 : 0;
-  const projectedBalance = balance + (avgPerDay * daysUntilMonthEnd);
-  
-  const recommendations: { prize: PrizeItem; reason: string; daysUntil: number; type: 'now' | 'soon' | 'save' }[] = [];
-  
-  prizes.forEach(prize => {
-    const isWishlisted = wishlist.includes(prize.key);
-    
-    if (balance >= prize.price) {
-      // Can afford now
-      recommendations.push({
-        prize,
-        reason: isWishlisted ? '⭐ On your wishlist - you can afford it now!' : 'You can afford this now!',
-        daysUntil: 0,
-        type: 'now'
-      });
-    } else if (projectedBalance >= prize.price && avgPerDay > 0) {
-      // Will be able to afford soon
-      const daysNeeded = Math.ceil((prize.price - balance) / avgPerDay);
-      if (daysNeeded <= 7) {
-        recommendations.push({
-          prize,
-          reason: isWishlisted 
-            ? `⭐ Wishlist item - just ${daysNeeded} days away!` 
-            : `Just ${daysNeeded} more days at your current pace!`,
-          daysUntil: daysNeeded,
-          type: 'soon'
-        });
-      }
-    } else if (balance >= prize.price * 0.7 && balance < prize.price) {
-      // Close to affording (70%+)
-      const remaining = prize.price - balance;
-      const progress = Math.round((balance / prize.price) * 100);
-      recommendations.push({
-        prize,
-        reason: `${progress}% there! Save ${remaining} more GCSD`,
-        daysUntil: avgPerDay > 0 ? Math.ceil(remaining / avgPerDay) : 999,
-        type: 'save'
-      });
-    }
-  });
-  
-  // Sort: wishlist first, then by type (now > soon > save), then by price
-  return recommendations
-    .sort((a, b) => {
-      const aWish = wishlist.includes(a.prize.key) ? 0 : 1;
-      const bWish = wishlist.includes(b.prize.key) ? 0 : 1;
-      if (aWish !== bWish) return aWish - bWish;
-      
-      const typeOrder = { now: 0, soon: 1, save: 2 };
-      if (typeOrder[a.type] !== typeOrder[b.type]) return typeOrder[a.type] - typeOrder[b.type];
-      
-      return a.prize.price - b.prize.price;
-    })
-    .slice(0, 5); // Top 5 recommendations
 }
 
 /* ===========================
@@ -1147,11 +828,6 @@ function EnhancedPodium({ leaderboard, theme }: { leaderboard: Array<{ name: str
             <div className="text-center mb-2">
               <div className="font-bold text-lg">{agent.name}</div>
               <div className="text-sm opacity-70">{agent.balance.toLocaleString()} GCSD</div>
-              {agent.bio && (
-                <div className="text-xs opacity-60 italic mt-1 max-w-[120px] truncate">
-                  "{agent.bio}"
-                </div>
-              )}
               {(() => {
                 const badge = getBadge(position, agent.balance);
                 return badge ? (
@@ -2048,10 +1724,6 @@ export default function GCSDApp() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   
-  /** backup system */
-  const [backups, setBackups] = useState<Backup[]>([]);
-  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
-  const [lastAutoBackup, setLastAutoBackup] = useState<string>("");
 
   // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
@@ -2108,19 +1780,7 @@ export default function GCSDApp() {
           setTxns(seedTxns);
           await kvSet("gcs-v4-core", { accounts: seedAccounts, txns: seedTxns });
         }
-        const savedStock = await kvGet<Record<string, number>>("gcs-v4-stock");
-        if (!savedStock) {
-          setStock(INITIAL_STOCK);
-        } else {
-          // Check if all stock values are 0 (corrupted state)
-          const allZero = Object.values(savedStock).every(val => val === 0);
-          if (allZero) {
-            setStock(INITIAL_STOCK);
-            await kvSet("gcs-v4-stock", INITIAL_STOCK);
-          } else {
-            setStock(savedStock);
-          }
-        }
+        setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         // Load notifications from KV storage instead of starting empty
@@ -2131,9 +1791,6 @@ export default function GCSDApp() {
         setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-        setBackups((await kvGet<Backup[]>("gcs-v4-backups")) ?? []);
-        setAutoBackupEnabled((await kvGet<boolean>("gcs-v4-auto-backup")) ?? true);
-        setLastAutoBackup((await kvGet<string>("gcs-v4-last-auto-backup")) ?? "");
         
         // CRITICAL: Theme is STRICTLY LOCAL - load from localStorage ONLY
         // NEVER from KV storage - each browser has its own theme
@@ -2177,9 +1834,6 @@ export default function GCSDApp() {
       if (key === "gcs-v4-wishlist") setWishlist(val ?? (await kvGet("gcs-v4-wishlist")) ?? {});
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
-      if (key === "gcs-v4-backups") setBackups(val ?? (await kvGet("gcs-v4-backups")) ?? []);
-      if (key === "gcs-v4-auto-backup") setAutoBackupEnabled(val ?? (await kvGet("gcs-v4-auto-backup")) ?? true);
-      if (key === "gcs-v4-last-auto-backup") setLastAutoBackup(val ?? (await kvGet("gcs-v4-last-auto-backup")) ?? "");
       
       // CRITICAL: Theme is NEVER synced via KV - ignore any theme-related KV changes
       // Each browser maintains its own theme in localStorage independently
@@ -2203,9 +1857,6 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-backups", backups);         }, [hydrated, backups]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-auto-backup", autoBackupEnabled); }, [hydrated, autoBackupEnabled]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-last-auto-backup", lastAutoBackup); }, [hydrated, lastAutoBackup]);
   
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
@@ -2249,45 +1900,6 @@ export default function GCSDApp() {
     }
   }, [hydrated]);
   
-  /* Auto-backup every 6 hours */
-  useEffect(() => {
-    if (!hydrated || !autoBackupEnabled) return;
-    
-    const performAutoBackup = () => {
-      const now = new Date();
-      const lastBackup = lastAutoBackup ? new Date(lastAutoBackup) : null;
-      
-      // Check if 6 hours have passed
-      if (!lastBackup || (now.getTime() - lastBackup.getTime()) > 6 * 60 * 60 * 1000) {
-        console.log("🔄 Performing auto-backup...");
-        
-        const backup: Backup = {
-          id: uid(),
-          timestamp: nowISO(),
-          label: `Auto-backup ${now.toLocaleString()}`,
-          data: {
-            accounts,
-            txns,
-            stock,
-            pins,
-            goals,
-            wishlist
-          }
-        };
-        
-        setBackups(prev => [backup, ...prev].slice(0, 20)); // Keep last 20 backups
-        setLastAutoBackup(nowISO());
-        console.log("✅ Auto-backup complete");
-      }
-    };
-    
-    // Run immediately on mount if needed
-    performAutoBackup();
-    
-    // Then check every hour
-    const interval = setInterval(performAutoBackup, 60 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [hydrated, autoBackupEnabled, accounts, txns, stock, pins, goals, wishlist, lastAutoBackup]);
   
   useEffect(()=> {
     if (!showIntro) return;
@@ -3764,10 +3376,6 @@ export default function GCSDApp() {
                 onUnfreezeAgent={unfreezeAgent}
                 onApproveRedeem={approveRedeem}
                 onRejectRedeem={rejectRedeem}
-                backups={backups}
-                autoBackupEnabled={autoBackupEnabled}
-                onToggleAutoBackup={() => setAutoBackupEnabled(prev => !prev)}
-                onRestoreBackup={restoreFromBackup}
               />
             </motion.div>
           )}
@@ -3886,7 +3494,7 @@ function Home({
     .map((id) => {
       const balance = balances.get(id) || 0;
       const account = accounts.find((a) => a.id === id);
-      return { id, name: account?.name || "—", balance, avatar: account?.avatar, bio: account?.bio };
+      return { id, name: account?.name || "—", balance, avatar: account?.avatar };
     })
     .sort((a, b) => b.balance - a.balance), [nonSystemIds, balances, accounts]);
 
@@ -4213,10 +3821,6 @@ function AgentPortal({
   const [showAvatarCropper, setShowAvatarCropper] = useState(false);
   const [avatarImageSrc, setAvatarImageSrc] = useState<string | null>(null);
   
-  // Bio editing
-  const [editingBio, setEditingBio] = useState(false);
-  const [bioInput, setBioInput] = useState(currentAgent?.bio || "");
-  const [showBioPin, setShowBioPin] = useState(false);
   
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -4273,19 +3877,6 @@ function AgentPortal({
     console.log("✅ Avatar save complete!");
   };
   
-  const saveBio = () => {
-    setShowBioPin(true);
-  };
-  
-  const handleBioSave = (pinValid: boolean) => {
-    if (pinValid) {
-      onUpdateAccount({ bio: bioInput.slice(0, 50) });
-      setEditingBio(false);
-      haptic([30, 20, 30]);
-      toast.success("✅ Bio updated!");
-    }
-    setShowBioPin(false);
-  };
 
   return (
     <div>
@@ -4354,73 +3945,6 @@ function AgentPortal({
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
-      {/* Milestone Alerts */}
-      {useMemo(() => {
-        // Calculate rank including ALL agents (even those with 0 balance)
-        const agentBalances = new Map<string, number>();
-        
-        // Initialize all agents with 0 balance
-        accounts.filter(a => a.role === 'agent').forEach(a => {
-          agentBalances.set(a.id, 0);
-        });
-        
-        // Add transaction amounts
-        txns.forEach(t => {
-          if (t.kind === 'credit' && t.toId) {
-            agentBalances.set(t.toId, (agentBalances.get(t.toId) || 0) + t.amount);
-          }
-          if (t.kind === 'debit' && t.fromId) {
-            agentBalances.set(t.fromId, (agentBalances.get(t.fromId) || 0) - t.amount);
-          }
-        });
-        
-        const rank = Array.from(agentBalances.entries())
-          .sort(([, a], [, b]) => b - a)
-          .findIndex(([id]) => id === agentId) + 1;
-        
-        const milestones = detectMilestones(agentId, balance, goal, rank, txns);
-        
-        if (milestones.length === 0) return null;
-        
-        return (
-          <motion.div
-            className="mb-4 space-y-2"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            {milestones.map((milestone, idx) => (
-              <motion.div
-                key={idx}
-                className={classNames(
-                  "p-3 rounded-xl border",
-                  milestone.type === 'goal' ? 'bg-emerald-500/10 border-emerald-500/30' :
-                  milestone.type === 'rank' ? 'bg-blue-500/10 border-blue-500/30' :
-                  'bg-purple-500/10 border-purple-500/30'
-                )}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: idx * 0.1 }}
-                whileHover={{ scale: 1.02, x: 5 }}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{milestone.icon}</span>
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold">{milestone.message}</div>
-                    {milestone.progress > 0 && (
-                      <div className="mt-1 h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
-                          style={{ width: `${milestone.progress}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        );
-      }, [agentId, balance, goal, accounts, txns])}
       
       <div className="grid lg:grid-cols-2 gap-4">
         {/* Summary */}
@@ -4454,73 +3978,6 @@ function AgentPortal({
           </div>
                 </div>
                 
-                {/* Bio Section */}
-                <div className="mt-3 p-3 rounded-xl border bg-black/5 dark:bg-white/5">
-                  {!editingBio ? (
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="text-xs opacity-70 mb-1">Bio/Quote</div>
-                        <div className="text-sm italic">
-                          {currentAgent?.bio || "No bio yet - click edit to add one!"}
-                        </div>
-                      </div>
-                      <motion.button
-                        className={classNames("text-xs px-2 py-1 rounded-lg", neonBtn(theme))}
-                        onClick={() => {
-                          haptic(20);
-                          setBioInput(currentAgent?.bio || "");
-                          setEditingBio(true);
-                        }}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        ✏️ Edit
-                      </motion.button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-xs opacity-70 mb-1">Edit Bio (max 50 characters)</div>
-                      <input
-                        type="text"
-                        value={bioInput}
-                        onChange={(e) => setBioInput(e.target.value)}
-                        maxLength={50}
-                        placeholder="Add a quote or personal message..."
-                        className={inputCls(theme)}
-                      />
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs opacity-60">{bioInput.length}/50 characters</span>
-                        <div className="flex gap-2">
-                          <motion.button
-                            className={classNames("text-xs px-3 py-1.5 rounded-lg", neonBtn(theme, true))}
-                            onClick={() => {
-                              haptic(30);
-                              saveBio();
-                            }}
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            💾 Save
-                          </motion.button>
-                          <motion.button
-                            className="text-xs px-3 py-1.5 rounded-lg opacity-60 hover:opacity-100"
-                            onClick={() => {
-                              haptic(20);
-                              setEditingBio(false);
-                              setBioInput(currentAgent?.bio || "");
-                            }}
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            Cancel
-                          </motion.button>
-                        </div>
-                      </div>
-                      <div className="text-xs opacity-70">🔒 PIN required to save</div>
-                    </div>
-                  )}
-                </div>
-                
           <div className="grid sm:grid-cols-3 gap-3">
             <TileRow label="Balance" value={balance} />
             <TileRow label="Lifetime Earned" value={Math.max(0, lifetimeEarn)} />
@@ -4545,80 +4002,9 @@ function AgentPortal({
               </div>
               <div className="mt-2 text-xs opacity-60">🔒 PIN required to set goal</div>
               
-              {/* Goal Suggestions */}
-              {goal === 0 && useMemo(() => {
-                const suggestions = suggestGoal(agentId, txns);
-                return (
-                  <div className="mt-3 p-3 rounded-lg bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
-                    <div className="text-xs font-semibold mb-2">💡 Smart Goal Suggestions</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="text-xs px-2 py-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 transition-colors"
-                        onClick={() => {
-                          setGoalInput(String(suggestions.safe));
-                          haptic(20);
-                        }}
-                      >
-                        🟢 Safe<br/>{suggestions.safe.toLocaleString()}
-                      </button>
-                      <button
-                        className="text-xs px-2 py-1.5 rounded bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 transition-colors"
-                        onClick={() => {
-                          setGoalInput(String(suggestions.balanced));
-                          haptic(20);
-                        }}
-                      >
-                        🟡 Balanced ⭐<br/>{suggestions.balanced.toLocaleString()}
-                      </button>
-                      <button
-                        className="text-xs px-2 py-1.5 rounded bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 transition-colors"
-                        onClick={() => {
-                          setGoalInput(String(suggestions.stretch));
-                          haptic(20);
-                        }}
-                      >
-                        🟠 Stretch<br/>{suggestions.stretch.toLocaleString()}
-                      </button>
-                      <button
-                        className="text-xs px-2 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 transition-colors"
-                        onClick={() => {
-                          setGoalInput(String(suggestions.ambitious));
-                          haptic(20);
-                        }}
-                      >
-                        🔴 Ambitious<br/>{suggestions.ambitious.toLocaleString()}
-                      </button>
-                    </div>
-                    <div className="text-xs opacity-60 mt-2">Based on your 30-day average</div>
-                  </div>
-                );
-              }, [agentId, txns, goal])}
               
               {goal > 0 && (
                 <>
-                  {/* Goal Difficulty Indicator */}
-                  {useMemo(() => {
-                    const difficulty = assessGoalDifficulty(goal, agentId, txns);
-                    return (
-                      <div className="mt-3 p-3 rounded-lg bg-black/5 dark:bg-white/5 border">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg">{difficulty.color}</span>
-                            <span className="text-sm font-semibold">Difficulty: {difficulty.difficulty}</span>
-                          </div>
-                          <span className={classNames("px-2 py-0.5 rounded text-xs text-white", difficulty.bgClass)}>
-                            {difficulty.probability}% success rate
-                          </span>
-                        </div>
-                        <div className="text-xs opacity-70">{difficulty.reason}</div>
-                        {difficulty.avgPerMonth > 0 && (
-                          <div className="text-xs opacity-60 mt-1">
-                            Your 30-day avg: {difficulty.avgPerMonth.toLocaleString()} • Best ever: {difficulty.bestMonth.toLocaleString()}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }, [goal, agentId, txns])}
                   
                   <div className="mt-3 text-sm opacity-70">{progress}% towards {goal.toLocaleString()} GCSD</div>
                   <div className="mt-2 h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
@@ -4913,29 +4299,6 @@ function AgentPortal({
         )}
       </AnimatePresence>
       
-      {/* Bio PIN Modal */}
-      <AnimatePresence>
-        {showBioPin && (
-          <PinModal
-            open={showBioPin}
-            onClose={() => setShowBioPin(false)}
-            onCheck={(pin) => {
-              const agentPin = pins[agentId];
-              if (!agentPin) {
-                toast.error("No PIN set for this agent");
-                return false;
-              }
-              if (pin === agentPin) {
-                handleBioSave(true);
-                return true;
-              }
-              toast.error("❌ Incorrect PIN");
-              return false;
-            }}
-            theme={theme}
-          />
-        )}
-      </AnimatePresence>
       
       {/* Receipt Modal */}
       <AnimatePresence>
@@ -5584,122 +4947,6 @@ function AdminPortal({
             </motion.div>
           </div>
 
-          {/* Sales Forecasting Card */}
-          {useMemo(() => {
-            const forecast = calculateSalesForecast(txns, accounts);
-            return (
-              <motion.div
-                className={classNames("rounded-2xl border p-6", neonBox(theme), "bg-gradient-to-br from-blue-500/5 to-purple-500/5")}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    📊 Sales Forecast
-                  </h3>
-                  <span className={classNames(
-                    "px-3 py-1 rounded-full text-xs font-semibold",
-                    forecast.confidence === 'High' ? 'bg-emerald-500/20 text-emerald-600' :
-                    forecast.confidence === 'Medium' ? 'bg-yellow-500/20 text-yellow-600' :
-                    'bg-gray-500/20 text-gray-600'
-                  )}>
-                    Confidence: {forecast.confidence}
-                  </span>
-                </div>
-
-                <div className="grid md:grid-cols-4 gap-4 mb-4">
-                  <div className="bg-black/5 dark:bg-white/5 rounded-lg p-3">
-                    <div className="text-xs opacity-70 mb-1">Days Elapsed</div>
-                    <div className="text-2xl font-bold">{forecast.daysElapsed}/{forecast.daysInMonth}</div>
-                    <div className="text-xs opacity-60 mt-1">{forecast.daysRemaining} days left</div>
-                  </div>
-
-                  <div className="bg-black/5 dark:bg-white/5 rounded-lg p-3">
-                    <div className="text-xs opacity-70 mb-1">Distributed So Far</div>
-                    <div className="text-2xl font-bold text-blue-500">{forecast.totalDistributed.toLocaleString()}</div>
-                    <div className="text-xs opacity-60 mt-1">GCSD</div>
-                  </div>
-
-                  <div className="bg-black/5 dark:bg-white/5 rounded-lg p-3">
-                    <div className="text-xs opacity-70 mb-1">Daily Average</div>
-                    <div className="text-2xl font-bold text-purple-500">{forecast.dailyAverage.toLocaleString()}</div>
-                    <div className="text-xs opacity-60 mt-1">GCSD/day</div>
-                  </div>
-
-                  <div className="bg-black/5 dark:bg-white/5 rounded-lg p-3">
-                    <div className="text-xs opacity-70 mb-1">Projected Month-End</div>
-                    <div className="text-2xl font-bold text-emerald-500">{forecast.projectedMonthEnd.toLocaleString()}</div>
-                    <div className="text-xs opacity-60 mt-1">GCSD total</div>
-                  </div>
-                </div>
-
-                <div className="border-t pt-4 mt-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm opacity-70">vs. Last Month</div>
-                      <div className="text-xs opacity-60">Last month: {forecast.lastMonthTotal.toLocaleString()} GCSD</div>
-                    </div>
-                    <div className="text-right">
-                      <div className={classNames(
-                        "text-2xl font-bold flex items-center gap-2",
-                        forecast.percentChange > 0 ? "text-emerald-500" : forecast.percentChange < 0 ? "text-red-500" : "text-gray-500"
-                      )}>
-                        {forecast.percentChange > 0 ? "📈" : forecast.percentChange < 0 ? "📉" : "➡️"}
-                        {forecast.percentChange > 0 ? "+" : ""}{forecast.percentChange}%
-                      </div>
-                      <div className="text-xs opacity-60">
-                        {forecast.difference > 0 ? "+" : ""}{forecast.difference.toLocaleString()} GCSD difference
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          }, [txns, accounts, theme])}
-
-          {/* Inactivity Alerts */}
-          {useMemo(() => {
-            const inactiveAgents = accounts
-              .filter(a => a.role === 'agent')
-              .map(a => ({ ...a, inactivity: checkInactivity(a.id, txns) }))
-              .filter(a => a.inactivity.inactive);
-
-            if (inactiveAgents.length === 0) return null;
-
-            return (
-              <motion.div
-                className={classNames("rounded-2xl border p-4", neonBox(theme), "bg-orange-500/5 border-orange-500/30")}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.25 }}
-              >
-                <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
-                  ⚠️ Inactivity Alerts
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500 text-white">{inactiveAgents.length}</span>
-                </h3>
-                <div className="space-y-2">
-                  {inactiveAgents.slice(0, 5).map(agent => (
-                    <div key={agent.id} className="flex items-center justify-between p-2 rounded-lg bg-black/5 dark:bg-white/5">
-                      <div>
-                        <div className="font-medium">{agent.name}</div>
-                        <div className="text-xs opacity-60">
-                          Last activity: {agent.inactivity.days} days ago
-                          {agent.inactivity.lastDate && ` (${fmtDate(new Date(agent.inactivity.lastDate))})`}
-                        </div>
-                      </div>
-                      <span className={classNames(
-                        "px-2 py-1 rounded text-xs font-semibold",
-                        agent.inactivity.severity === 'critical' ? 'bg-red-500 text-white' : 'bg-yellow-500 text-white'
-                      )}>
-                        {agent.inactivity.severity === 'critical' ? '🔴 Critical' : '🟡 Warning'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            );
-          }, [accounts, txns, theme])}
 
           {/* Agent Balances with Freeze Controls */}
           <div className="grid md:grid-cols-3 gap-4">
@@ -6572,14 +5819,8 @@ function AdminPortal({
                       )}
                     </div>
                     <div className="text-xs opacity-70">{log.details}</div>
-                    <div className="text-xs opacity-50 mt-1 flex items-center gap-2">
-                      <span>by {log.adminName}</span>
-                      <span>•</span>
-                      <span className="flex items-center gap-1">
-                        🕐 {fmtDateTime(log.when)}
-                      </span>
-                      <span>•</span>
-                      <span className="opacity-70">{timeAgo(log.when)}</span>
+                    <div className="text-xs opacity-50 mt-1">
+                      by {log.adminName} • {new Date(log.when).toLocaleString()}
                     </div>
                   </div>
                   {log.amount && (
@@ -6920,19 +6161,17 @@ function Picker({
             <div className="text-xs opacity-70 mt-1">PIN required</div>
           </HoverCard>
 
-          {useMemo(() => 
-            accounts
-              .filter((a) => a.role !== "system")
-              .map((a, index) => (
-                <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={0}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
-                    <div className="font-medium flex-1 truncate">{a.name}</div>
-                  </div>
-                  <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
-                </HoverCard>
-              )), [accounts, balances, theme, onChooseAgent]
-          )}
+          {accounts
+            .filter((a) => a.role !== "system")
+            .map((a, index) => (
+              <HoverCard key={a.id} theme={theme} onClick={() => { haptic(40); onChooseAgent(a.id); }} delay={0}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Avatar name={a.name} size="sm" theme={theme} avatarUrl={a.avatar} />
+                  <div className="font-medium flex-1 truncate">{a.name}</div>
+                </div>
+                <div className="text-xs opacity-70">Balance: {(balances.get(a.id) || 0).toLocaleString()} GCSD</div>
+              </HoverCard>
+            ))}
         </div>
       </motion.div>
     </motion.div>
