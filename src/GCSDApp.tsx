@@ -36,6 +36,19 @@ type AdminNotification = { id: string; when: string; type: "credit"|"debit"|"red
 type RedeemRequest = { id: string; agentId: string; agentName: string; prizeKey: string; prizeLabel: string; price: number; when: string; agentPinVerified: boolean };
 type AuditLog = { id: string; when: string; adminName: string; action: string; details: string; agentName?: string; amount?: number };
 type Wishlist = Record<string, string[]>; // agentId -> array of prizeKeys
+type Backup = { 
+  id: string; 
+  timestamp: string; 
+  label: string;
+  data: { 
+    accounts: Account[]; 
+    txns: Transaction[]; 
+    stock: Record<string, number>;
+    pins: Record<string, string>;
+    goals: Record<string, number>;
+    wishlist: Wishlist;
+  }; 
+};
 
 /** Metric reset epochs (admin control) */
 type MetricsEpoch = { earned30d?: string; spent30d?: string; starOfDay?: string; leaderOfMonth?: string };
@@ -1724,6 +1737,11 @@ export default function GCSDApp() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   
+  /** backup system */
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
+  const [lastAutoBackup, setLastAutoBackup] = useState<string>("");
+  
 
   // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
@@ -1741,39 +1759,7 @@ export default function GCSDApp() {
         const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>("gcs-v4-core");
         if (core?.accounts && core?.txns) {
           // Clean up duplicates and ensure only valid agents exist
-          const vault = core.accounts.find(a => a.role === "system") || seedAccounts[0];
-          const existingAgents = core.accounts.filter(a => a.role === "agent");
-          
-          // Remove duplicates and only keep agents from AGENT_NAMES
-          const cleanedAgents: Account[] = [];
-          const seenNames = new Set<string>();
-          
-          // First, keep existing agents that are in AGENT_NAMES (no duplicates)
-          for (const agent of existingAgents) {
-            const normalizedName = agent.name.trim().toLowerCase();
-            if (AGENT_NAMES.some(n => n.toLowerCase() === normalizedName) && !seenNames.has(normalizedName)) {
-              cleanedAgents.push(agent);
-              seenNames.add(normalizedName);
-            }
-          }
-          
-          // Add any missing agents from AGENT_NAMES
-          for (const name of AGENT_NAMES) {
-            const normalizedName = name.toLowerCase();
-            if (!seenNames.has(normalizedName)) {
-              cleanedAgents.push({ id: uid(), name, role: "agent" });
-              seenNames.add(normalizedName);
-            }
-          }
-          
-          const cleanedAccounts = [vault, ...cleanedAgents];
-          
-          // Save cleaned accounts back to database
-          if (cleanedAccounts.length !== core.accounts.length) {
-            await kvSet("gcs-v4-core", { accounts: cleanedAccounts, txns: core.txns });
-          }
-          
-          setAccounts(cleanedAccounts);
+          setAccounts(core.accounts);
           setTxns(core.txns);
         } else {
           setAccounts(seedAccounts);
@@ -1791,6 +1777,9 @@ export default function GCSDApp() {
         setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
+        setBackups((await kvGet<Backup[]>("gcs-v4-backups")) ?? []);
+        setAutoBackupEnabled((await kvGet<boolean>("gcs-v4-auto-backup")) ?? true);
+        setLastAutoBackup((await kvGet<string>("gcs-v4-last-auto-backup")) ?? "");
         
         // CRITICAL: Theme is STRICTLY LOCAL - load from localStorage ONLY
         // NEVER from KV storage - each browser has its own theme
@@ -1834,6 +1823,9 @@ export default function GCSDApp() {
       if (key === "gcs-v4-wishlist") setWishlist(val ?? (await kvGet("gcs-v4-wishlist")) ?? {});
       if (key === "gcs-v4-epochs") setEpochs(val ?? (await kvGet("gcs-v4-epochs")) ?? {});
       if (key === "gcs-v4-metrics") setMetrics(val ?? (await kvGet("gcs-v4-metrics")) ?? {});
+      if (key === "gcs-v4-backups") setBackups(val ?? (await kvGet("gcs-v4-backups")) ?? []);
+      if (key === "gcs-v4-auto-backup") setAutoBackupEnabled(val ?? (await kvGet("gcs-v4-auto-backup")) ?? true);
+      if (key === "gcs-v4-last-auto-backup") setLastAutoBackup(val ?? (await kvGet("gcs-v4-last-auto-backup")) ?? "");
       
       // CRITICAL: Theme is NEVER synced via KV - ignore any theme-related KV changes
       // Each browser maintains its own theme in localStorage independently
@@ -1857,6 +1849,9 @@ export default function GCSDApp() {
   useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-backups", backups);         }, [hydrated, backups]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-auto-backup", autoBackupEnabled); }, [hydrated, autoBackupEnabled]);
+  useEffect(() => { if (hydrated) kvSet("gcs-v4-last-auto-backup", lastAutoBackup); }, [hydrated, lastAutoBackup]);
   
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
@@ -1900,6 +1895,45 @@ export default function GCSDApp() {
     }
   }, [hydrated]);
   
+  /* Auto-backup every 6 hours */
+  useEffect(() => {
+    if (!hydrated || !autoBackupEnabled) return;
+    
+    const performAutoBackup = () => {
+      const now = new Date();
+      const lastBackup = lastAutoBackup ? new Date(lastAutoBackup) : null;
+      
+      // Check if 6 hours have passed
+      if (!lastBackup || (now.getTime() - lastBackup.getTime()) > 6 * 60 * 60 * 1000) {
+        console.log("🔄 Performing auto-backup...");
+        
+        const backup: Backup = {
+          id: uid(),
+          timestamp: nowISO(),
+          label: `Auto-backup ${now.toLocaleString()}`,
+          data: {
+            accounts,
+            txns,
+            stock,
+            pins,
+            goals,
+            wishlist
+          }
+        };
+        
+        setBackups(prev => [backup, ...prev].slice(0, 20)); // Keep last 20 backups
+        setLastAutoBackup(nowISO());
+        console.log("✅ Auto-backup complete");
+      }
+    };
+    
+    // Run immediately on mount if needed
+    performAutoBackup();
+    
+    // Then check every hour
+    const interval = setInterval(performAutoBackup, 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [hydrated, autoBackupEnabled, accounts, txns, stock, pins, goals, wishlist, lastAutoBackup]);
   
   useEffect(()=> {
     if (!showIntro) return;
@@ -2699,6 +2733,39 @@ export default function GCSDApp() {
     confettiBurst();
   }
   
+  // Clean up duplicate agents - ONE-TIME FIX
+  async function cleanupDuplicates() {
+    const confirmed = confirm("⚠️ This will remove duplicate agents and preserve the first occurrence of each. Continue?");
+    if (!confirmed) return;
+    
+    const vault = accounts.find(a => a.role === "system");
+    if (!vault) {
+      toast.error("System error: vault not found");
+      return;
+    }
+    
+    const seenNames = new Set<string>();
+    const cleanedAgents: Account[] = [];
+    
+    // Keep first occurrence of each agent
+    accounts.filter(a => a.role === "agent").forEach(agent => {
+      const normalizedName = agent.name.trim().toLowerCase();
+      if (!seenNames.has(normalizedName)) {
+        cleanedAgents.push(agent);
+        seenNames.add(normalizedName);
+      }
+    });
+    
+    const cleanedAccounts = [vault, ...cleanedAgents];
+    
+    setAccounts(cleanedAccounts);
+    await kvSet("gcs-v4-core", { accounts: cleanedAccounts, txns });
+    
+    logAudit("Cleanup Duplicates", `Removed ${accounts.length - cleanedAccounts.length} duplicate agents`);
+    toast.success(`✅ Cleaned up! Removed ${accounts.length - cleanedAccounts.length} duplicates`);
+    haptic([50, 30, 50]);
+  }
+  
   async function backupAllData(){
     console.log("backupAllData called");
     
@@ -3376,6 +3443,11 @@ export default function GCSDApp() {
                 onUnfreezeAgent={unfreezeAgent}
                 onApproveRedeem={approveRedeem}
                 onRejectRedeem={rejectRedeem}
+                onCleanupDuplicates={cleanupDuplicates}
+                backups={backups}
+                autoBackupEnabled={autoBackupEnabled}
+                onToggleAutoBackup={() => setAutoBackupEnabled(prev => !prev)}
+                onRestoreBackup={restoreFromBackup}
               />
             </motion.div>
           )}
@@ -4810,6 +4882,7 @@ function AdminPortal({
   autoBackupEnabled: boolean;
   onToggleAutoBackup: () => void;
   onRestoreBackup: (backupId: string) => void;
+  onCleanupDuplicates: () => void;
 }) {
   const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests" | "audit" | "export">("dashboard");
   const [agentId, setAgentId] = useState("");
@@ -5850,6 +5923,25 @@ function AdminPortal({
           transition={{ duration: 0.3 }}
         >
           <h3 className="text-lg font-semibold mb-4">📥 Export Data</h3>
+          
+          {/* Cleanup Duplicates - ONE-TIME FIX */}
+          <motion.div 
+            className="glass-card rounded-xl p-4 mb-6 border-2 border-orange-500/50 bg-orange-500/5"
+            whileHover={{ scale: 1.02 }}
+          >
+            <h4 className="font-semibold mb-2 text-orange-500">🧹 Clean Up Duplicates</h4>
+            <p className="text-sm opacity-70 mb-3">Remove duplicate agents and restore clean data (one-time fix)</p>
+            <motion.button
+              className="w-full px-4 py-3 rounded-xl bg-orange-500 text-white hover:bg-orange-600 font-semibold"
+              onClick={onCleanupDuplicates}
+              whileTap={{ scale: 0.95 }}
+            >
+              🧹 Remove Duplicate Agents
+            </motion.button>
+            <div className="text-xs opacity-60 mt-2 text-center">
+              This will keep the first occurrence of each agent and remove duplicates
+            </div>
+          </motion.div>
           
           {/* Complete System Backup */}
           <motion.div 
