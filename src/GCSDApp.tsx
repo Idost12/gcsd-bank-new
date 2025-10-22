@@ -3747,26 +3747,38 @@ function AgentPortal({
   };
   
   const saveAvatar = (croppedImageUrl: string) => {
-    console.log("saveAvatar called!");
-    console.log("Agent ID:", agentId);
-    console.log("Cropped image URL length:", croppedImageUrl.length);
-    console.log("Cropped image preview:", croppedImageUrl.substring(0, 100));
+    console.log("🔵 saveAvatar called!");
+    console.log("🔵 Agent ID:", agentId);
+    console.log("🔵 Cropped image URL length:", croppedImageUrl.length);
+    console.log("🔵 Cropped image preview:", croppedImageUrl.substring(0, 100));
     
     if (!croppedImageUrl || croppedImageUrl.length < 100) {
+      console.error("❌ Invalid image data");
       toast.error("Failed to create avatar image");
       return;
     }
     
-    // Update the account with the new avatar
-    onUpdateAccount({ avatar: croppedImageUrl });
+    console.log("🔵 About to call onUpdateAccount...");
+    
+    try {
+      // Update the account with the new avatar
+      onUpdateAccount({ avatar: croppedImageUrl });
+      console.log("✅ onUpdateAccount called successfully");
+    } catch (error) {
+      console.error("❌ Error calling onUpdateAccount:", error);
+      toast.error("Failed to update account");
+      return;
+    }
     
     // Close the modal
+    console.log("🔵 Closing modal...");
     setShowAvatarCropper(false);
     setAvatarImageSrc(null);
     
     // Success feedback
     haptic([30, 20, 30]);
     toast.success("✅ Profile picture updated!");
+    console.log("✅ Avatar save complete!");
   };
 
   return (
@@ -4493,29 +4505,31 @@ function AvatarCropperModal({
 
         {/* Actions */}
         <div className="flex gap-3">
-          <motion.button
+          <button
+            type="button"
             disabled={!imageLoaded}
             className={classNames(
-              "flex-1 px-4 py-3 rounded-xl font-semibold",
+              "flex-1 px-4 py-3 rounded-xl font-semibold transition-transform active:scale-95 hover:scale-102",
               neonBtn(theme, true),
               !imageLoaded && "opacity-50 cursor-not-allowed"
             )}
             onClick={(e) => {
+              alert("Button was clicked!"); // Simple test
+              console.log("🟢 Button clicked event fired!");
               e.preventDefault();
               e.stopPropagation();
               if (!imageLoaded) {
+                console.log("⚠️ Image not loaded yet");
                 toast.error("Please wait for image to load");
                 return;
               }
-              console.log("Save button clicked!");
+              console.log("🟢 Calling handleCrop...");
               haptic([30, 20, 30]);
               handleCrop();
             }}
-            whileHover={imageLoaded ? { scale: 1.02 } : {}}
-            whileTap={imageLoaded ? { scale: 0.98 } : {}}
           >
             {imageLoaded ? "✅ Save Picture" : "⏳ Loading..."}
-          </motion.button>
+          </button>
           <motion.button
             className={classNames("px-4 py-3 rounded-xl", neonBtn(theme))}
             onClick={(e) => {
