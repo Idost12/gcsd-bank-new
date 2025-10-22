@@ -3655,6 +3655,7 @@ function AgentPortal({
   onToggleWishlist,
   onOpenMeme,
   pins,
+  onUpdateAccount,
 }: {
   theme: Theme;
   agentId: string;
@@ -4514,7 +4515,6 @@ function AvatarCropperModal({
               !imageLoaded && "opacity-50 cursor-not-allowed"
             )}
             onClick={(e) => {
-              alert("Button was clicked!"); // Simple test
               console.log("🟢 Button clicked event fired!");
               e.preventDefault();
               e.stopPropagation();
