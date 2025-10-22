@@ -1800,16 +1800,13 @@ export default function GCSDApp() {
         const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
         if (!remote) return;
         
-        // Check if this is a complete reset by comparing account names
-        setAccounts(prev => {
-          const merged = mergeAccounts(prev, remote.accounts || []);
-          // If remote has significantly different accounts (like after reset), use remote completely
-          if (remote.accounts && remote.accounts.length > 0 && !accountsAreEqual(prev, remote.accounts)) {
-            return remote.accounts;
-          }
-          return merged;
-        });
-        setTxns(prev => mergeTxns(prev, remote.txns || []));
+        // Use remote data directly - simpler and more reliable
+        if (remote.accounts && remote.accounts.length > 0) {
+          setAccounts(remote.accounts);
+        }
+        if (remote.txns && remote.txns.length > 0) {
+          setTxns(remote.txns);
+        }
         return;
       }
       if (key === "gcs-v4-stock")  setStock(val ?? (await kvGet("gcs-v4-stock")) ?? {});
