@@ -1715,6 +1715,10 @@ export default function GCSDApp() {
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
   const [lastAutoBackup, setLastAutoBackup] = useState<string>("");
   
+  // Batch updates to reduce Supabase writes
+  const [pendingUpdates, setPendingUpdates] = useState<Map<string, any>>(new Map());
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
 
   // theme side effect - applies theme to DOM (LOCAL ONLY)
   useEffect(() => {
@@ -1737,7 +1741,12 @@ export default function GCSDApp() {
         if (core?.accounts && Array.isArray(core.accounts) && core.accounts.length > 0 && core?.txns && Array.isArray(core.txns)) {
           console.log("✅ Found valid data:", core.accounts.length, "accounts,", core.txns.length, "transactions");
           setAccounts(core.accounts);
-          setTxns(core.txns);
+          
+          // Decompress transactions if they're compressed
+          const decompressedTxns = core.txns.map((txn: any) => 
+            txn.i ? decompressTransaction(txn) : txn
+          );
+          setTxns(decompressedTxns);
         } else {
           console.log("⚠️ No valid data found, using seed data");
           setAccounts(seedAccounts);
@@ -1748,14 +1757,20 @@ export default function GCSDApp() {
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         // Load notifications from KV storage instead of starting empty
-        setNotifs((await kvGet<Notification[]>("gcs-v4-notifs")) ?? []);
+        const rawNotifs = await kvGet<Notification[]>("gcs-v4-notifs");
+        const decompressedNotifs = rawNotifs?.map((notif: any) => 
+          notif.i ? decompressNotification(notif) : notif
+        ) ?? [];
+        setNotifs(decompressedNotifs);
         setAdminNotifs((await kvGet<AdminNotification[]>("gcs-v4-admin-notifs")) ?? []);
         setRedeemRequests((await kvGet<RedeemRequest[]>("gcs-v4-redeem-requests")) ?? []);
         setAuditLogs((await kvGet<AuditLog[]>("gcs-v4-audit-logs")) ?? []);
         setWishlist((await kvGet<Wishlist>("gcs-v4-wishlist")) ?? {});
         setEpochs((await kvGet<Record<string,string>>("gcs-v4-epochs")) ?? {});
         setMetrics((await kvGet<MetricsEpoch>("gcs-v4-metrics")) ?? {});
-        setBackups((await kvGet<Backup[]>("gcs-v4-backups")) ?? []);
+        // Clear existing backups to save Supabase quota
+        setBackups([]);
+        await kvSet("gcs-v4-backups", []);
         setAutoBackupEnabled((await kvGet<boolean>("gcs-v4-auto-backup")) ?? true);
         setLastAutoBackup((await kvGet<string>("gcs-v4-last-auto-backup")) ?? "");
         
@@ -1764,6 +1779,19 @@ export default function GCSDApp() {
         const savedTheme = localStorage.getItem("gcsd-theme") as Theme;
         const loadedTheme = savedTheme || "light";
         setTheme(loadedTheme);
+        
+        // Load UI state from localStorage to save Supabase quota
+        const savedPortal = localStorage.getItem("gcsd-portal") as Portal | null;
+        if (savedPortal) setPortal(savedPortal);
+        
+        const savedPickerOpen = localStorage.getItem("gcsd-picker-open");
+        if (savedPickerOpen) setPickerOpen(savedPickerOpen === "true");
+        
+        const savedMobileMenuOpen = localStorage.getItem("gcsd-mobile-menu-open");
+        if (savedMobileMenuOpen) setMobileMenuOpen(savedMobileMenuOpen === "true");
+        
+        const savedIsAdmin = localStorage.getItem("gcsd-is-admin");
+        if (savedIsAdmin) setIsAdmin(savedIsAdmin === "true");
       } finally {
         setHydrated(true);
       }
@@ -1783,7 +1811,11 @@ export default function GCSDApp() {
           setAccounts(remote.accounts);
         }
         if (remote.txns && remote.txns.length > 0) {
-          setTxns(remote.txns);
+          // Decompress transactions if they're compressed
+          const decompressedTxns = remote.txns.map((txn: any) => 
+            txn.i ? decompressTransaction(txn) : txn
+          );
+          setTxns(decompressedTxns);
         }
         return;
       }
@@ -1791,7 +1823,13 @@ export default function GCSDApp() {
       if (key === "gcs-v4-pins")   setPins(val ?? (await kvGet("gcs-v4-pins")) ?? {});
       if (key === "gcs-v4-goals")  setGoals(val ?? (await kvGet("gcs-v4-goals")) ?? {});
       // Notifications now sync live
-      if (key === "gcs-v4-notifs") setNotifs(val ?? (await kvGet("gcs-v4-notifs")) ?? []);
+      if (key === "gcs-v4-notifs") {
+        const rawNotifs = val ?? (await kvGet("gcs-v4-notifs")) ?? [];
+        const decompressedNotifs = rawNotifs.map((notif: any) => 
+          notif.i ? decompressNotification(notif) : notif
+        );
+        setNotifs(decompressedNotifs);
+      }
       if (key === "gcs-v4-admin-notifs") setAdminNotifs(val ?? (await kvGet("gcs-v4-admin-notifs")) ?? []);
       if (key === "gcs-v4-redeem-requests") setRedeemRequests(val ?? (await kvGet("gcs-v4-redeem-requests")) ?? []);
       if (key === "gcs-v4-audit-logs") setAuditLogs(val ?? (await kvGet("gcs-v4-audit-logs")) ?? []);
@@ -1812,21 +1850,28 @@ export default function GCSDApp() {
   }, []);
 
   /* persist on changes */
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-core",  { accounts, txns }); }, [hydrated, accounts, txns]);
+  useEffect(() => { 
+    if (hydrated) {
+      // Compress transactions before storing to reduce data size
+      const compressedTxns = txns.map(compressTransaction);
+      kvSet("gcs-v4-core", { accounts, txns: compressedTxns }); 
+    }
+  }, [hydrated, accounts, txns]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-stock", stock);             }, [hydrated, stock]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-pins",  pins);              }, [hydrated, pins]);
   useEffect(() => { if (hydrated) kvSet("gcs-v4-goals", goals);             }, [hydrated, goals]);
   // Notifications now persist to KV storage
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-admin-notifs", adminNotifs); }, [hydrated, adminNotifs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-redeem-requests", redeemRequests); }, [hydrated, redeemRequests]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-audit-logs", auditLogs); }, [hydrated, auditLogs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-backups", backups);         }, [hydrated, backups]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-auto-backup", autoBackupEnabled); }, [hydrated, autoBackupEnabled]);
-  useEffect(() => { if (hydrated) kvSet("gcs-v4-last-auto-backup", lastAutoBackup); }, [hydrated, lastAutoBackup]);
+  // Use batched updates for less critical data to reduce Supabase writes
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-notifs", notifs);           }, [hydrated, notifs]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-admin-notifs", adminNotifs); }, [hydrated, adminNotifs]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-redeem-requests", redeemRequests); }, [hydrated, redeemRequests]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-audit-logs", auditLogs); }, [hydrated, auditLogs]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-wishlist", wishlist); }, [hydrated, wishlist]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-epochs", epochs);           }, [hydrated, epochs]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-metrics", metrics);         }, [hydrated, metrics]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-backups", backups);         }, [hydrated, backups]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-auto-backup", autoBackupEnabled); }, [hydrated, autoBackupEnabled]);
+  useEffect(() => { if (hydrated) batchedKvSet("gcs-v4-last-auto-backup", lastAutoBackup); }, [hydrated, lastAutoBackup]);
   
   /* theme persistence - STRICTLY LOCAL to each browser - NOT synced to KV */
   useEffect(() => { 
@@ -1836,6 +1881,25 @@ export default function GCSDApp() {
       localStorage.setItem("gcsd-theme", theme);
     }
   }, [hydrated, theme]);
+
+  /* UI state persistence - LOCAL ONLY to save Supabase quota */
+  useEffect(() => {
+    if (hydrated) {
+      localStorage.setItem("gcsd-portal", portal);
+      localStorage.setItem("gcsd-picker-open", pickerOpen.toString());
+      localStorage.setItem("gcsd-mobile-menu-open", mobileMenuOpen.toString());
+      localStorage.setItem("gcsd-is-admin", isAdmin.toString());
+    }
+  }, [hydrated, portal, pickerOpen, mobileMenuOpen, isAdmin]);
+
+  // Cleanup batching timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, []);
 
   /* clock + intro */
   useEffect(()=> {
@@ -1871,44 +1935,45 @@ export default function GCSDApp() {
   }, [hydrated]);
   
   /* Auto-backup every 6 hours */
-  useEffect(() => {
-    if (!hydrated || !autoBackupEnabled) return;
-    
-    const performAutoBackup = () => {
-      const now = new Date();
-      const lastBackup = lastAutoBackup ? new Date(lastAutoBackup) : null;
-      
-      // Check if 6 hours have passed
-      if (!lastBackup || (now.getTime() - lastBackup.getTime()) > 6 * 60 * 60 * 1000) {
-        console.log("🔄 Performing auto-backup...");
-        
-        const backup: Backup = {
-          id: uid(),
-          timestamp: nowISO(),
-          label: `Auto-backup ${now.toLocaleString()}`,
-          data: {
-            accounts,
-            txns,
-            stock,
-            pins,
-            goals,
-            wishlist
-          }
-        };
-        
-        setBackups(prev => [backup, ...prev].slice(0, 20)); // Keep last 20 backups
-        setLastAutoBackup(nowISO());
-        console.log("✅ Auto-backup complete");
-      }
-    };
-    
-    // Run immediately on mount if needed
-    performAutoBackup();
-    
-    // Then check every hour
-    const interval = setInterval(performAutoBackup, 60 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [hydrated, autoBackupEnabled, accounts, txns, stock, pins, goals, wishlist, lastAutoBackup]);
+  /* Auto-backup DISABLED to save Supabase quota */
+  // useEffect(() => {
+  //   if (!hydrated || !autoBackupEnabled) return;
+  //   
+  //   const performAutoBackup = () => {
+  //     const now = new Date();
+  //     const lastBackup = lastAutoBackup ? new Date(lastAutoBackup) : null;
+  //     
+  //     // Check if 6 hours have passed
+  //     if (!lastBackup || (now.getTime() - lastBackup.getTime()) > 6 * 60 * 60 * 1000) {
+  //       console.log("🔄 Performing auto-backup...");
+  //       
+  //       const backup: Backup = {
+  //         id: uid(),
+  //         timestamp: nowISO(),
+  //         label: `Auto-backup ${now.toLocaleString()}`,
+  //         data: {
+  //           accounts,
+  //           txns,
+  //           stock,
+  //           pins,
+  //           goals,
+  //           wishlist
+  //         }
+  //       };
+  //       
+  //       setBackups(prev => [backup, ...prev].slice(0, 20)); // Keep last 20 backups
+  //       setLastAutoBackup(nowISO());
+  //       console.log("✅ Auto-backup complete");
+  //     }
+  //   };
+  //   
+  //   // Run immediately on mount if needed
+  //   performAutoBackup();
+  //   
+  //   // Then check every hour
+  //   const interval = setInterval(performAutoBackup, 60 * 60 * 1000);
+  //   return () => clearInterval(interval);
+  // }, [hydrated, autoBackupEnabled, accounts, txns, stock, pins, goals, wishlist, lastAutoBackup]);
   
   useEffect(()=> {
     if (!showIntro) return;
@@ -2022,7 +2087,7 @@ export default function GCSDApp() {
         agentName,
         amount: txn.amount
       };
-      setAdminNotifs(prev => [...prev, adminNotif].slice(0, 200));
+      notifyAdmin(adminNotif);
     }
     
     if (txn.kind === "debit" && txn.fromId && !txn.memo?.startsWith("Redeem:")) {
@@ -2035,24 +2100,122 @@ export default function GCSDApp() {
         agentName,
         amount: txn.amount
       };
-      setAdminNotifs(prev => [...prev, adminNotif].slice(0, 200));
+      notifyAdmin(adminNotif);
     }
   };
   
   const notify = (text:string, pushTitle?: string) => {
-    setNotifs(prev => [{ id: uid(), when: nowISO(), text }, ...prev].slice(0,200));
+    const newNotif = { id: uid(), when: nowISO(), text };
+    setNotifs(prev => [newNotif, ...prev].slice(0,200));
     setUnread(c => c + 1);
+    
+    // Auto-expire notification after 10 minutes
+    setTimeout(() => {
+      setNotifs(prev => prev.filter(n => n.id !== newNotif.id));
+    }, 10 * 60 * 1000); // 10 minutes
     
     // Send push notification if enabled
     if (notificationsEnabled && pushTitle) {
       sendPushNotification(pushTitle, text);
     }
   };
+
+  const notifyAdmin = (adminNotif: AdminNotification) => {
+    setAdminNotifs(prev => [...prev, adminNotif].slice(0, 200));
+    
+    // Auto-expire admin notification after 10 minutes
+    setTimeout(() => {
+      setAdminNotifs(prev => prev.filter(n => n.id !== adminNotif.id));
+    }, 10 * 60 * 1000); // 10 minutes
+  };
+
+  // Data compression functions to reduce Supabase storage
+  const compressTransaction = (txn: Transaction) => ({
+    i: txn.id,
+    k: txn.kind,
+    a: txn.amount,
+    m: txn.memo,
+    d: txn.dateISO,
+    f: txn.fromId,
+    t: txn.toId,
+    x: txn.meta
+  });
+
+  const decompressTransaction = (compressed: any): Transaction => ({
+    id: compressed.i,
+    kind: compressed.k,
+    amount: compressed.a,
+    memo: compressed.m,
+    dateISO: compressed.d,
+    fromId: compressed.f,
+    toId: compressed.t,
+    meta: compressed.x
+  });
+
+  const compressNotification = (notif: Notification) => ({
+    i: notif.id,
+    w: notif.when,
+    t: notif.text
+  });
+
+  const decompressNotification = (compressed: any): Notification => ({
+    id: compressed.i,
+    when: compressed.w,
+    text: compressed.t
+  });
+
+  // Batched update function to reduce Supabase writes
+  const batchedKvSet = (key: string, value: any) => {
+    // Compress data before storing to reduce size
+    let compressedValue = value;
+    if (key === "gcs-v4-core" && value?.txns) {
+      compressedValue = {
+        ...value,
+        txns: value.txns.map(compressTransaction)
+      };
+    } else if (key === "gcs-v4-notifs" && Array.isArray(value)) {
+      compressedValue = value.map(compressNotification);
+    }
+    
+    setPendingUpdates(prev => new Map(prev).set(key, compressedValue));
+    
+    // Clear existing timeout
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+    
+    // Set new timeout to batch updates
+    updateTimeoutRef.current = setTimeout(async () => {
+      const updates = pendingUpdates;
+      setPendingUpdates(new Map());
+      
+      // Write all pending updates at once
+      for (const [k, v] of updates) {
+        await kvSet(k, v);
+      }
+      
+      console.log("📦 Batched", updates.size, "updates to Supabase");
+    }, 1000); // Batch every 1 second
+  };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
   const openAgentPin = (agentId:string, cb:(ok:boolean)=>void) => setPinModal({open:true, agentId, onOK:cb});
   
-  // Audit logging helper
+  // Audit logging helper - only log important actions to save Supabase quota
   const logAudit = (action: string, details: string, agentName?: string, amount?: number) => {
+    // Only log important actions to reduce database writes
+    const importantActions = [
+      "Credit Added", "Manual Transfer", "Redeem Approved", "Redeem Rejected",
+      "Account Frozen", "Account Unfrozen", "Sale Undone", "Redemption Undone",
+      "Manual Withdrawal", "PIN Updated", "PIN Reset", "Data Restored",
+      "Cleanup Duplicates", "Backup Imported", "Data Backup"
+    ];
+    
+    // Skip logging if not an important action
+    if (!importantActions.includes(action)) {
+      console.log("📝 Skipping audit log for:", action, details);
+      return;
+    }
+    
     const log: AuditLog = {
       id: uid(),
       when: nowISO(),
@@ -2164,7 +2327,7 @@ export default function GCSDApp() {
         agentName: getName(agentId),
         amount: prize.price
       };
-      setAdminNotifs(prev => [...prev, adminNotif]);
+      notifyAdmin(adminNotif);
       
       toast.success("Request sent to admin for approval!");
       notify(`⏳ ${getName(agentId)} requesting ${prize.label} (${prize.price.toLocaleString()} GCSD)`);
@@ -2241,7 +2404,7 @@ export default function GCSDApp() {
       agentName: request.agentName,
       amount: request.price
     };
-    setAdminNotifs(prev => [...prev, adminNotif]);
+    notifyAdmin(adminNotif);
     
     // Remove from requests
     setRedeemRequests(prev => prev.filter(r => r.id !== requestId));
@@ -2297,7 +2460,7 @@ export default function GCSDApp() {
       text: `Frozen account: ${getName(agentId)}`,
       agentName: getName(agentId)
     };
-    setAdminNotifs(prev => [...prev, adminNotif]);
+    notifyAdmin(adminNotif);
   }
 
   // Unfreeze agent account
@@ -2318,7 +2481,7 @@ export default function GCSDApp() {
       text: `Unfrozen account: ${getName(agentId)}`,
       agentName: getName(agentId)
     };
-    setAdminNotifs(prev => [...prev, adminNotif]);
+    notifyAdmin(adminNotif);
   }
 
   // Track active users (when they switch to agent portal)
