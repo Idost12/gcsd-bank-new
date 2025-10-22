@@ -1107,7 +1107,8 @@ function MemeModal({
   onClose, 
   theme, 
   initialData,
-  onSave 
+  onSave,
+  readOnly = false
 }: { 
   open: boolean; 
   agentName: string; 
@@ -1115,6 +1116,7 @@ function MemeModal({
   theme: Theme;
   initialData?: { topText: string; bottomText: string; uploadedImage: string | null };
   onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null }) => void;
+  readOnly?: boolean;
 }) {
   const [topText, setTopText] = useState(initialData?.topText || "");
   const [bottomText, setBottomText] = useState(initialData?.bottomText || "");
@@ -1228,8 +1230,8 @@ function MemeModal({
     
     toast.success(`🎉 Meme downloaded! "${topText || 'Top Text'}" / "${bottomText || 'Bottom Text'}"`);
     
-    // Save meme data when downloading
-    if (onSave) {
+    // Save meme data when downloading (only if not read-only)
+    if (onSave && !readOnly) {
       onSave({ topText, bottomText, uploadedImage });
     }
   };
@@ -1253,49 +1255,55 @@ function MemeModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">🎨 Meme Generator</h2>
-            <button onClick={handleCloseAttempt} className="text-2xl opacity-60 hover:opacity-100">×</button>
+            <h2 className="text-2xl font-bold">{readOnly ? "👁️ View Meme" : "🎨 Meme Generator"}</h2>
+            <button onClick={readOnly ? onClose : handleCloseAttempt} className="text-2xl opacity-60 hover:opacity-100">×</button>
           </div>
           
           <div className="text-sm opacity-70 mb-4">
-            {initialData ? `View or download your meme, ${agentName}! 🎉` : `Congrats ${agentName}! Create your custom meme! 🎉`}
+            {readOnly 
+              ? `Your meme, ${agentName}! Download it anytime. 🎉` 
+              : initialData 
+                ? `View or download your meme, ${agentName}! 🎉` 
+                : `Congrats ${agentName}! Create your custom meme! 🎉`}
           </div>
 
-          {/* Image Upload */}
-          <div className="mb-4">
-            <label className="text-sm font-semibold mb-2 block">Upload Image (Optional):</label>
-            <div className="relative">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                className="hidden"
-                id="image-upload"
-              />
-              <label
-                htmlFor="image-upload"
-                className={classNames(
-                  "block w-full px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all hover:scale-105",
-                  uploadedImage ? "border-emerald-500 bg-emerald-500/10" : "border-gray-400 hover:border-purple-500"
-                )}
-              >
-                <div className="text-center">
-                  {uploadedImage ? (
-                    <div>
-                      <div className="text-emerald-500 font-semibold">✅ Image Uploaded!</div>
-                      <div className="text-xs opacity-70 mt-1">Click to change image</div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="text-2xl mb-2">📸</div>
-                      <div className="font-semibold">Click to upload image</div>
-                      <div className="text-xs opacity-70 mt-1">Max 5MB • JPG, PNG, GIF</div>
-                    </div>
+          {/* Image Upload - disabled in read-only mode */}
+          {!readOnly && (
+            <div className="mb-4">
+              <label className="text-sm font-semibold mb-2 block">Upload Image (Optional):</label>
+              <div className="relative">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                  id="image-upload"
+                />
+                <label
+                  htmlFor="image-upload"
+                  className={classNames(
+                    "block w-full px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all hover:scale-105",
+                    uploadedImage ? "border-emerald-500 bg-emerald-500/10" : "border-gray-400 hover:border-purple-500"
                   )}
-                </div>
-              </label>
+                >
+                  <div className="text-center">
+                    {uploadedImage ? (
+                      <div>
+                        <div className="text-emerald-500 font-semibold">✅ Image Uploaded!</div>
+                        <div className="text-xs opacity-70 mt-1">Click to change image</div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-2xl mb-2">📸</div>
+                        <div className="font-semibold">Click to upload image</div>
+                        <div className="text-xs opacity-70 mt-1">Max 5MB • JPG, PNG, GIF</div>
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Meme Preview */}
           <div className="relative rounded-xl aspect-square mb-4 flex flex-col justify-between p-6 text-white font-bold text-center shadow-xl overflow-hidden">
@@ -1323,31 +1331,33 @@ function MemeModal({
             </div>
           </div>
 
-          {/* Text Inputs */}
-          <div className="space-y-3 mb-4">
-            <div>
-              <label className="text-sm font-semibold mb-1 block">Top Text:</label>
-              <input 
-                type="text"
-                value={topText}
-                onChange={(e) => setTopText(e.target.value.toUpperCase())}
-                placeholder="ENTER TOP TEXT"
-                className={inputCls(theme)}
-                maxLength={40}
-              />
+          {/* Text Inputs - disabled in read-only mode */}
+          {!readOnly && (
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="text-sm font-semibold mb-1 block">Top Text:</label>
+                <input 
+                  type="text"
+                  value={topText}
+                  onChange={(e) => setTopText(e.target.value.toUpperCase())}
+                  placeholder="ENTER TOP TEXT"
+                  className={inputCls(theme)}
+                  maxLength={40}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold mb-1 block">Bottom Text:</label>
+                <input 
+                  type="text"
+                  value={bottomText}
+                  onChange={(e) => setBottomText(e.target.value.toUpperCase())}
+                  placeholder="ENTER BOTTOM TEXT"
+                  className={inputCls(theme)}
+                  maxLength={40}
+                />
+              </div>
             </div>
-            <div>
-              <label className="text-sm font-semibold mb-1 block">Bottom Text:</label>
-              <input 
-                type="text"
-                value={bottomText}
-                onChange={(e) => setBottomText(e.target.value.toUpperCase())}
-                placeholder="ENTER BOTTOM TEXT"
-                className={inputCls(theme)}
-                maxLength={40}
-              />
-            </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3">
@@ -1357,8 +1367,18 @@ function MemeModal({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              📥 Download as JPEG
+              📥 Download {readOnly ? "Meme" : "as JPEG"}
             </motion.button>
+            {readOnly && (
+              <motion.button
+                className={classNames("px-4 py-3 rounded-xl font-semibold", neonBtn(theme))}
+                onClick={onClose}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                Close
+              </motion.button>
+            )}
           </div>
         </motion.div>
 
@@ -1534,6 +1554,7 @@ export default function GCSDApp() {
     agentName: string; 
     initialData?: { topText: string; bottomText: string; uploadedImage: string | null };
     onSave?: (data: { topText: string; bottomText: string; uploadedImage: string | null }) => void;
+    readOnly?: boolean;
   } | null>(null);
   const [pinModal, setPinModal] = useState<{open:boolean; agentId?:string; onOK?:(good:boolean)=>void}>({open:false});
   const [unread, setUnread] = useState(0);
@@ -2037,23 +2058,8 @@ export default function GCSDApp() {
     toast.success(`Redemption approved for ${request.agentName}!`);
     confettiBurst();
     
-    // Special prize handling: Show meme generator for meme_generator prize
-    if (request.prizeKey === "meme_generator") {
-      setTimeout(() => {
-        setMemeModal({ 
-          open: true, 
-          agentName: request.agentName,
-          onSave: (memeData) => {
-            // Save meme data to transaction meta
-            setTxns(prev => prev.map(t => 
-              t.id === txnId 
-                ? { ...t, meta: { ...t.meta, memeData } }
-                : t
-            ));
-          }
-        });
-      }, 1000); // Delay to let confetti finish
-    }
+    // Note: Meme generator can only be accessed from "My Purchases" tab
+    // Users need to pay each time to generate a new meme
   }
 
   // Reject redeem request
@@ -2842,6 +2848,7 @@ export default function GCSDApp() {
           theme={theme}
           initialData={memeModal.initialData}
           onSave={memeModal.onSave}
+          readOnly={memeModal.readOnly}
         />
       )}
 
@@ -2999,8 +3006,9 @@ export default function GCSDApp() {
                     open: true,
                     agentName,
                     initialData: memeData,
+                    readOnly: !!memeData, // Read-only if meme already exists
                     onSave: (newMemeData) => {
-                      // Update the transaction with new meme data
+                      // Update the transaction with new meme data (only when creating for first time)
                       setTxns(prev => prev.map(t => 
                         t.id === txn.id 
                           ? { ...t, meta: { ...t.meta, memeData: newMemeData } }
@@ -3763,6 +3771,12 @@ function AgentPortal({
                   <p className="text-sm mt-2">Start redeeming prizes to see them here!</p>
                 </div>
               ) : (
+                <>
+                  <div className="mb-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/30">
+                    <p className="text-sm opacity-80">
+                      💡 <strong>Meme Generator:</strong> Each purchase allows creating ONE meme. Buy again to create more!
+                    </p>
+                  </div>
                 <div className="space-y-3">
                   {redeemedPrizes.map((t, i) => {
                     const prizeLabel = t.meta?.prizeLabel || t.memo?.replace("Redeem: ", "") || "Prize";
@@ -3786,9 +3800,14 @@ function AgentPortal({
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
                               <h4 className="font-semibold text-lg">{prizeLabel}</h4>
-                              {isMeme && (
+                              {isMeme && !memeData && (
                                 <span className="px-2 py-0.5 text-xs bg-purple-500 text-white rounded-full font-semibold">
                                   🎨 MEME
+                                </span>
+                              )}
+                              {isMeme && memeData && (
+                                <span className="px-2 py-0.5 text-xs bg-emerald-500 text-white rounded-full font-semibold">
+                                  ✅ CREATED
                                 </span>
                               )}
                             </div>
@@ -3818,14 +3837,25 @@ function AgentPortal({
                               📄 View Receipt
                             </motion.button>
                             
-                            {isMeme && (
+                            {isMeme && !memeData && (
                               <motion.button
                                 className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
                                 onClick={() => onOpenMeme(t)}
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                               >
-                                🎨 {memeData ? "View Meme" : "Create Meme"}
+                                🎨 Create Meme
+                              </motion.button>
+                            )}
+                            
+                            {isMeme && memeData && (
+                              <motion.button
+                                className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
+                                onClick={() => onOpenMeme(t)}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                              >
+                                👁️ View Meme
                               </motion.button>
                             )}
                           </div>
@@ -3834,6 +3864,7 @@ function AgentPortal({
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
           </motion.div>
