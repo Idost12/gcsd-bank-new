@@ -6025,6 +6025,29 @@ function AdminPortal({
         >
           <h3 className="text-lg font-semibold mb-4">📥 Export Data</h3>
           
+          {/* Import Backup - RESTORE FROM FILE */}
+          <motion.div 
+            className="glass-card rounded-xl p-4 mb-6 border-2 border-blue-500/50 bg-blue-500/5"
+            whileHover={{ scale: 1.02 }}
+          >
+            <h4 className="font-semibold mb-2 text-blue-500">📂 Import Backup File</h4>
+            <p className="text-sm opacity-70 mb-3">
+              Restore from a previously downloaded backup JSON file
+            </p>
+            <label className="w-full px-4 py-3 rounded-xl bg-blue-500 text-white hover:bg-blue-600 font-semibold cursor-pointer block text-center transition-colors">
+              📂 Choose Backup File to Restore
+              <input
+                type="file"
+                accept=".json"
+                onChange={onImportBackup}
+                className="hidden"
+              />
+            </label>
+            <div className="text-xs opacity-60 mt-2 text-center">
+              Select your backup JSON file from 11:20 or any other backup
+            </div>
+          </motion.div>
+          
           {/* Cleanup Duplicates - ONE-TIME FIX */}
           <motion.div 
             className="glass-card rounded-xl p-4 mb-6 border-2 border-orange-500/50 bg-orange-500/5"
