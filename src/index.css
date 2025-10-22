@@ -509,7 +509,12 @@ body:has(.neon-theme) button:hover,
   border-color: #fb923c !important;
 }
 
-/* Neon theme text visibility */
+/* Neon theme text visibility - comprehensive fixes */
+body:has(.neon-theme),
+.neon-theme {
+  color: #fed7aa !important;
+}
+
 body:has(.neon-theme) .text-slate-600,
 .neon-theme .text-slate-600 {
   color: #fed7aa !important;
@@ -521,9 +526,71 @@ body:has(.neon-theme) .text-slate-500,
   opacity: 0.8;
 }
 
+body:has(.neon-theme) .text-slate-700,
+.neon-theme .text-slate-700 {
+  color: #fed7aa !important;
+}
+
+body:has(.neon-theme) .text-slate-800,
+.neon-theme .text-slate-800 {
+  color: #fed7aa !important;
+}
+
+body:has(.neon-theme) .text-slate-900,
+.neon-theme .text-slate-900 {
+  color: #fed7aa !important;
+}
+
+body:has(.neon-theme) .text-black,
+.neon-theme .text-black {
+  color: #fed7aa !important;
+}
+
 body:has(.neon-theme) .opacity-70,
 .neon-theme .opacity-70 {
   opacity: 0.9 !important;
+}
+
+body:has(.neon-theme) .opacity-60,
+.neon-theme .opacity-60 {
+  opacity: 0.85 !important;
+}
+
+body:has(.neon-theme) .opacity-50,
+.neon-theme .opacity-50 {
+  opacity: 0.8 !important;
+}
+
+/* Neon theme - ensure white/light text colors */
+body:has(.neon-theme) .text-white,
+.neon-theme .text-white {
+  color: #fed7aa !important;
+}
+
+/* Neon theme - override colored text for visibility */
+body:has(.neon-theme) .text-emerald-500,
+.neon-theme .text-emerald-500 {
+  color: #6ee7b7 !important;
+}
+
+body:has(.neon-theme) .text-rose-500,
+.neon-theme .text-rose-500 {
+  color: #fb7185 !important;
+}
+
+body:has(.neon-theme) .text-blue-500,
+.neon-theme .text-blue-500 {
+  color: #60a5fa !important;
+}
+
+body:has(.neon-theme) .text-purple-500,
+.neon-theme .text-purple-500 {
+  color: #c084fc !important;
+}
+
+body:has(.neon-theme) .text-yellow-500,
+.neon-theme .text-yellow-500 {
+  color: #fbbf24 !important;
 }
 
 /* Ensure inputs are visible in all modes */
