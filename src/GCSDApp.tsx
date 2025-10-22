@@ -3218,9 +3218,14 @@ export default function GCSDApp() {
                   });
                 }}
                 onUpdateAccount={(updates) => {
-                  setAccounts(prev => prev.map(a => 
-                    a.id === currentAgentId ? { ...a, ...updates } : a
-                  ));
+                  console.log("Updating account:", currentAgentId, "with updates:", updates);
+                  setAccounts(prev => {
+                    const updated = prev.map(a => 
+                      a.id === currentAgentId ? { ...a, ...updates } : a
+                    );
+                    console.log("Updated accounts:", updated.find(a => a.id === currentAgentId));
+                    return updated;
+                  });
                 }}
               />
             </motion.div>
@@ -3718,23 +3723,36 @@ function AgentPortal({
 
   // Avatar upload
   const currentAgent = accounts.find(a => a.id === agentId);
+  const [showAvatarCropper, setShowAvatarCropper] = useState(false);
+  const [avatarImageSrc, setAvatarImageSrc] = useState<string | null>(null);
+  
   const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error("Image too large! Max 2MB");
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("Image too large! Max 5MB");
         return;
       }
       
       const reader = new FileReader();
       reader.onload = (e) => {
-        const avatarUrl = e.target?.result as string;
-        onUpdateAccount({ avatar: avatarUrl });
-        haptic([30, 20, 30]);
-        toast.success("✅ Profile picture updated!");
+        const imageUrl = e.target?.result as string;
+        setAvatarImageSrc(imageUrl);
+        setShowAvatarCropper(true);
       };
       reader.readAsDataURL(file);
     }
+    // Reset input so same file can be selected again
+    event.target.value = '';
+  };
+  
+  const saveAvatar = (croppedImageUrl: string) => {
+    console.log("Saving avatar for agent:", agentId, "URL length:", croppedImageUrl.length);
+    onUpdateAccount({ avatar: croppedImageUrl });
+    haptic([30, 20, 30]);
+    toast.success("✅ Profile picture updated!");
+    setShowAvatarCropper(false);
+    setAvatarImageSrc(null);
   };
 
   return (
@@ -4138,6 +4156,21 @@ function AgentPortal({
         )}
       </AnimatePresence>
       
+      {/* Avatar Cropper Modal */}
+      <AnimatePresence>
+        {showAvatarCropper && avatarImageSrc && (
+          <AvatarCropperModal
+            imageSrc={avatarImageSrc}
+            theme={theme}
+            onSave={saveAvatar}
+            onClose={() => {
+              setShowAvatarCropper(false);
+              setAvatarImageSrc(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
+      
       {/* Receipt Modal */}
       <AnimatePresence>
         {selectedReceipt && (
@@ -4149,6 +4182,263 @@ function AgentPortal({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Avatar Cropper Modal */
+function AvatarCropperModal({ 
+  imageSrc, 
+  theme, 
+  onSave, 
+  onClose 
+}: { 
+  imageSrc: string; 
+  theme: Theme; 
+  onSave: (croppedImage: string) => void; 
+  onClose: () => void;
+}) {
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      imageRef.current = img;
+    };
+    img.src = imageSrc;
+  }, [imageSrc]);
+
+  const handleCrop = () => {
+    if (!canvasRef.current || !imageRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas to 300x300 for high quality avatar
+    const size = 300;
+    canvas.width = size;
+    canvas.height = size;
+
+    // Clear canvas with circular clipping
+    ctx.clearRect(0, 0, size, size);
+    
+    // Create circular clipping path
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+
+    // Calculate scaling to fit image in preview
+    const img = imageRef.current;
+    const imgAspect = img.width / img.height;
+    
+    let drawWidth, drawHeight;
+    if (imgAspect > 1) {
+      // Landscape
+      drawHeight = size;
+      drawWidth = size * imgAspect;
+    } else {
+      // Portrait or square
+      drawWidth = size;
+      drawHeight = size / imgAspect;
+    }
+    
+    // Apply user scale
+    drawWidth *= scale;
+    drawHeight *= scale;
+    
+    // Center and apply position offset
+    const x = (size - drawWidth) / 2 + (position.x * 2);
+    const y = (size - drawHeight) / 2 + (position.y * 2);
+
+    // Draw image
+    ctx.drawImage(img, x, y, drawWidth, drawHeight);
+    
+    ctx.restore();
+
+    // Get the cropped image as data URL
+    const croppedImageUrl = canvas.toDataURL('image/jpeg', 0.92);
+    haptic(50);
+    onSave(croppedImageUrl);
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 glass grid place-items-center"
+      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className={classNames("glass-card rounded-3xl shadow-2xl p-6 w-[min(500px,90vw)]", neonBox(theme))}
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">📸 Crop Profile Picture</h2>
+          <button onClick={onClose} className="text-2xl opacity-60 hover:opacity-100">×</button>
+        </div>
+        
+        <div className="text-sm opacity-70 mb-4">
+          Adjust the position and zoom to frame your photo perfectly. It will appear as a circle.
+        </div>
+
+        {/* Preview Area */}
+        <div className="mb-4 grid gap-4">
+          {/* Main editing view */}
+          <div>
+          <div className="relative w-full aspect-square rounded-xl overflow-hidden border-4 border-dashed border-purple-400/50 bg-black/10">
+            <div 
+              className="absolute inset-0 flex items-center justify-center"
+              style={{
+                transform: `translate(${position.x}px, ${position.y}px)`
+              }}
+            >
+              <img
+                src={imageSrc}
+                alt="Preview"
+                className="max-w-full max-h-full object-contain"
+                style={{
+                  transform: `scale(${scale})`,
+                  transformOrigin: 'center'
+                }}
+                draggable={false}
+              />
+            </div>
+            {/* Circular mask overlay */}
+            <div className="absolute inset-0 pointer-events-none">
+              <svg viewBox="0 0 100 100" className="w-full h-full">
+                <defs>
+                  <mask id="circle-mask">
+                    <rect width="100" height="100" fill="white"/>
+                    <circle cx="50" cy="50" r="45" fill="black"/>
+                  </mask>
+                </defs>
+                <rect width="100" height="100" fill="rgba(0,0,0,0.6)" mask="url(#circle-mask)"/>
+                <circle cx="50" cy="50" r="45" fill="none" stroke="white" strokeWidth="0.5" strokeDasharray="2,2"/>
+              </svg>
+            </div>
+          </div>
+          <p className="text-xs opacity-70 mt-2 text-center">Drag sliders below to adjust • Circle shows cropped area</p>
+          </div>
+          
+          {/* Final Preview Circle */}
+          <div className="flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-xs font-semibold mb-2">Final Preview:</p>
+              <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-purple-400 shadow-xl mx-auto bg-black/10">
+                <div 
+                  className="w-full h-full flex items-center justify-center"
+                  style={{
+                    transform: `translate(${position.x * 0.24}px, ${position.y * 0.24}px)`
+                  }}
+                >
+                  <img
+                    src={imageSrc}
+                    alt="Final preview"
+                    className="min-w-full min-h-full object-cover"
+                    style={{
+                      transform: `scale(${scale})`,
+                      transformOrigin: 'center'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="space-y-4 mb-4">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-semibold">🔍 Zoom: {Math.round(scale * 100)}%</label>
+              <motion.button
+                className={classNames("text-xs px-2 py-1 rounded", neonBtn(theme))}
+                onClick={() => {
+                  setScale(1);
+                  setPosition({ x: 0, y: 0 });
+                  haptic(20);
+                  toast.success("Reset to center");
+                }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                ↺ Reset
+              </motion.button>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="3"
+              step="0.05"
+              value={scale}
+              onChange={(e) => setScale(Number(e.target.value))}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs opacity-60 mt-1">
+              <span>50%</span>
+              <span>300%</span>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-semibold mb-2 block">↔️ Horizontal</label>
+              <input
+                type="range"
+                min="-100"
+                max="100"
+                value={position.x}
+                onChange={(e) => setPosition(prev => ({ ...prev, x: Number(e.target.value) }))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold mb-2 block">↕️ Vertical</label>
+              <input
+                type="range"
+                min="-100"
+                max="100"
+                value={position.y}
+                onChange={(e) => setPosition(prev => ({ ...prev, y: Number(e.target.value) }))}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Hidden canvas for cropping */}
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <motion.button
+            className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
+            onClick={handleCrop}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            ✅ Save Picture
+          </motion.button>
+          <motion.button
+            className={classNames("px-4 py-3 rounded-xl", neonBtn(theme))}
+            onClick={onClose}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            Cancel
+          </motion.button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
