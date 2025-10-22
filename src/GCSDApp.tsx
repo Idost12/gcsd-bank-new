@@ -305,15 +305,21 @@ function classNames(...x: (string | false | undefined | null)[]) {
 
 /** Liquid Glass containers/buttons/inputs with theme awareness */
 const neonBox = (theme: Theme) =>
-  "glass-card rounded-xl text-slate-800 dark:text-slate-100";
+  theme === "neon" 
+    ? "glass-card rounded-xl text-orange-100 neon-theme" 
+    : "glass-card rounded-xl text-slate-800 dark:text-slate-100";
 
 const neonBtn = (theme: Theme, solid?: boolean) =>
-  solid
-    ? "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all"
-    : "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all";
+  theme === "neon"
+    ? "glass-btn rounded-xl px-4 py-2 font-medium text-orange-100 neon-theme transition-all"
+    : solid
+      ? "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all"
+      : "glass-btn rounded-xl px-4 py-2 font-medium text-slate-900 dark:text-white transition-all";
 
 const inputCls = (theme: Theme) =>
-  "glass border-none rounded-xl px-4 py-2.5 w-full text-slate-900 dark:text-white placeholder-slate-600 dark:placeholder-slate-300 focus:ring-2 focus:ring-blue-400/50 dark:focus:ring-purple-500/50 transition-all";
+  theme === "neon"
+    ? "glass border-none rounded-xl px-4 py-2.5 w-full text-orange-100 placeholder-orange-200/60 focus:ring-2 focus:ring-orange-400/50 transition-all neon-theme"
+    : "glass border-none rounded-xl px-4 py-2.5 w-full text-slate-900 dark:text-white placeholder-slate-600 dark:placeholder-slate-300 focus:ring-2 focus:ring-blue-400/50 dark:focus:ring-purple-500/50 transition-all";
 
 function TypeLabel({ text }: { text: string }) {
   return (
@@ -1049,16 +1055,17 @@ function HoverCard({ children, onClick, delay = 0, theme }: { children: React.Re
     <motion.button 
       onClick={handleClick} 
       className={classNames("border rounded-2xl px-3 py-3 text-left haptic-feedback", neonBox(theme))}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -5 }}
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
       transition={{ 
-        duration: 0.2, 
-        delay: delay,
+        duration: 0.15, 
+        delay: Math.min(delay, 0.15),
         ease: "easeOut"
       }}
       whileHover={{ scale: 1.03, y: -2 }}
       whileTap={{ scale: 0.97 }}
+      style={{ willChange: delay < 0.1 ? "transform" : "auto" }}
     >
       {children}
     </motion.button>
@@ -1072,7 +1079,10 @@ function FancySelect({ value, onChange, children, theme, placeholder }: { value:
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="appearance-none w-full px-3 py-2.5 pr-8 rounded-xl focus:outline-none focus:ring-2 bg-transparent text-slate-900 dark:text-white focus:ring-blue-400/50 dark:focus:ring-purple-500/50"
+        className={classNames(
+          "appearance-none w-full px-3 py-2.5 pr-8 rounded-xl focus:outline-none focus:ring-2 bg-transparent",
+          theme === "neon" ? "text-orange-100 focus:ring-orange-400/50" : "text-slate-900 dark:text-white focus:ring-blue-400/50 dark:focus:ring-purple-500/50"
+        )}
         style={theme === "neon" || document.documentElement.classList.contains("dark") ? { colorScheme: "dark" } : {}}
       >
         {placeholder && <option value="">{placeholder}</option>}
@@ -1518,7 +1528,7 @@ export default function GCSDApp() {
   const [dateStr, setDateStr] = useState(fmtDate(new Date()));
 
   // Sandbox state removed
-  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number} | null>(null);
+  const [receipt, setReceipt] = useState<{id:string; when:string; buyer:string; item:string; amount:number; buyerId:string} | null>(null);
   const [memeModal, setMemeModal] = useState<{
     open: boolean; 
     agentName: string; 
@@ -2006,7 +2016,7 @@ export default function GCSDApp() {
     notify(`🎁 ${request.agentName} redeemed ${request.prizeLabel} (−${request.price} GCSD)`);
       setReceipt({
         id: receiptId,
-      when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price
+      when: new Date().toLocaleString(), buyer: request.agentName, item: request.prizeLabel, amount: request.price, buyerId: request.agentId
     });
     
     // Create admin notification
@@ -2555,7 +2565,10 @@ export default function GCSDApp() {
   /* ============================ render ============================ */
   return (
     <div
-      className="min-h-screen overflow-x-hidden text-slate-900 dark:text-slate-100 transition-colors duration-200 swipe-container"
+      className={classNames(
+        "min-h-screen overflow-x-hidden transition-colors duration-200 swipe-container",
+        theme === "neon" ? "text-orange-100" : "text-slate-900 dark:text-slate-100"
+      )}
     >
       <Toaster position="top-center" richColors />
 
@@ -2867,9 +2880,9 @@ export default function GCSDApp() {
         theme={theme}
       />
 
-      {/* Receipt */}
+      {/* Receipt - only show for the buyer or if viewing as that agent */}
       <AnimatePresence>
-        {receipt && (
+        {receipt && (portal === "agent" && currentAgentId === receipt.buyerId) && (
           <motion.div 
             className="fixed inset-0 z-50 bg-black/40 grid place-items-center"
             initial={{ opacity: 0 }}
@@ -2966,6 +2979,7 @@ export default function GCSDApp() {
                 prizes={PRIZE_ITEMS}
                 goals={goals}
                 wishlist={wishlist[currentAgentId] || []}
+                pins={pins}
                 onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
                 onRedeem={(k)=>redeemPrize(currentAgentId, k)}
                 onToggleWishlist={(prizeKey) => {
@@ -3421,6 +3435,7 @@ function AgentPortal({
   onRedeem,
   onToggleWishlist,
   onOpenMeme,
+  pins,
 }: {
   theme: Theme;
   agentId: string;
@@ -3434,10 +3449,28 @@ function AgentPortal({
   onRedeem: (k: string) => void;
   onToggleWishlist: (prizeKey: string) => void;
   onOpenMeme: (txn: Transaction) => void;
+  pins: Record<string, string>;
 }) {
   const [agentTab, setAgentTab] = useState<"overview" | "purchases">("overview");
+  const [purchasesPinVerified, setPurchasesPinVerified] = useState(false);
+  const [showPurchasesPin, setShowPurchasesPin] = useState(false);
   
   const name = accounts.find((a) => a.id === agentId)?.name || "—";
+  
+  // Handle tab switch - require PIN for purchases
+  const handleTabChange = (tab: "overview" | "purchases") => {
+    if (tab === "purchases" && !purchasesPinVerified) {
+      setShowPurchasesPin(true);
+    } else {
+      setAgentTab(tab);
+    }
+  };
+  
+  // Reset PIN verification when agent changes
+  useEffect(() => {
+    setPurchasesPinVerified(false);
+    setAgentTab("overview");
+  }, [agentId]);
   const balance = txns.reduce((s, t) => {
     if (t.toId === agentId && t.kind === "credit") s += t.amount;
     if (t.fromId === agentId && t.kind === "debit") s -= t.amount;
@@ -3459,6 +3492,15 @@ function AgentPortal({
   // Get redeemed prizes (only active ones, not reversed)
   const redeemedPrizes = agentTxns.filter((t) => G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns));
 
+  // Receipt modal state
+  const [selectedReceipt, setSelectedReceipt] = useState<{
+    id: string;
+    when: string;
+    buyer: string;
+    item: string;
+    amount: number;
+  } | null>(null);
+
   return (
     <div>
       {/* Tab Navigation */}
@@ -3469,7 +3511,7 @@ function AgentPortal({
         ].map((tab) => (
           <motion.button
             key={tab.key}
-            onClick={() => setAgentTab(tab.key as typeof agentTab)}
+            onClick={() => handleTabChange(tab.key as typeof agentTab)}
             className={classNames(
               "flex items-center gap-2 px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all",
               agentTab === tab.key 
@@ -3481,9 +3523,37 @@ function AgentPortal({
           >
             <tab.icon className="w-4 h-4" />
             {tab.label}
+            {tab.key === "purchases" && <Lock className="w-3 h-3 opacity-50" />}
           </motion.button>
         ))}
       </div>
+      
+      {/* PIN Modal for Purchases */}
+      <AnimatePresence>
+        {showPurchasesPin && (
+          <PinModal
+            open={showPurchasesPin}
+            onClose={() => setShowPurchasesPin(false)}
+            onCheck={(pin) => {
+              const agentPin = pins[agentId];
+              if (!agentPin) {
+                toast.error("No PIN set for this agent");
+                return false;
+              }
+              if (pin === agentPin) {
+                setPurchasesPinVerified(true);
+                setAgentTab("purchases");
+                setShowPurchasesPin(false);
+                toast.success("✅ Access granted");
+                return true;
+              }
+              toast.error("❌ Incorrect PIN");
+              return false;
+            }}
+            theme={theme}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Tab Content */}
       <AnimatePresence mode="wait">
@@ -3732,16 +3802,33 @@ function AgentPortal({
                             </div>
                           </div>
                           
-                          {isMeme && (
+                          <div className="flex flex-col gap-2">
                             <motion.button
-                              className={classNames("px-4 py-2 rounded-xl font-semibold", neonBtn(theme, true))}
-                              onClick={() => onOpenMeme(t)}
+                              className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme, true))}
+                              onClick={() => setSelectedReceipt({
+                                id: receiptId,
+                                when: date.toLocaleString(),
+                                buyer: name,
+                                item: prizeLabel,
+                                amount: t.amount
+                              })}
                               whileHover={{ scale: 1.05 }}
                               whileTap={{ scale: 0.95 }}
                             >
-                              🎨 {memeData ? "View Meme" : "Create Meme"}
+                              📄 View Receipt
                             </motion.button>
-                          )}
+                            
+                            {isMeme && (
+                              <motion.button
+                                className={classNames("px-4 py-2 rounded-xl font-semibold whitespace-nowrap", neonBtn(theme))}
+                                onClick={() => onOpenMeme(t)}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                              >
+                                🎨 {memeData ? "View Meme" : "Create Meme"}
+                              </motion.button>
+                            )}
+                          </div>
                         </div>
                       </motion.div>
                     );
@@ -3752,7 +3839,100 @@ function AgentPortal({
           </motion.div>
         )}
       </AnimatePresence>
+      
+      {/* Receipt Modal */}
+      <AnimatePresence>
+        {selectedReceipt && (
+          <ReceiptModal
+            receipt={selectedReceipt}
+            theme={theme}
+            onClose={() => setSelectedReceipt(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+/** Receipt Modal Component */
+function ReceiptModal({ receipt, theme, onClose }: { receipt: { id: string; when: string; buyer: string; item: string; amount: number }; theme: Theme; onClose: () => void }) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 glass grid place-items-center"
+      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className={classNames("glass-card rounded-3xl shadow-2xl p-8 w-[min(500px,90vw)]", neonBox(theme))}
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="text-4xl mb-3">🧾</div>
+          <h2 className="text-2xl font-bold mb-1">{APP_NAME}</h2>
+          <p className="text-sm opacity-70">Purchase Receipt</p>
+        </div>
+
+        {/* Receipt Details */}
+        <div className="space-y-4 mb-6">
+          <div className="border-b border-dashed pb-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm opacity-70">Receipt ID</span>
+              <code className="font-mono font-semibold">{receipt.id}</code>
+            </div>
+          </div>
+
+          <div className="border-b border-dashed pb-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm opacity-70">Date & Time</span>
+              <span className="font-medium">{receipt.when}</span>
+            </div>
+          </div>
+
+          <div className="border-b border-dashed pb-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm opacity-70">Customer</span>
+              <span className="font-medium">{receipt.buyer}</span>
+            </div>
+          </div>
+
+          <div className="border-b border-dashed pb-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm opacity-70">Item</span>
+              <span className="font-medium">{receipt.item}</span>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <div className="flex justify-between items-center text-lg">
+              <span className="font-bold">Total Amount</span>
+              <span className="font-bold text-rose-500">{receipt.amount.toLocaleString()} GCSD</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="text-center text-xs opacity-50 mb-4">
+          Thank you for your purchase! ✨
+        </div>
+
+        {/* Close Button */}
+        <motion.button
+          className={classNames("w-full px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
+          onClick={onClose}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          Close
+        </motion.button>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -5066,18 +5246,20 @@ function Picker({
   return (
     <motion.div 
       className="fixed inset-0 z-40 glass grid place-items-center"
-      style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+      style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
+      transition={{ duration: 0.12 }}
+      onClick={onClose}
     >
       <motion.div 
         className={classNames("glass-card rounded-3xl shadow-xl p-4 sm:p-6 w-[min(780px,95vw)] max-h-[90vh] overflow-y-auto", neonBox(theme))}
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.95, opacity: 0, y: 10 }}
-        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        transition={{ duration: 0.15, ease: "easeOut" }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
@@ -5103,7 +5285,7 @@ function Picker({
           {accounts
             .filter((a) => a.role !== "system")
             .map((a, index) => (
-              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)} delay={0.02 * (index + 1)}>
+              <HoverCard key={a.id} theme={theme} onClick={() => onChooseAgent(a.id)} delay={Math.min(index * 0.01, 0.15)}>
                 <div className="flex items-center gap-2 mb-1">
                   <Avatar name={a.name} size="sm" theme={theme} />
                   <div className="font-medium flex-1 truncate">{a.name}</div>
