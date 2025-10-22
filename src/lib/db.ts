@@ -20,9 +20,17 @@ const TABLE = "kv";
 
 export async function kvSet<T = KVValue>(key: string, val: T): Promise<void> {
   if (!supabase) { kvMemory.set(key, val); return; }
+  
+  // Skip write if value hasn't changed (saves egress!)
+  const next = stableStringify(val);
+  if (lastWriteJson.get(key) === next) {
+    console.log("⏭️ Skipping unchanged write for", key);
+    return;
+  }
+  
   const { error } = await supabase.from(TABLE).upsert({ key, val }, { onConflict: "key" }).select("key").single();
   if (error) { console.warn("[GCS] kvSet failed; memory fallback:", error); kvMemory.set(key, val); }
-  else { lastWriteJson.set(key, stableStringify(val)); }
+  else { lastWriteJson.set(key, next); }
 }
 
 export async function kvGet<T = KVValue>(key: string): Promise<T | null> {
