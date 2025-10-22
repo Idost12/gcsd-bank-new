@@ -153,33 +153,6 @@ const sendPushNotification = async (title: string, body: string, icon?: string) 
   }
 };
 
-// merge transactions by id (prevents realtime from overwriting local adds)
-function mergeTxns(local: Transaction[], remote: Transaction[]) {
-  const map = new Map<string, Transaction>();
-  for (const t of remote) map.set(t.id, t);
-  for (const t of local) map.set(t.id, t); // local wins on conflict
-  const all = Array.from(map.values());
-  all.sort((a,b)=> new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime());
-  return all;
-}
-function mergeAccounts(local: Account[], remote: Account[]) {
-  const map = new Map<string, Account>();
-  // Remote takes precedence to avoid duplication
-  for (const a of remote) map.set(a.id, a);
-  // Only add local accounts that don't exist remotely
-  for (const a of local) {
-    if (!map.has(a.id)) map.set(a.id, a);
-  }
-  return Array.from(map.values());
-}
-
-// Helper to check if accounts are the same (by name and role)
-function accountsAreEqual(a1: Account[], a2: Account[]): boolean {
-  if (a1.length !== a2.length) return false;
-  const names1 = a1.map(a => `${a.name}-${a.role}`).sort();
-  const names2 = a2.map(a => `${a.name}-${a.role}`).sort();
-  return names1.join(',') === names2.join(',');
-}
 
 /** Compute balances map for all accounts - properly handles reversals and allows negative balances */
 function computeBalances(accounts: Account[], txns: Transaction[]) {
@@ -1757,11 +1730,16 @@ export default function GCSDApp() {
     (async () => {
       try {
         const core = await kvGet<{ accounts: Account[]; txns: Transaction[] }>("gcs-v4-core");
-        if (core?.accounts && core?.txns) {
-          // Clean up duplicates and ensure only valid agents exist
+        
+        console.log("📦 Loading data from storage...", core);
+        
+        // Check if we have valid data
+        if (core?.accounts && Array.isArray(core.accounts) && core.accounts.length > 0 && core?.txns && Array.isArray(core.txns)) {
+          console.log("✅ Found valid data:", core.accounts.length, "accounts,", core.txns.length, "transactions");
           setAccounts(core.accounts);
           setTxns(core.txns);
         } else {
+          console.log("⚠️ No valid data found, using seed data");
           setAccounts(seedAccounts);
           setTxns(seedTxns);
           await kvSet("gcs-v4-core", { accounts: seedAccounts, txns: seedTxns });
