@@ -94,8 +94,8 @@ body {
 /* Optimized Glass Effects with Reflective Edges */
 .glass {
   background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(8px) saturate(150%);
-  -webkit-backdrop-filter: blur(8px) saturate(150%);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
   border: 1px solid rgba(255, 255, 255, 0.3);
   box-shadow: 
     0 4px 16px 0 rgba(31, 38, 135, 0.1),
@@ -103,6 +103,7 @@ body {
     inset 0 -1px 0 0 rgba(255, 255, 255, 0.1);
   position: relative;
   transform: translateZ(0);
+  will-change: transform;
 }
 
 .glass::before {
@@ -120,8 +121,8 @@ body {
 
 .dark .glass {
   background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(8px) saturate(150%);
-  -webkit-backdrop-filter: blur(8px) saturate(150%);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 
     0 4px 16px 0 rgba(0, 0, 0, 0.2),
@@ -135,8 +136,8 @@ body {
 
 .neon-theme .glass {
   background: rgba(42, 42, 42, 0.5);
-  backdrop-filter: blur(8px) saturate(150%);
-  -webkit-backdrop-filter: blur(8px) saturate(150%);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
   border: 1px solid rgba(249, 115, 22, 0.4);
   box-shadow: 
     0 4px 16px 0 rgba(249, 115, 22, 0.15),
@@ -151,8 +152,8 @@ body {
 /* Glass button variant with reflective edges */
 .glass-btn {
   background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(6px) saturate(140%);
-  -webkit-backdrop-filter: blur(6px) saturate(140%);
+  backdrop-filter: blur(4px) saturate(130%);
+  -webkit-backdrop-filter: blur(4px) saturate(130%);
   border: 1px solid rgba(255, 255, 255, 0.4);
   box-shadow: 
     0 2px 12px 0 rgba(31, 38, 135, 0.15),
@@ -160,7 +161,8 @@ body {
     inset 0 -1px 0 0 rgba(0, 0, 0, 0.08);
   position: relative;
   transform: translateZ(0);
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
 }
 
 .glass-btn::before {
@@ -233,8 +235,8 @@ body {
 /* Glass card variant with reflective edges */
 .glass-card {
   background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(10px) saturate(160%);
-  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(8px) saturate(145%);
+  -webkit-backdrop-filter: blur(8px) saturate(145%);
   border: 1px solid rgba(255, 255, 255, 0.25);
   box-shadow: 
     0 4px 20px 0 rgba(31, 38, 135, 0.08),
@@ -242,6 +244,7 @@ body {
     inset 0 -1px 0 0 rgba(255, 255, 255, 0.08);
   position: relative;
   transform: translateZ(0);
+  will-change: transform;
 }
 
 .glass-card::before {
@@ -310,18 +313,18 @@ body {
 @media (max-width: 768px) {
   /* Reduce blur for 60fps on mobile */
   .glass {
-    backdrop-filter: blur(5px) saturate(130%);
-    -webkit-backdrop-filter: blur(5px) saturate(130%);
+    backdrop-filter: blur(3px) saturate(120%);
+    -webkit-backdrop-filter: blur(3px) saturate(120%);
   }
   
   .glass-btn {
-    backdrop-filter: blur(4px) saturate(130%);
-    -webkit-backdrop-filter: blur(4px) saturate(130%);
+    backdrop-filter: blur(2px) saturate(110%);
+    -webkit-backdrop-filter: blur(2px) saturate(110%);
   }
   
   .glass-card {
-    backdrop-filter: blur(6px) saturate(140%);
-    -webkit-backdrop-filter: blur(6px) saturate(140%);
+    backdrop-filter: blur(4px) saturate(130%);
+    -webkit-backdrop-filter: blur(4px) saturate(130%);
   }
   
   /* Slower animations on mobile to reduce CPU */
@@ -354,18 +357,21 @@ body {
 
 /* Enhanced hover effects - optimized */
 .hover-lift {
-  will-change: transform;
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .hover-lift:hover {
   transform: translateY(-2px) translateZ(0);
+  will-change: transform;
 }
 
 /* Smooth transitions for interactive elements - optimized */
 button, input, select, textarea, .clickable {
+  transition: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover, .clickable:hover {
   will-change: transform;
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* small helpers */
