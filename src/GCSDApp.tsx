@@ -4936,6 +4936,9 @@ function AdminPortal({
   onUnfreezeAgent,
   onApproveRedeem,
   onRejectRedeem,
+  onCleanupDuplicates,
+  onEmergencyReset,
+  onImportBackup,
   backups,
   autoBackupEnabled,
   onToggleAutoBackup,
@@ -4979,6 +4982,8 @@ function AdminPortal({
   onToggleAutoBackup: () => void;
   onRestoreBackup: (backupId: string) => void;
   onCleanupDuplicates: () => void;
+  onEmergencyReset: () => void;
+  onImportBackup: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   const [adminTab, setAdminTab] = useState<"dashboard" | "addsale" | "transfer" | "corrections" | "history" | "users" | "notifications" | "goals" | "requests" | "audit" | "export">("dashboard");
   const [agentId, setAgentId] = useState("");
