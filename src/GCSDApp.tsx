@@ -1802,7 +1802,7 @@ function MemeModal({
           {/* Actions */}
           <div className="flex gap-3">
             {!readOnly && (
-              <motion.button
+            <motion.button
                 className={classNames("flex-1 px-4 py-3 rounded-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600")}
                 onClick={() => {
                   // Save the meme data first
@@ -1820,11 +1820,11 @@ function MemeModal({
                   // Then close
                   onClose();
                 }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
                 💾 Save & Close
-              </motion.button>
+            </motion.button>
             )}
             <motion.button
               className={classNames(readOnly ? "flex-1" : "", "px-4 py-3 rounded-xl font-semibold", neonBtn(theme, true))}
@@ -4053,77 +4053,6 @@ function Home({
               <div className="absolute bottom-0 left-0 right-2 h-6 bg-gradient-to-t from-slate-50 to-transparent dark:from-slate-900 pointer-events-none"></div>
             </div>
           </motion.div>
-
-          {/* Smart Shopping Assistant */}
-          {(() => {
-            const recommendations = recommendPrizes(agentId, balance, txns, prizes, wishlist);
-            
-            if (recommendations.length === 0) return null;
-            
-            return (
-              <motion.div
-                className={classNames("rounded-2xl border p-5 mb-4", neonBox(theme), "bg-gradient-to-br from-purple-500/5 to-blue-500/5")}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <Sparkles className="w-5 h-5 text-purple-500" />
-                  <h3 className="font-semibold text-lg">🛍️ Smart Shopping Assistant</h3>
-                </div>
-                <div className="text-xs opacity-70 mb-4">
-                  Personalized recommendations based on your balance and earning pace
-                </div>
-                
-                <div className="space-y-2">
-                  {recommendations.map((rec, idx) => {
-                    const stockLeft = stock[rec.prize.key] || 0;
-                    const isWished = wishlist.includes(rec.prize.key);
-                    
-                    return (
-                      <motion.div
-                        key={rec.prize.key}
-                        className={classNames(
-                          "p-3 rounded-lg border transition-all",
-                          rec.type === 'now' ? 'bg-emerald-500/10 border-emerald-500/30' :
-                          rec.type === 'soon' ? 'bg-blue-500/10 border-blue-500/30' :
-                          'bg-purple-500/10 border-purple-500/30'
-                        )}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.05 }}
-                        whileHover={{ scale: 1.02, x: 3 }}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className="font-medium">{rec.prize.label}</div>
-                              {isWished && <span className="text-xs">⭐</span>}
-                              {rec.type === 'now' && (
-                                <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500 text-white font-semibold">
-                                  Available Now!
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs opacity-70">{rec.reason}</div>
-                            {stockLeft > 0 && stockLeft <= 3 && (
-                              <div className="text-xs text-orange-500 mt-1">⚠️ Only {stockLeft} left in stock!</div>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-bold whitespace-nowrap">
-                              {rec.prize.price.toLocaleString()}
-                            </div>
-                            <div className="text-xs opacity-60">GCSD</div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            );
-          })()}
 
           {/* Available Prizes */}
           <motion.div 
