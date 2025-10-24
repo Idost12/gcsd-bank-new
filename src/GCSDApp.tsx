@@ -6,6 +6,7 @@ import {
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
+import "./lib/testGoogleSheets"; // Test Google Sheets integration
 
 /* ===========================
    Types & constants
