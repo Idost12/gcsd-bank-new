@@ -18,7 +18,7 @@ const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 // Cache to avoid excessive API calls
 const cache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_DURATION = 30000; // 30 seconds
+const CACHE_DURATION = 5000; // 5 seconds - shorter cache for better sync
 
 // Helper function to get cached data or fetch from API
 async function getCachedOrFetch<T>(key: string, fetchFn: () => Promise<T>): Promise<T> {
@@ -101,7 +101,8 @@ async function getAllSheetData(): Promise<Record<string, any>> {
       }
     }
 
-    console.log("📖 Successfully read data from Google Sheets");
+    console.log("📖 Successfully read data from Google Sheets:", Object.keys(result).length, "keys");
+    console.log("📊 Sample data:", Object.entries(result).slice(0, 3));
     return result;
   } catch (error) {
     console.warn("[GCS] Google Sheets read failed; using memory fallback:", error);
@@ -158,14 +159,13 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
     setTimeout(() => {
       document.body.removeChild(form);
       document.body.removeChild(iframe);
-    }, 1000);
+    }, 2000); // Increased delay to ensure Google Sheets processes the data
     
     console.log("✅ Successfully submitted data to Google Sheets via Apps Script");
     
-    // Update cache
-    for (const [key, value] of Object.entries(data)) {
-      cache.set(key, { data: value, timestamp: Date.now() });
-    }
+    // Clear cache to force fresh read on next access
+    cache.clear();
+    console.log("🔄 Cache cleared - next read will be fresh from Google Sheets");
   } catch (error) {
     console.warn("[GCS] Google Sheets update failed; using memory fallback:", error);
     // Update memory as fallback
@@ -177,14 +177,20 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
 
 // Google Sheets implementation of the KV store
 export async function kvSet<T = KVValue>(key: string, val: T): Promise<void> {
+  console.log(`💾 Setting ${key} to:`, val);
   const allData = await getCachedOrFetch('all_data', getAllSheetData);
   allData[key] = val;
   await updateSheetData(allData);
+  
+  // Force a small delay to ensure data is written before continuing
+  await new Promise(resolve => setTimeout(resolve, 1000));
 }
 
 export async function kvGet<T = KVValue>(key: string): Promise<T | null> {
   const allData = await getCachedOrFetch('all_data', getAllSheetData);
-  return (allData[key] ?? null) as T | null;
+  const result = (allData[key] ?? null) as T | null;
+  console.log(`📖 Getting ${key}:`, result);
+  return result;
 }
 
 export async function kvDelete(key: string): Promise<void> {
@@ -267,6 +273,13 @@ export async function kvGetRemember<T = KVValue>(key: string): Promise<T | null>
   const v = await kvGet<T>(key);
   if (v !== null) lastWriteJson.set(key, stableStringify(v));
   return v;
+}
+
+// Force refresh function to clear cache and get fresh data
+export async function forceRefresh(): Promise<void> {
+  console.log("🔄 Forcing refresh - clearing cache");
+  cache.clear();
+  await getAllSheetData();
 }
 
 // Export for compatibility
