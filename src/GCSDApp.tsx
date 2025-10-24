@@ -9,6 +9,8 @@ import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./l
 import "./lib/testGoogleSheets"; // Test Google Sheets integration
 import "./lib/debug"; // Debug test
 
+// Updated: October 24, 2025 - Google Sheets migration complete
+
 /* ===========================
    Types & constants
    =========================== */
@@ -2166,7 +2168,7 @@ export default function GCSDApp() {
     text: compressed.t
   });
 
-  // Batched update function to reduce Supabase writes
+  // Batched update function to reduce Google Sheets writes
   const batchedKvSet = (key: string, value: any) => {
     // Compress data before storing to reduce size
     let compressedValue = value;
@@ -2196,7 +2198,7 @@ export default function GCSDApp() {
         await kvSet(k, v);
       }
       
-      console.log("📦 Batched", updates.size, "updates to Supabase");
+      console.log("📦 Batched", updates.size, "updates to Google Sheets");
     }, 1000); // Batch every 1 second
   };
   const getName = (id:string) => accounts.find(a=>a.id===id)?.name || "—";
