@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 import "./lib/testGoogleSheets"; // Test Google Sheets integration
+import "./lib/debug"; // Debug test
 
 /* ===========================
    Types & constants
