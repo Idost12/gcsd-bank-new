@@ -11,5 +11,6 @@ export {
   kvSetIfChanged,
   kvGetRemember,
   forceRefresh,
+  testGoogleSheetsConnection,
   supabase
 } from './googleSheets';
