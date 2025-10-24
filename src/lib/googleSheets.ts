@@ -1,5 +1,6 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
+// Updated: October 24, 2025 - Using batchUpdate method
 
 type KVValue = unknown;
 
@@ -89,15 +90,20 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
       typeof value === 'string' ? value : JSON.stringify(value)
     ]);
 
+    // Use batchUpdate instead of direct value update
     const response = await fetch(
-      `${SHEETS_API_BASE}/${SHEET_ID}/values/Data!A:B?valueInputOption=RAW&key=${API_KEY}`,
+      `${SHEETS_API_BASE}/${SHEET_ID}/values:batchUpdate?key=${API_KEY}`,
       {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          values: values
+          valueInputOption: 'RAW',
+          data: [{
+            range: 'Data!A:B',
+            values: values
+          }]
         })
       }
     );
