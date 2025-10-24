@@ -5,7 +5,7 @@ import {
   Wallet, Gift, History, Sparkles, UserCircle2, Lock, Check, X, Sun, Moon,
   Users, Home as HomeIcon, RotateCcw, Bell, Flame, Plus, Shield, Zap, ChevronDown
 } from "lucide-react";
-import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange, forceRefresh } from "./lib/db";
+import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange, forceRefresh, testGoogleSheetsConnection } from "./lib/db";
 import "./lib/testGoogleSheets"; // Test Google Sheets integration
 import "./lib/debug"; // Debug test
 
@@ -1758,10 +1758,12 @@ export default function GCSDApp() {
           await kvSet("gcs-v4-core", { accounts: seedAccounts, txns: seedTxns });
         }
         
-        // Force refresh to ensure we have the latest data from Google Sheets
+        // Test Google Sheets connection and force refresh
         setTimeout(() => {
-          forceRefresh().then(() => {
-            console.log("🔄 Initial data refresh completed");
+          testGoogleSheetsConnection().then(() => {
+            forceRefresh().then(() => {
+              console.log("🔄 Initial data refresh completed");
+            });
           });
         }, 1000);
         setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
