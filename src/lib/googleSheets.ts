@@ -1,12 +1,13 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
-// Updated: October 24, 2025 - Using batchUpdate method
+// Updated: October 24, 2025 - Using Service Account authentication
 
 type KVValue = unknown;
 
 // Configuration - you'll need to set these up
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string | undefined;
-const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
+const SERVICE_ACCOUNT_EMAIL = import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_EMAIL as string | undefined;
+const SERVICE_ACCOUNT_PRIVATE_KEY = import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY as string | undefined;
 
 // Fallback to memory if no Google Sheets config
 let kvMemory = new Map<string, KVValue>();
@@ -32,25 +33,80 @@ async function getCachedOrFetch<T>(key: string, fetchFn: () => Promise<T>): Prom
   return data;
 }
 
+// Get access token using service account
+async function getAccessToken(): Promise<string> {
+  if (!SERVICE_ACCOUNT_EMAIL || !SERVICE_ACCOUNT_PRIVATE_KEY) {
+    throw new Error("Missing service account credentials");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "RS256",
+    typ: "JWT"
+  };
+
+  const payload = {
+    iss: SERVICE_ACCOUNT_EMAIL,
+    scope: "https://www.googleapis.com/auth/spreadsheets",
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now
+  };
+
+  // Create JWT (simplified - in production, use a proper JWT library)
+  const encodedHeader = btoa(JSON.stringify(header));
+  const encodedPayload = btoa(JSON.stringify(payload));
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    await crypto.subtle.importKey(
+      "pkcs8",
+      new TextEncoder().encode(SERVICE_ACCOUNT_PRIVATE_KEY),
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"]
+    ),
+    new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)
+  );
+
+  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature)));
+  const jwt = `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get access token: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
 // Get all data from the sheet
 async function getAllSheetData(): Promise<Record<string, any>> {
-  if (!SHEET_ID || !API_KEY) {
+  if (!SHEET_ID || !SERVICE_ACCOUNT_EMAIL || !SERVICE_ACCOUNT_PRIVATE_KEY) {
     console.warn("[GCS] Missing Google Sheets config; using memory fallback");
     return Object.fromEntries(kvMemory);
   }
 
   try {
+    const accessToken = await getAccessToken();
     const response = await fetch(
-      `${SHEETS_API_BASE}/${SHEET_ID}/values/Data!A:B?key=${API_KEY}`
+      `${SHEETS_API_BASE}/${SHEET_ID}/values/Data!A:B?access_token=${accessToken}`
     );
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
     const result: Record<string, any> = {};
-    
+
     if (data.values) {
       for (const row of data.values) {
         if (row.length >= 2) {
@@ -64,7 +120,7 @@ async function getAllSheetData(): Promise<Record<string, any>> {
         }
       }
     }
-    
+
     return result;
   } catch (error) {
     console.warn("[GCS] Google Sheets fetch failed; using memory fallback:", error);
@@ -74,7 +130,7 @@ async function getAllSheetData(): Promise<Record<string, any>> {
 
 // Update the entire sheet with new data
 async function updateSheetData(data: Record<string, any>): Promise<void> {
-  if (!SHEET_ID || !API_KEY) {
+  if (!SHEET_ID || !SERVICE_ACCOUNT_EMAIL || !SERVICE_ACCOUNT_PRIVATE_KEY) {
     console.warn("[GCS] Missing Google Sheets config; using memory fallback");
     // Update memory
     for (const [key, value] of Object.entries(data)) {
@@ -84,15 +140,17 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
   }
 
   try {
+    const accessToken = await getAccessToken();
+    
     // Convert data to sheet format
     const values = Object.entries(data).map(([key, value]) => [
       key,
       typeof value === 'string' ? value : JSON.stringify(value)
     ]);
 
-    // Use batchUpdate instead of direct value update
+    // Use batchUpdate with service account
     const response = await fetch(
-      `${SHEETS_API_BASE}/${SHEET_ID}/values:batchUpdate?key=${API_KEY}`,
+      `${SHEETS_API_BASE}/${SHEET_ID}/values:batchUpdate?access_token=${accessToken}`,
       {
         method: 'POST',
         headers: {
@@ -112,6 +170,8 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
+    console.log("✅ Successfully updated Google Sheets with service account");
+    
     // Update cache
     for (const [key, value] of Object.entries(data)) {
       cache.set(key, { data: value, timestamp: Date.now() });
