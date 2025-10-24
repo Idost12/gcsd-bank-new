@@ -1,6 +1,6 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
-// Updated: October 24, 2025 - Multi-user Google Sheets integration
+// Updated: October 24, 2025 - Enhanced CSV parsing for complex JSON data
 
 type KVValue = unknown;
 
@@ -74,13 +74,28 @@ async function getAllSheetData(): Promise<Record<string, any>> {
     // Skip header row and process data
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
-      if (line) {
-        const [key, value] = line.split(',');
-        if (key && value) {
-          try {
-            result[key] = JSON.parse(value);
-          } catch {
-            result[key] = value;
+      if (line && line !== 'Key,"""""""""""""""Value"""""""""""""""') {
+        // Find the first comma to separate key from value
+        const firstCommaIndex = line.indexOf(',');
+        if (firstCommaIndex > 0) {
+          const key = line.substring(0, firstCommaIndex);
+          let value = line.substring(firstCommaIndex + 1);
+          
+          if (key && value) {
+            try {
+              // Remove all the extra quotes that Google Sheets adds
+              const cleanValue = value.replace(/^"+|"+$/g, '').replace(/""/g, '"');
+              result[key] = JSON.parse(cleanValue);
+            } catch (error) {
+              // If JSON parsing fails, try to clean it more aggressively
+              try {
+                const moreCleanValue = value.replace(/^"+|"+$/g, '').replace(/""/g, '"').replace(/\\"/g, '"');
+                result[key] = JSON.parse(moreCleanValue);
+              } catch {
+                // If still fails, use the raw value
+                result[key] = value.replace(/^"+|"+$/g, '');
+              }
+            }
           }
         }
       }
