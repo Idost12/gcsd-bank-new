@@ -1,6 +1,6 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
-// Updated: October 24, 2025 - Hidden iframe to prevent popups
+// Updated: October 24, 2025 - Multi-user Google Sheets integration
 
 type KVValue = unknown;
 
@@ -51,14 +51,14 @@ async function getAccessToken(): Promise<string> {
 
 // Get all data from the sheet
 async function getAllSheetData(): Promise<Record<string, any>> {
-  if (!SHEET_ID || !SERVICE_ACCOUNT_EMAIL || !SERVICE_ACCOUNT_PRIVATE_KEY) {
+  if (!SHEET_ID) {
     console.warn("[GCS] Missing Google Sheets config; using memory fallback");
     return Object.fromEntries(kvMemory);
   }
 
   try {
-    // Use a simpler approach - make the sheet publicly accessible
-    // This avoids the complex JWT authentication
+    // Use a simple approach: read from Google Sheets CSV export
+    // This works for multi-user scenarios
     const response = await fetch(
       `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`
     );
@@ -71,8 +71,10 @@ async function getAllSheetData(): Promise<Record<string, any>> {
     const lines = csvText.split('\n');
     const result: Record<string, any> = {};
 
-    for (const line of lines) {
-      if (line.trim()) {
+    // Skip header row and process data
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line) {
         const [key, value] = line.split(',');
         if (key && value) {
           try {
@@ -84,9 +86,10 @@ async function getAllSheetData(): Promise<Record<string, any>> {
       }
     }
 
+    console.log("📖 Successfully read data from Google Sheets");
     return result;
   } catch (error) {
-    console.warn("[GCS] Google Sheets fetch failed; using memory fallback:", error);
+    console.warn("[GCS] Google Sheets read failed; using memory fallback:", error);
     return Object.fromEntries(kvMemory);
   }
 }
