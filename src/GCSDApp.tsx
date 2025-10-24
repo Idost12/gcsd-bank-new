@@ -8,10 +8,8 @@ import {
 import { kvGetRemember as kvGet, kvSetIfChanged as kvSet, onKVChange } from "./lib/db";
 import "./lib/testGoogleSheets"; // Test Google Sheets integration
 import "./lib/debug"; // Debug test
-import "./lib/comprehensiveTest"; // Comprehensive functionality test
-import "./lib/realTimeMonitor"; // Real-time monitoring system
 
-// Updated: October 24, 2025 - Comprehensive Google Sheets testing
+// Updated: October 24, 2025 - Google Sheets integration complete
 
 /* ===========================
    Types & constants
