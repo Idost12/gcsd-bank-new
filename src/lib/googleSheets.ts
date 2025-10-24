@@ -219,6 +219,7 @@ export function onKVChange(
         for (const [key, value] of Object.entries(currentData)) {
           if (!(key in lastData) || JSON.stringify(lastData[key]) !== JSON.stringify(value)) {
             const event = key in lastData ? "UPDATE" : "INSERT";
+            console.log(`🔄 Live update detected: ${event} on ${key}`);
             changeHandlers.forEach(h => h({ event, key, val: value }));
           }
         }
@@ -226,6 +227,7 @@ export function onKVChange(
         // Check for deletions
         for (const key of Object.keys(lastData)) {
           if (!(key in currentData)) {
+            console.log(`🔄 Live update detected: DELETE on ${key}`);
             changeHandlers.forEach(h => h({ event: "DELETE", key }));
           }
         }
@@ -234,7 +236,7 @@ export function onKVChange(
       } catch (error) {
         console.warn("[GCS] Polling error:", error);
       }
-    }, 5000); // Poll every 5 seconds
+    }, 3000); // Poll every 3 seconds for faster updates
   }
   
   // Return unsubscribe function
