@@ -1,11 +1,12 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
-// Updated: October 24, 2025 - Simplified memory storage approach
+// Updated: October 24, 2025 - Google Apps Script integration
 
 type KVValue = unknown;
 
 // Configuration - you'll need to set these up
 const SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID as string | undefined;
+const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
 const SERVICE_ACCOUNT_EMAIL = import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_EMAIL as string | undefined;
 const SERVICE_ACCOUNT_PRIVATE_KEY = import.meta.env.VITE_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY as string | undefined;
 
@@ -92,7 +93,7 @@ async function getAllSheetData(): Promise<Record<string, any>> {
 
 // Update the entire sheet with new data
 async function updateSheetData(data: Record<string, any>): Promise<void> {
-  if (!SHEET_ID || !SERVICE_ACCOUNT_EMAIL || !SERVICE_ACCOUNT_PRIVATE_KEY) {
+  if (!SHEET_ID) {
     console.warn("[GCS] Missing Google Sheets config; using memory fallback");
     // Update memory
     for (const [key, value] of Object.entries(data)) {
@@ -102,21 +103,32 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
   }
 
   try {
-    // For now, use memory storage since Google Sheets write requires complex authentication
-    // This is a temporary solution that will work for the app functionality
-    console.log("📝 Storing data in memory (Google Sheets write requires server-side authentication)");
+    // Use Google Apps Script to write to Google Sheets
+    // This is the ONLY way to write to Google Sheets from a browser
+    const scriptUrl = `https://script.google.com/macros/s/AKfycbyvqoO-IHAfVlUCOhlIPv6dgXg0j7yqHF6ccMnRvcePvL8thCUZuUq17ldS0KJlsThC8g/exec`;
     
-    // Update memory
-    for (const [key, value] of Object.entries(data)) {
-      kvMemory.set(key, value);
+    const response = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'updateData',
+        sheetId: SHEET_ID,
+        data: data
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
+
+    console.log("✅ Successfully updated Google Sheets via Apps Script");
     
     // Update cache
     for (const [key, value] of Object.entries(data)) {
       cache.set(key, { data: value, timestamp: Date.now() });
     }
-    
-    console.log("✅ Data stored successfully in memory");
   } catch (error) {
     console.warn("[GCS] Google Sheets update failed; using memory fallback:", error);
     // Update memory as fallback
