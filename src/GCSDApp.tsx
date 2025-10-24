@@ -1811,8 +1811,15 @@ export default function GCSDApp() {
 
   /* realtime sync: merge (do not overwrite local) */
   useEffect(() => {
-    const off = onKVChange(async ({ key, val }) => {
+    const off = onKVChange(async ({ key, val, event }) => {
       if (!key) return;
+      
+      // Show live update notification for core data changes
+      if (key === "gcs-v4-core" && event === "UPDATE") {
+        console.log("🔄 Live update: Core data changed - refreshing UI");
+        toast.success("🔄 Live update received!", { duration: 2000 });
+      }
+      
       if (key === "gcs-v4-core") {
         const remote = (val ?? (await kvGet("gcs-v4-core"))) as {accounts: Account[]; txns: Transaction[]} | null;
         if (!remote) return;
