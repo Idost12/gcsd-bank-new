@@ -10,5 +10,6 @@ export {
   onKVChange,
   kvSetIfChanged,
   kvGetRemember,
+  forceRefresh,
   supabase
 } from './googleSheets';
