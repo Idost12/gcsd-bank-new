@@ -68,6 +68,8 @@ async function getAllSheetData(): Promise<Record<string, any>> {
     }
 
     const csvText = await response.text();
+    console.log("📄 Raw CSV from Google Sheets:", csvText.substring(0, 500) + "...");
+    
     const lines = csvText.split('\n');
     const result: Record<string, any> = {};
 
@@ -75,23 +77,31 @@ async function getAllSheetData(): Promise<Record<string, any>> {
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (line && line !== 'Key,"""""""""""""""Value"""""""""""""""') {
+        console.log("📝 Processing line:", line.substring(0, 100) + "...");
+        
         // Find the first comma to separate key from value
         const firstCommaIndex = line.indexOf(',');
         if (firstCommaIndex > 0) {
           const key = line.substring(0, firstCommaIndex);
           let value = line.substring(firstCommaIndex + 1);
           
+          console.log("🔑 Key:", key, "Value:", value.substring(0, 50) + "...");
+          
           if (key && value) {
             try {
               // Remove all the extra quotes that Google Sheets adds
               const cleanValue = value.replace(/^"+|"+$/g, '').replace(/""/g, '"');
               result[key] = JSON.parse(cleanValue);
+              console.log("✅ Successfully parsed:", key);
             } catch (error) {
+              console.log("❌ JSON parse failed for", key, ":", error);
               // If JSON parsing fails, try to clean it more aggressively
               try {
                 const moreCleanValue = value.replace(/^"+|"+$/g, '').replace(/""/g, '"').replace(/\\"/g, '"');
                 result[key] = JSON.parse(moreCleanValue);
+                console.log("✅ Successfully parsed after cleaning:", key);
               } catch {
+                console.log("❌ Still failed, using raw value for:", key);
                 // If still fails, use the raw value
                 result[key] = value.replace(/^"+|"+$/g, '');
               }
@@ -103,6 +113,13 @@ async function getAllSheetData(): Promise<Record<string, any>> {
 
     console.log("📖 Successfully read data from Google Sheets:", Object.keys(result).length, "keys");
     console.log("📊 Sample data:", Object.entries(result).slice(0, 3));
+    
+    // If no data was parsed, try to use memory fallback
+    if (Object.keys(result).length === 0) {
+      console.log("⚠️ No data parsed from CSV, using memory fallback");
+      return Object.fromEntries(kvMemory);
+    }
+    
     return result;
   } catch (error) {
     console.warn("[GCS] Google Sheets read failed; using memory fallback:", error);
@@ -282,6 +299,40 @@ export async function forceRefresh(): Promise<void> {
   console.log("🔄 Forcing refresh - clearing cache");
   cache.clear();
   await getAllSheetData();
+}
+
+// Test function to debug Google Sheets connection
+export async function testGoogleSheetsConnection(): Promise<void> {
+  console.log("🧪 Testing Google Sheets connection...");
+  
+  if (!SHEET_ID) {
+    console.error("❌ No SHEET_ID configured");
+    return;
+  }
+  
+  try {
+    const response = await fetch(
+      `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`
+    );
+    
+    if (!response.ok) {
+      console.error("❌ HTTP Error:", response.status, response.statusText);
+      return;
+    }
+    
+    const csvText = await response.text();
+    console.log("✅ Successfully connected to Google Sheets");
+    console.log("📄 CSV Length:", csvText.length);
+    console.log("📄 First 200 chars:", csvText.substring(0, 200));
+    
+    // Try to parse the CSV
+    const lines = csvText.split('\n');
+    console.log("📄 Number of lines:", lines.length);
+    console.log("📄 First few lines:", lines.slice(0, 3));
+    
+  } catch (error) {
+    console.error("❌ Connection test failed:", error);
+  }
 }
 
 // Export for compatibility
