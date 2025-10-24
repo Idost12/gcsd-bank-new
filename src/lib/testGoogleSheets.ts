@@ -1,5 +1,6 @@
 // src/lib/testGoogleSheets.ts
 // Simple test to verify Google Sheets integration works
+// Updated: October 24, 2025 - Google Sheets migration complete
 
 import { kvSet, kvGet, kvDelete } from './googleSheets';
 
