@@ -1,6 +1,6 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
-// Updated: October 24, 2025 - Google Apps Script integration
+// Updated: October 24, 2025 - GET request bypass for CORS
 
 type KVValue = unknown;
 
@@ -103,27 +103,35 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
   }
 
   try {
-    // Use Google Apps Script to write to Google Sheets
-    // This is the ONLY way to write to Google Sheets from a browser
+    // Use JSONP to bypass CORS issues with Google Apps Script
     const scriptUrl = `https://script.google.com/macros/s/AKfycbyvqoO-IHAfVlUCOhlIPv6dgXg0j7yqHF6ccMnRvcePvL8thCUZuUq17ldS0KJlsThC8g/exec`;
     
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'updateData',
-        sheetId: SHEET_ID,
-        data: data
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    console.log("✅ Successfully updated Google Sheets via Apps Script");
+    // Create a form to submit data via GET request (bypasses CORS)
+    const form = document.createElement('form');
+    form.method = 'GET';
+    form.action = scriptUrl;
+    form.target = '_blank';
+    form.style.display = 'none';
+    
+    // Add data as hidden inputs
+    const sheetIdInput = document.createElement('input');
+    sheetIdInput.type = 'hidden';
+    sheetIdInput.name = 'sheetId';
+    sheetIdInput.value = SHEET_ID;
+    form.appendChild(sheetIdInput);
+    
+    const dataInput = document.createElement('input');
+    dataInput.type = 'hidden';
+    dataInput.name = 'data';
+    dataInput.value = JSON.stringify(data);
+    form.appendChild(dataInput);
+    
+    // Submit the form
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+    
+    console.log("✅ Successfully submitted data to Google Sheets via Apps Script");
     
     // Update cache
     for (const [key, value] of Object.entries(data)) {
