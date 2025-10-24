@@ -1,6 +1,6 @@
 // src/lib/googleSheets.ts
 // Google Sheets backend to replace Supabase
-// Updated: October 24, 2025 - GET request bypass for CORS
+// Updated: October 24, 2025 - Hidden iframe to prevent popups
 
 type KVValue = unknown;
 
@@ -103,14 +103,20 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
   }
 
   try {
-    // Use JSONP to bypass CORS issues with Google Apps Script
+    // Use a hidden iframe to submit data without popups
     const scriptUrl = `https://script.google.com/macros/s/AKfycbyvqoO-IHAfVlUCOhlIPv6dgXg0j7yqHF6ccMnRvcePvL8thCUZuUq17ldS0KJlsThC8g/exec`;
+    
+    // Create a hidden iframe
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.name = 'hiddenFrame';
+    document.body.appendChild(iframe);
     
     // Create a form to submit data via GET request (bypasses CORS)
     const form = document.createElement('form');
     form.method = 'GET';
     form.action = scriptUrl;
-    form.target = '_blank';
+    form.target = 'hiddenFrame';
     form.style.display = 'none';
     
     // Add data as hidden inputs
@@ -129,7 +135,12 @@ async function updateSheetData(data: Record<string, any>): Promise<void> {
     // Submit the form
     document.body.appendChild(form);
     form.submit();
-    document.body.removeChild(form);
+    
+    // Clean up after a short delay
+    setTimeout(() => {
+      document.body.removeChild(form);
+      document.body.removeChild(iframe);
+    }, 1000);
     
     console.log("✅ Successfully submitted data to Google Sheets via Apps Script");
     
