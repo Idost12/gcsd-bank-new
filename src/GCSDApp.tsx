@@ -1786,7 +1786,15 @@ export default function GCSDApp() {
             });
           });
         }, 1000);
-        setStock((await kvGet<Record<string, number>>("gcs-v4-stock")) ?? INITIAL_STOCK);
+        const currentStock = await kvGet<Record<string, number>>("gcs-v4-stock");
+        // If stock is empty or all zeros, reset to initial stock
+        if (!currentStock || Object.values(currentStock).every(v => v === 0)) {
+          console.log("🔄 Stock is empty, resetting to initial values");
+          await kvSet("gcs-v4-stock", INITIAL_STOCK);
+          setStock(INITIAL_STOCK);
+        } else {
+          setStock(currentStock);
+        }
         setPins((await kvGet<Record<string, string>>("gcs-v4-pins")) ?? {});
         setGoals((await kvGet<Record<string, number>>("gcs-v4-goals")) ?? {});
         // Load notifications from KV storage instead of starting empty
