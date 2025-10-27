@@ -3190,6 +3190,22 @@ export default function GCSDApp() {
     toast.success(`Reset applied for ${kind}`);
   }
 
+  /** Reset stock to initial values */
+  async function resetStock(){
+    if (!isAdmin) return toast.error("Admin only");
+    
+    const confirmReset = prompt(`⚠️ Reset all stock to initial values?\n\nThis will restore stock for all prizes.\n\nType 'RESET' to confirm:`);
+    if (!confirmReset || confirmReset.trim().toUpperCase() !== "RESET") {
+      return toast.error("Reset cancelled");
+    }
+    
+    await kvSet("gcs-v4-stock", INITIAL_STOCK);
+    setStock(INITIAL_STOCK);
+    
+    toast.success("Stock reset to initial values!");
+    logAudit("Stock Reset", "Reset all stock to initial values", undefined, undefined);
+  }
+
   // Sandbox mode removed - not needed for banking app
 
   /* ============================ render ============================ */
@@ -3767,6 +3783,7 @@ export default function GCSDApp() {
                 onCompleteReset={completeReset}
                 onBackupData={backupAllData}
                 onResetMetric={resetMetric}
+                onResetStock={resetStock}
                 onFreezeAgent={freezeAgent}
                 onUnfreezeAgent={unfreezeAgent}
                 onApproveRedeem={approveRedeem}
@@ -5165,6 +5182,7 @@ function AdminPortal({
   onCompleteReset,
   onBackupData,
   onResetMetric,
+  onResetStock,
   onFreezeAgent,
   onUnfreezeAgent,
   onApproveRedeem,
@@ -5206,6 +5224,7 @@ function AdminPortal({
   onCompleteReset: () => void;
   onBackupData: () => void;
   onResetMetric: (k: keyof MetricsEpoch) => void;
+  onResetStock: () => void;
   onFreezeAgent: (agentId: string) => void;
   onUnfreezeAgent: (agentId: string) => void;
   onApproveRedeem: (requestId: string) => void;
@@ -5976,9 +5995,17 @@ function AdminPortal({
                   </motion.div>
                 ))}
             </div>
-            <div className="mt-4 border-t pt-4">
+            <div className="mt-4 border-t pt-4 space-y-2">
               <motion.button 
-                className={classNames("px-4 py-2 rounded-xl", neonBtn(theme, true))} 
+                className={classNames("w-full px-4 py-2 rounded-xl", neonBtn(theme, true))} 
+                onClick={onResetStock}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                📦 Reset Stock to Initial Values
+              </motion.button>
+              <motion.button 
+                className={classNames("w-full px-4 py-2 rounded-xl", neonBtn(theme, true))} 
                 onClick={onCompleteReset}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
