@@ -283,9 +283,9 @@ function LineChart({ earned, spent }: { earned: number[]; spent: number[] }) {
   const toPath = (arr: number[]) =>
     arr.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step},${h - pad - (v / max) * (h - pad * 2)}`).join(" ");
   return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="rounded-xl border">
+    <svg width="100%" viewBox={"0 0 " + w + " " + h} className="rounded-xl border">
       <path d={toPath(earned)} fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500" />
-      <path d={toPath(spent)}  fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
+      <path d={toPath(spent)} fill="none" stroke="currentColor" strokeWidth="2" className="text-rose-500" />
       <g className="text-xs">
         <text x={pad} y={h - 2} className="fill-current opacity-60">Earned</text>
         <text x={pad + 70} y={h - 2} className="fill-current opacity-60">Spent</text>
