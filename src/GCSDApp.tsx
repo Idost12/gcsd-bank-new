@@ -166,17 +166,36 @@ function computeBalances(accounts: Account[], txns: Transaction[]) {
   // Process transactions in chronological order to handle reversals correctly
   const sortedTxns = [...txns].sort((a, b) => new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime());
   
+  console.log("🧮 Computing balances for", accounts.length, "accounts and", txns.length, "transactions");
+  
+  // Debug: Show sample transactions
+  if (sortedTxns.length > 0) {
+    console.log("📋 Sample transactions:", sortedTxns.slice(0, 3).map(t => ({
+      id: t.id,
+      kind: t.kind,
+      amount: t.amount,
+      fromId: t.fromId,
+      toId: t.toId,
+      memo: t.memo
+    })));
+  }
+  
   for (const t of sortedTxns) {
     if (t.kind === "credit" && t.toId) {
-      map.set(t.toId, (map.get(t.toId) || 0) + t.amount);
+      const oldBalance = map.get(t.toId) || 0;
+      const newBalance = oldBalance + t.amount;
+      map.set(t.toId, newBalance);
+      console.log(`➕ Credit: ${t.toId} +${t.amount} = ${newBalance}`);
     }
     if (t.kind === "debit" && t.fromId) {
       const currentBalance = map.get(t.fromId) || 0;
       const newBalance = currentBalance - t.amount;
-      // Allow negative balances for accurate accounting
       map.set(t.fromId, newBalance);
+      console.log(`➖ Debit: ${t.fromId} -${t.amount} = ${newBalance}`);
     }
   }
+  
+  console.log("💰 Final balances:", Object.fromEntries(map));
   return map;
 }
 
@@ -1744,6 +1763,7 @@ export default function GCSDApp() {
         // Check if we have valid data
         if (core?.accounts && Array.isArray(core.accounts) && core.accounts.length > 0 && core?.txns && Array.isArray(core.txns)) {
           console.log("✅ Found valid data:", core.accounts.length, "accounts,", core.txns.length, "transactions");
+          console.log("👥 Account details:", core.accounts.map(a => ({ name: a.name, balance: a.balance || 0 })));
           setAccounts(core.accounts);
           
           // Decompress transactions if they're compressed
@@ -2025,7 +2045,18 @@ export default function GCSDApp() {
   };
 
   /* derived */
-  const balances = useMemo(()=>computeBalances(accounts, txns), [accounts, txns]);
+  const balances = useMemo(()=>{
+    const result = computeBalances(accounts, txns);
+    console.log("💰 Balance calculation:", Object.fromEntries(result));
+    
+    // Debug: Check specific agent balances
+    const oliverId = accounts.find(a => a.name === "Oliver Steele")?.id;
+    if (oliverId) {
+      console.log("👤 Oliver's balance:", result.get(oliverId) || 0);
+    }
+    
+    return result;
+  }, [accounts, txns]);
   const nonSystemIds = new Set(accounts.filter(a=>a.role!=="system").map(a=>a.id));
 
   const agent = accounts.find(a=>a.id===currentAgentId);
@@ -2315,6 +2346,7 @@ export default function GCSDApp() {
     const prize = PRIZE_ITEMS.find(p=>p.key===prizeKey); if(!prize) return;
     const left = stock[prizeKey] ?? 0;
     const bal  = balances.get(agentId)||0;
+    console.log("🔍 Redeem check for", getName(agentId), "- Balance:", bal, "Prize price:", prize.price);
     /** count only ACTIVE redeems towards the limit */
     const count= txns.filter(t=> t.fromId===agentId && G_isRedeemTxn(t) && G_isRedeemStillActive(t, txns)).length;
 
@@ -2325,7 +2357,10 @@ export default function GCSDApp() {
     if (agent?.frozen) return toast.error("Account is frozen. Contact admin.");
     if (!isUnlimitedPrize && count >= MAX_PRIZES_PER_AGENT) return toast.error(`Limit reached (${MAX_PRIZES_PER_AGENT})`);
     if (left <= 0) return toast.error("Out of stock");
-    if (bal  < prize.price) return toast.error("Insufficient balance");
+    if (bal  < prize.price) {
+      console.log("❌ Insufficient balance:", bal, "<", prize.price);
+      return toast.error("Insufficient balance");
+    }
 
     // Step 1: Verify agent PIN
     openAgentPin(agentId, (ok)=>{
@@ -3632,6 +3667,7 @@ export default function GCSDApp() {
                 goals={goals}
                 wishlist={wishlist[currentAgentId] || []}
                 pins={pins}
+                balances={balances}
                 onSetGoal={(amt)=> setSavingsGoal(currentAgentId, amt)}
                 onRedeem={(k)=>redeemPrize(currentAgentId, k)}
                 onToggleWishlist={(prizeKey) => {
@@ -4108,6 +4144,7 @@ function AgentPortal({
   onOpenMeme,
   pins,
   onUpdateAccount,
+  balances,
 }: {
   theme: Theme;
   agentId: string;
@@ -4123,6 +4160,7 @@ function AgentPortal({
   onOpenMeme: (txn: Transaction) => void;
   pins: Record<string, string>;
   onUpdateAccount: (updates: Partial<Account>) => void;
+  balances: Map<string, number>;
 }) {
   const [agentTab, setAgentTab] = useState<"overview" | "purchases">("overview");
   const [purchasesPinVerified, setPurchasesPinVerified] = useState(false);
@@ -4144,11 +4182,8 @@ function AgentPortal({
     setPurchasesPinVerified(false);
     setAgentTab("overview");
   }, [agentId]);
-  const balance = txns.reduce((s, t) => {
-    if (t.toId === agentId && t.kind === "credit") s += t.amount;
-    if (t.fromId === agentId && t.kind === "debit") s -= t.amount;
-    return s;
-  }, 0);
+  // Use the same balance calculation as the global system to ensure consistency
+  const balance = balances.get(agentId) || 0;
 
   const agentTxns = txns.filter((t) => t.toId === agentId || t.fromId === agentId);
   const lifetimeEarn =
